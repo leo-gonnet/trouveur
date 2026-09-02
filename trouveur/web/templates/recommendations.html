@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% set active = 'recommendations' %}
+{% block title %}Recommendations — Trouveur{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Recommendations</h1>
+  <span class="sub">jobs that passed the rules filter AND scored {{ threshold }}+ from the LLM</span>
+</div>
+
+{% if jobs %}
+  <p class="hint" style="margin-bottom:var(--space-3)">
+    {{ jobs|length }} job{{ '' if jobs|length == 1 else 's' }}, highest score first.
+    Everything scraped — matched or not — is in <a href="/search">Search</a>.</p>
+  <div class="card">
+    {% for job in jobs %}{% include "_job.html" %}{% endfor %}
+  </div>
+{% else %}
+  <div class="empty">
+    {% if overview.total == 0 %}
+      <h2>Nothing scraped yet</h2>
+      <p>The daily pipeline hasn't run yet, or no source has returned results.</p>
+      <div class="steps"><code>uv run trouveur run --days 7</code></div>
+    {% elif overview.scored == 0 %}
+      <h2>{{ overview.passed_rules }} job{{ '' if overview.passed_rules == 1 else 's' }}
+        passed the rules filter, none scored yet</h2>
+      <p>The LLM scoring stage hasn't run — usually because <code>ANTHROPIC_API_KEY</code>
+        isn't set, or the pipeline was run with <code>--no-llm</code>.</p>
+      <div class="steps">
+        Set <code>ANTHROPIC_API_KEY</code> in <code>/etc/trouveur/env</code>, then:<br>
+        <code>uv run trouveur run --days 1</code>
+      </div>
+      <p style="margin-top:var(--space-4)">
+        In the meantime, every scraped job is browsable in
+        <a href="/search">Search</a>.</p>
+    {% else %}
+      <h2>No job has reached the {{ threshold }} threshold yet</h2>
+      <p>{{ overview.scored }} job{{ '' if overview.scored == 1 else 's' }} scored so far,
+        none strong enough to recommend. This is expected most days — recommendations
+        are deliberately strict.</p>
+      <p style="margin-top:var(--space-4)">
+        Lower the threshold in <a href="/profile">Profile</a>, or browse everything scraped in
+        <a href="/search">Search</a>.</p>
+    {% endif %}
+  </div>
+{% endif %}
+{% endblock %}

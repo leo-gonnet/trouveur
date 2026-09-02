@@ -1,0 +1,23 @@
+# Domain and ACME email come from .env, so this file needs no per-host edits. Caddy obtains and
+# renews the certificate once TROUVEUR_DOMAIN has an A record pointing here.
+
+{
+	email {$TROUVEUR_ACME_EMAIL}
+}
+
+{$TROUVEUR_DOMAIN} {
+	encode gzip
+	reverse_proxy web:8080
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	log {
+		output stdout
+	}
+}

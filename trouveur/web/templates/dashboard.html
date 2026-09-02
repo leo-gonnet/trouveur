@@ -1,0 +1,217 @@
+{% extends "base.html" %}
+{% set active = 'dashboard' %}
+{% block title %}Dashboard — Trouveur{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Dashboard</h1>
+  {% if overview.first_ever %}
+    <span class="sub">tracking since {{ overview.first_ever.strftime('%Y-%m-%d') }}
+      &middot; {{ overview.companies }} distinct companies</span>
+  {% endif %}
+</div>
+
+<div class="kpis">
+  <div class="kpi">
+    <div class="label">Total scraped</div>
+    <div class="value">{{ overview.total }}</div>
+    <div class="foot">across all sources</div>
+  </div>
+  <div class="kpi">
+    <div class="label">Last 24h</div>
+    <div class="value">{{ overview.last_24h }}</div>
+    <div class="foot">new postings found</div>
+  </div>
+  <div class="kpi">
+    <div class="label">Passed rules</div>
+    <div class="value">{{ overview.passed_rules }}</div>
+    <div class="foot">{{ (100 * overview.passed_rules / overview.total)|round|int if overview.total else 0 }}% of scraped</div>
+  </div>
+  <div class="kpi">
+    <div class="label">Scored</div>
+    <div class="value">{{ overview.scored }}</div>
+    <div class="foot">{{ (100 * overview.scored / overview.passed_rules)|round|int if overview.passed_rules else 0 }}% of rules survivors</div>
+  </div>
+  <div class="kpi">
+    <div class="label">Recommended</div>
+    <div class="value" style="color:var(--good)">{{ overview.recommended }}</div>
+    <div class="foot"><a href="/recommendations">view &rarr;</a></div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-head">
+    <h2>Database growth</h2>
+    <span class="hint">new postings per day, by source, last {{ chart.columns|length }} days</span>
+  </div>
+  {% if chart.columns and chart.max_total > 1 %}
+    <div class="chart">
+      {% for col in chart.columns %}
+        <div class="col" title="{{ col.label }}: {{ col.total }} new job{{ '' if col.total == 1 else 's' }}">
+          {% for src in chart.sources %}
+            {% set n = col.counts[src] %}
+            {% if n > 0 %}
+              <div class="seg" style="height:{{ (n / chart.max_total * 100)|round(1) }}%;
+                                       background:{{ chart.colors[src] }}"></div>
+            {% endif %}
+          {% endfor %}
+        </div>
+      {% endfor %}
+    </div>
+    <div class="chart-x">
+      {% for col in chart.columns %}
+        <span>{% if loop.index0 % 3 == 0 %}{{ col.label }}{% endif %}</span>
+      {% endfor %}
+    </div>
+    <div class="legend">
+      {% for src in chart.sources %}
+        <div class="item"><span class="swatch" style="background:{{ chart.colors[src] }}"></span>{{ src }}</div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="hint">Not enough history yet — check back after a few daily runs.</p>
+  {% endif %}
+</div>
+
+<div class="grid cols-2">
+  <div class="card">
+    <div class="card-head">
+      <h2>Source quality</h2>
+      <span class="hint">match rate = recommended &divide; scraped</span>
+    </div>
+    {% if sources %}
+      <table>
+        <thead><tr>
+          <th>Source</th><th class="num">Scraped</th><th class="num">Passed</th>
+          <th class="num">Scored</th><th class="num">Recommended</th><th>Match rate</th>
+        </tr></thead>
+        <tbody>
+        {% for s in sources %}
+          <tr>
+            <td>{{ s.source }}
+              {% set h = health.get(s.source) %}
+              {% if h and h.last_error %}<span class="pill bad" title="{{ h.last_error }}">error</span>
+              {% elif not h %}<span class="pill warn">never run</span>
+              {% else %}<span class="pill ok">healthy</span>{% endif %}
+            </td>
+            <td class="num">{{ s.scraped }}</td>
+            <td class="num">{{ s.passed_rules }}</td>
+            <td class="num">{{ s.scored }}</td>
+            <td class="num">{{ s.recommended }}</td>
+            <td>
+              {% set rate = (100 * s.recommended / s.scraped)|round|int if s.scraped else 0 %}
+              <div style="display:flex;align-items:center;gap:8px">
+                <div class="bar-track"><div class="bar-fill" style="width:{{ rate }}%"></div></div>
+                <span class="hint">{{ rate }}%</span>
+              </div>
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="hint">No sources have run yet.</p>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <div class="card-head">
+      <h2>Source health</h2>
+      <span class="hint">last pipeline run per source</span>
+    </div>
+    {% if health %}
+      <table>
+        <thead><tr><th>Source</th><th>Last run</th><th class="num">Jobs seen</th><th>Status</th></tr></thead>
+        <tbody>
+        {% for name, h in health.items() %}
+          <tr>
+            <td>{{ name }}</td>
+            <td class="hint">{{ h.last_run_at.strftime('%Y-%m-%d %H:%M') if h.last_run_at else '—' }}</td>
+            <td class="num">{{ h.jobs_seen }}</td>
+            <td>
+              {% if h.last_error %}<span class="pill bad" title="{{ h.last_error }}">failing</span>
+              {% else %}<span class="pill ok">ok</span>{% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="hint">No run recorded yet. Run <code>trouveur run</code> once to populate this.</p>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-head">
+    <h2>Best matching-rate sources</h2>
+    <span class="hint">recommended &divide; scraped &middot; sources with under 5 jobs are excluded</span>
+  </div>
+  {% if best_sources %}
+    <table>
+      <tbody>
+      {% for s in best_sources %}
+        <tr>
+          <td style="width:2em" class="hint">{{ loop.index }}</td>
+          <td>{{ s.source }}{% if loop.first and s.rate > 0 %}
+            <span class="pill ok" style="margin-left:6px">top</span>{% endif %}</td>
+          <td style="width:45%">
+            <div style="display:flex;align-items:center;gap:8px">
+              <div class="bar-track">
+                <div class="bar-fill" style="width:{{ (s.rate * 100)|round(1) }}%;
+                  {% if loop.first and s.rate > 0 %}background:var(--good){% endif %}"></div>
+              </div>
+              <span class="hint" style="min-width:3.5em;text-align:right">
+                {{ (s.rate * 100)|round(1) }}%</span>
+            </div>
+          </td>
+          <td class="num hint">{{ s.recommended }}/{{ s.scraped }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="hint">Not enough volume per source yet to rank match rates.</p>
+  {% endif %}
+</div>
+
+<div class="grid cols-2">
+  <div class="card">
+    <div class="card-head"><h2>By country</h2></div>
+    {% if countries %}
+      <table>
+        <tbody>
+        {% for c in countries %}
+          <tr>
+            <td>{{ c.country }}</td>
+            <td>
+              <div style="display:flex;align-items:center;gap:8px">
+                <div class="bar-track"><div class="bar-fill"
+                  style="width:{{ (100 * c.n / countries[0].n)|round|int }}%"></div></div>
+                <span class="hint num" style="min-width:2.4em;text-align:right">{{ c.n }}</span>
+              </div>
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="hint">No data yet.</p>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <div class="card-head"><h2>Top employers</h2></div>
+    {% if companies %}
+      <table>
+        <tbody>
+        {% for c in companies %}
+          <tr><td>{{ c.company }}</td><td class="num">{{ c.n }}</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="hint">No data yet.</p>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

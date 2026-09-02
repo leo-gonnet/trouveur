@@ -1,0 +1,34 @@
+<div class="job" id="job-{{ job.id }}">
+  <div class="job-title">
+    {% if job.llm_score is not none %}
+      <span class="score {% if job.llm_score >= 80 %}high{% elif job.llm_score >= 60 %}mid{% else %}low{% endif %}">
+        {{ job.llm_score }}</span>
+    {% else %}
+      <span class="score low" title="Not scored yet">–</span>
+    {% endif %}
+    <div>
+      <a href="{{ job.url }}" target="_blank" rel="noopener noreferrer">{{ job.title }}</a>
+      <div class="meta">
+        <span>{{ job.company or 'unknown company' }}</span>
+        <span>{{ [job.location_city, job.location_country]|select|join(', ') or 'location n/a' }}</span>
+        <span class="pill {% if job.remote %}ok{% endif %}">
+          {% if job.remote %}remote{% elif job.remote is false %}on-site{% else %}remote n/a{% endif %}</span>
+        {% if job.salary_min or job.salary_max %}
+          <span>{{ job.salary_min|int if job.salary_min else '?' }}–{{ job.salary_max|int if job.salary_max else '?' }}
+            EUR/{{ (job.salary_period or '')|lower }}</span>
+        {% endif %}
+        {% if job.posted_at %}<span>{{ job.posted_at.strftime('%Y-%m-%d') }}</span>{% endif %}
+        <span class="pill">{{ job.source }}</span>
+        {% if job.rule_verdict == 'reject' %}<span class="pill warn">filtered out</span>{% endif %}
+      </div>
+    </div>
+  </div>
+  {% if job.llm_reason %}<div class="reason">{{ job.llm_reason }}</div>{% endif %}
+  <div class="actions" hx-target="#job-{{ job.id }}-actions" hx-swap="innerHTML">
+    <span id="job-{{ job.id }}-actions" style="display:contents">
+      <button hx-post="/jobs/{{ job.id }}/state" hx-vals='{"state":"interested"}'>Interested</button>
+      <button hx-post="/jobs/{{ job.id }}/state" hx-vals='{"state":"applied"}'>Applied</button>
+      <button hx-post="/jobs/{{ job.id }}/state" hx-vals='{"state":"rejected"}'>Not for me</button>
+    </span>
+  </div>
+</div>

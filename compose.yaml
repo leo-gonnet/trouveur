@@ -1,0 +1,65 @@
+# Migrations are not automatic: `docker compose run --rm migrate` before `up -d`, every deploy.
+
+name: trouveur
+
+x-app: &app
+  image: ${TROUVEUR_IMAGE:?set TROUVEUR_IMAGE in .env}:${TROUVEUR_TAG:-latest}
+  env_file: [.env]
+  depends_on:
+    db:
+      condition: service_healthy
+  restart: unless-stopped
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: trouveur
+      POSTGRES_DB: trouveur
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trouveur -d trouveur"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # The `deploy` profile keeps this out of a plain `docker compose up`.
+  migrate:
+    <<: *app
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+    profiles: ["deploy"]
+
+  web:
+    <<: *app
+    command: ["trouveur", "serve", "--host", "0.0.0.0", "--port", "8080"]
+    expose: ["8080"]
+
+  # The only process that runs a scan. Owns the schedule (a DB row, edited in the web UI).
+  runner:
+    <<: *app
+    command: ["trouveur", "runner"]
+
+  caddy:
+    image: caddy:2
+    # Only what the Caddyfile substitutes; no app secrets in the proxy's environment.
+    environment:
+      TROUVEUR_DOMAIN: ${TROUVEUR_DOMAIN:?set TROUVEUR_DOMAIN in .env}
+      TROUVEUR_ACME_EMAIL: ${TROUVEUR_ACME_EMAIL:?set TROUVEUR_ACME_EMAIL in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [web]
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:

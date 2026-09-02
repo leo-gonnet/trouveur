@@ -1,0 +1,26 @@
+# Keep the context small and never ship secrets or local state into an image.
+.git/
+.github/
+.venv/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Personal data, same list as .gitignore.
+.env
+*.dump
+*.sql.gz
+backups/
+/var/
+
+# Not needed at runtime. README.md stays: pyproject.toml points `readme` at it.
+tests/
+backup.sh
+*.md
+!README.md
+
+.DS_Store
+*.log
+scratch/

@@ -1,0 +1,56 @@
+[project]
+name = "trouveur"
+version = "0.1.0"
+description = "Trouveur - self-hosted job aggregator with pluggable sources and profile-based filtering"
+readme = "README.md"
+license = "LicenseRef-PolyForm-Noncommercial-1.0.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "jinja2>=3.1",
+    "python-multipart>=0.0.12",
+    "httpx>=0.27",
+    "selectolax>=0.3.21",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "sqlalchemy>=2.0.36",
+    "asyncpg>=0.30",
+    "alembic>=1.14",
+    "argon2-cffi>=23.1",
+    "itsdangerous>=2.2",
+    "click>=8.1",
+]
+
+[project.optional-dependencies]
+# Heavy (pulls pandas). The source degrades to a no-op when absent.
+jobspy = ["python-jobspy>=1.1.82"]
+
+[project.scripts]
+trouveur = "trouveur.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.7",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["trouveur"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

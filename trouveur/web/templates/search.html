@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% set active = 'search' %}
+{% block title %}Search — Trouveur{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Search</h1>
+  <span class="sub">every job ever scraped, matched or not</span>
+</div>
+<div class="card" style="margin-bottom:var(--space-5)">
+  <div class="searchbar">
+    <input type="text" name="q" value="{{ query }}" placeholder="e.g. ingenieur, münchen, supply chain"
+           autofocus
+           hx-get="/search" hx-trigger="input changed delay:300ms, search"
+           hx-target="#results" hx-include="[name='country'],[name='remote']"
+           hx-push-url="true">
+    <select name="country" hx-get="/search" hx-target="#results"
+            hx-include="[name='q'],[name='remote']">
+      <option value="">All countries</option>
+      {% for c in ['AT','DE','CH'] %}
+        <option value="{{ c }}" {% if country==c %}selected{% endif %}>{{ c }}</option>
+      {% endfor %}
+    </select>
+    <select name="remote" hx-get="/search" hx-target="#results"
+            hx-include="[name='q'],[name='country']">
+      <option value="">Any location type</option>
+      <option value="yes" {% if remote=='yes' %}selected{% endif %}>Remote</option>
+      <option value="no" {% if remote=='no' %}selected{% endif %}>On-site</option>
+    </select>
+  </div>
+  <p class="hint" style="margin-top:var(--space-3)">
+    Umlauts are optional — <code>munchen</code> finds <code>München</code>, and
+    <code>ingenieur</code> also matches inside <code>Wirtschaftsingenieur</code>.</p>
+</div>
+<div id="results">{% include "_results.html" %}</div>
+{% endblock %}

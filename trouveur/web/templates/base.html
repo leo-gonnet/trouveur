@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>{% block title %}Trouveur{% endblock %}</title>
+<link rel="stylesheet" href="/static/app.css">
+<script src="https://unpkg.com/htmx.org@2.0.4"
+        integrity="sha384-HGfztofotfshcF7+8n44JQL2oJmowVChPTg48S+jvZoztPfvwD79OC/LTtG6dMp+"
+        crossorigin="anonymous"></script>
+</head>
+<body>
+{% if request.cookies.get('trouveur_session') %}
+<header class="topbar">
+  <a href="/dashboard" class="brand"><span class="dot"></span>Trouveur</a>
+  <nav class="nav">
+    <a href="/dashboard" {% if active=='dashboard' %}aria-current="page"{% endif %}>Dashboard</a>
+    <a href="/recommendations" {% if active=='recommendations' %}aria-current="page"{% endif %}>Recommendations</a>
+    <a href="/search" {% if active=='search' %}aria-current="page"{% endif %}>Search</a>
+    <a href="/profile" {% if active=='profile' %}aria-current="page"{% endif %}>Profile</a>
+    <a href="/companies" {% if active=='companies' %}aria-current="page"{% endif %}>Companies</a>
+    <a href="/admin" {% if active=='admin' %}aria-current="page"{% endif %}>Scans</a>
+  </nav>
+  <span class="spacer"></span>
+  <form method="post" action="/logout"><button type="submit">Log out</button></form>
+</header>
+{% endif %}
+<main>{% block content %}{% endblock %}</main>
+</body>
+</html>

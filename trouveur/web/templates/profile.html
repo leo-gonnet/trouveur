@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% set active = 'profile' %}
+{% block title %}Profile — Trouveur{% endblock %}
+{% block content %}
+<div class="page-head"><h1>Profile</h1></div>
+{% if saved %}
+  <div class="notice">
+    Saved. Cached scores were cleared, so the next run re-scores against the new profile.</div>
+{% endif %}
+<div class="card">
+<form method="post" action="/profile">
+  <div class="row">
+    <div>
+      <label for="title">Current / target title</label>
+      <input type="text" id="title" name="title" value="{{ p.title }}">
+    </div>
+    <div>
+      <label for="years_experience">Years of experience</label>
+      <input type="number" id="years_experience" name="years_experience"
+             value="{{ p.years_experience }}" min="0" max="60">
+    </div>
+  </div>
+
+  <label for="objectives">Objectives</label>
+  <textarea id="objectives" name="objectives">{{ p.objectives }}</textarea>
+  <div class="hint">Given to the scorer verbatim. Be concrete about domain, seniority and
+    working style — this text does most of the filtering work.</div>
+
+  <label for="must_have">Must have <span class="hint">(one per line)</span></label>
+  <textarea id="must_have" name="must_have">{{ p.must_have|join('\n') }}</textarea>
+
+  <label for="deal_breakers">Deal breakers <span class="hint">(one per line)</span></label>
+  <textarea id="deal_breakers" name="deal_breakers">{{ p.deal_breakers|join('\n') }}</textarea>
+  <div class="hint">Matched literally against title, company and description.</div>
+
+  <label for="keywords">Search keywords <span class="hint">(comma separated)</span></label>
+  <input type="text" id="keywords" name="keywords" value="{{ p.keywords|join(', ') }}">
+  <div class="hint">Drives what the sources search for, and gates relevance on title and
+    description (not company name).</div>
+
+  <div class="row">
+    <div>
+      <label for="cities">Cities <span class="hint">(comma separated)</span></label>
+      <input type="text" id="cities" name="cities" value="{{ p.cities|join(', ') }}">
+      <div class="hint">Type umlauts properly: <code>München</code>, not <code>Muenchen</code>.</div>
+    </div>
+    <div>
+      <label for="countries">Countries</label>
+      <input type="text" id="countries" name="countries" value="{{ p.countries|join(', ') }}">
+    </div>
+  </div>
+
+  <div class="row">
+    <div>
+      <label for="min_salary_eur_year">Minimum salary (EUR/year)</label>
+      <input type="number" id="min_salary_eur_year" name="min_salary_eur_year"
+             value="{{ p.min_salary_eur_year|int }}" min="0" step="1000">
+    </div>
+    <div>
+      <label for="notify_threshold">Recommendation threshold (0–100)</label>
+      <input type="number" id="notify_threshold" name="notify_threshold"
+             value="{{ p.notify_threshold }}" min="0" max="100">
+      <div class="hint">Governs both the email digest and the Recommendations page.</div>
+    </div>
+    <div>
+      <label for="languages">Languages <span class="hint">(comma separated)</span></label>
+      <input type="text" id="languages" name="languages" value="{{ p.languages|join(', ') }}">
+    </div>
+  </div>
+
+  <label class="check" for="remote_only">
+    <input type="checkbox" id="remote_only" name="remote_only" value="true"
+           {% if p.remote_only %}checked{% endif %}>
+    Remote roles only
+  </label>
+
+  <input class="btn primary" type="submit" value="Save profile" style="margin-top:var(--space-6)">
+</form>
+</div>
+{% endblock %}

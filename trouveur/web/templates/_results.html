@@ -1,0 +1,9 @@
+{% if jobs %}
+  <p class="hint" style="margin-bottom:var(--space-3)">
+    {{ jobs|length }} result{{ '' if jobs|length == 1 else 's' }}</p>
+  <div class="card">
+    {% for job in jobs %}{% include "_job.html" %}{% endfor %}
+  </div>
+{% else %}
+  <div class="empty"><p>No matching jobs.</p></div>
+{% endif %}
