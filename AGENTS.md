@@ -143,6 +143,14 @@ robots.txt (checked 2026-08-31): `User-agent: * / Disallow:` — crawling is exp
 
 ### All adapters, without exception
 
+- **Sources are opt-in.** A source runs only when the user has switched it on, and a fresh
+  install has none switched on. The activated set lives in `source_activation` (its own table,
+  not a `profile` column, for the same reason as `personio_tenant`) and reaches the pipeline
+  through the `enabled` argument of `build_sources`, which has no default. **A new adapter must
+  also be listed in `sources/__init__.py::AVAILABLE_SOURCES`** or it can never be activated and
+  will silently never run; `test_every_source_the_pipeline_can_build_is_in_the_registry` guards
+  that. The registry is plain data and imports no adapter, because the web process renders it and
+  must not pull in JobSpy's pandas.
 - **Failure isolation.** One dead source must never abort the run. `pipeline.py` wraps each source
   and records the error in `source_state`. A failing source is a logged warning, not a crash.
 - **Delta-first.** Use the cheapest incremental mechanism the source offers (`veroeffentlichtseit`,
@@ -216,7 +224,13 @@ The LLM stage is the only part of this system that costs money per run.
 - **The dashboard's health panel depends on `pipeline._record_source_health`.** Every source in
   `build_sources()` gets a `source_state` row every run, success or failure, so a source that
   stops running shows up as unhealthy rather than silently vanishing from the numbers. If you add
-  a source, it is covered automatically — do not special-case it.
+  a source, it is covered automatically — do not special-case it. `build_sources()` now returns
+  only activated sources, so the panel marks a deactivated one `off` rather than reading its
+  stale row as healthy.
+- **`/sources` is where a source is switched on**, and nothing is on by default, so an install
+  that has never visited that page collects zero jobs. That is the intended state, but it looks
+  exactly like a broken scraper — keep the empty-state notice on the page and the warning
+  `pipeline.run` logs when no source is activated.
 - **Styling lives in one file:** `web/static/app.css`, using CSS custom properties for theming
   (incl. `prefers-color-scheme: dark`). No inline `<style>` blocks in templates beyond one-off
   layout tweaks (`style="width:45%"` etc.); reusable patterns get a class in `app.css` instead.

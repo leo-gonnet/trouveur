@@ -37,7 +37,8 @@ def test_login_page_states_there_is_no_signup(client):
 
 @pytest.mark.parametrize(
     "path",
-    ["/", "/dashboard", "/recommendations", "/search", "/profile", "/companies", "/admin"],
+    ["/", "/dashboard", "/recommendations", "/search", "/profile", "/sources", "/companies",
+     "/admin"],
 )
 def test_unauthenticated_requests_redirect_to_login(client, path):
     response = client.get(path)
@@ -47,6 +48,23 @@ def test_unauthenticated_requests_redirect_to_login(client, path):
 
 def test_unauthenticated_state_change_is_rejected(client):
     assert client.post("/jobs/1/state", data={"state": "applied"}).status_code == 401
+
+
+def test_unauthenticated_source_activation_is_rejected(client):
+    response = client.post("/sources/arbeitsagentur/toggle", data={"enabled": "true"})
+    assert response.status_code == 303
+    assert response.headers["location"] == "/login"
+
+
+def test_activating_an_unknown_source_is_refused(client):
+    """The registry is the whitelist: a typed URL must not create a row for a source that has
+    no adapter, which would sit in the table forever doing nothing."""
+    from trouveur.config import get_settings
+    from trouveur.web import auth as web_auth
+
+    client.cookies.set(web_auth.COOKIE_NAME, web_auth.issue_session(get_settings(), "leo"))
+    response = client.post("/sources/monster/toggle", data={"enabled": "true"})
+    assert response.status_code == 404
 
 
 @pytest.mark.parametrize("path", ["/admin/run", "/admin/schedule"])

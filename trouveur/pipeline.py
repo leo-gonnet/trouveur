@@ -11,6 +11,7 @@ deal-breaker phrases and the staffing-agency flag.
 from __future__ import annotations
 
 import logging
+from collections.abc import Collection
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
@@ -21,6 +22,7 @@ from trouveur.filters import llm as llm_filter
 from trouveur.filters.rules import evaluate, title_is_plausible
 from trouveur.models import Job, ProfileData, RuleVerdict
 from trouveur.notify import email
+from trouveur.sources import SOURCE_NAMES
 from trouveur.sources.arbeitsagentur import ArbeitsagenturSource
 from trouveur.sources.http import PoliteClient
 from trouveur.sources.jobspy_source import JobSpySource
@@ -54,8 +56,17 @@ class RunReport:
 
 
 def build_sources(
-    profile: ProfileData, tenants: list[str] | None = None, only: str | None = None
+    profile: ProfileData,
+    enabled: Collection[str],
+    tenants: list[str] | None = None,
+    only: str | None = None,
 ) -> list:
+    """Build the adapters the user has activated, in run order.
+
+    `enabled` has no default: a source runs only when it is switched on in the web UI, and a
+    caller that forgets to pass the activated set must fail loudly rather than quietly scanning
+    everything.
+    """
     keywords = profile.keywords or [profile.title or "Wirtschaftsingenieur"]
     sources = [
         ArbeitsagenturSource(keywords=keywords),
@@ -74,10 +85,21 @@ def build_sources(
 
     # Runs last and narrow: LinkedIn rate-limits around page 10 from a single IP.
     sources.append(JobSpySource(keywords=keywords, countries=profile.countries))
+
+    activated = set(enabled)
+    sources = [s for s in sources if s.name in activated]
+
     if only:
+        if only not in SOURCE_NAMES:
+            raise SystemExit(f"unknown source: {only}")
+        if only not in activated:
+            raise SystemExit(
+                f"source {only} is not activated; switch it on under Sources in the web UI"
+            )
         sources = [s for s in sources if s.name == only]
         if not sources:
-            raise SystemExit(f"unknown source: {only}")
+            # Activated but nothing to scan: today that is only Personio without companies.
+            raise SystemExit(f"source {only} is activated but has nothing configured to scan")
     return sources
 
 
@@ -124,8 +146,12 @@ async def run(
     report = RunReport()
     since = datetime.now(UTC) - timedelta(days=since_days)
 
-    profile, tenants = await _load_run_config(dry_run)
-    sources = build_sources(profile, tenants, only_source)
+    profile, tenants, enabled = await _load_run_config(dry_run)
+    sources = build_sources(profile, enabled, tenants, only_source)
+    if not sources:
+        # A run with nothing activated collects nothing and would otherwise look like a healthy
+        # empty day. Say so.
+        log.warning("no sources are activated; activate one under Sources in the web UI")
     collected = await collect(sources, since, report)
 
     if dry_run:
@@ -238,22 +264,24 @@ async def _notify(conn, settings: Settings, profile: ProfileData) -> int:
     return len(rows)
 
 
-async def _load_run_config(dry_run: bool) -> tuple[ProfileData, list[str]]:
+async def _load_run_config(dry_run: bool) -> tuple[ProfileData, list[str], list[str]]:
     if dry_run:
         # Dry runs must work before Postgres exists, so fall back to defaults.
         try:
             async with connect() as conn:
                 row = await q.get_profile(conn)
                 tenants = await q.enabled_personio_tenants(conn)
-                return (_row_to_profile(row) if row else ProfileData()), tenants
+                enabled = await q.enabled_sources(conn)
+                return (_row_to_profile(row) if row else ProfileData()), tenants, enabled
         except Exception as exc:  # noqa: BLE001
             log.info("no database available (%s); using default profile for dry run", exc)
-            return ProfileData(), []
+            return ProfileData(), [], []
     async with connect() as conn:
         await q.ensure_profile(conn)
         row = await q.get_profile(conn)
         tenants = await q.enabled_personio_tenants(conn)
-        return (_row_to_profile(row) if row else ProfileData()), tenants
+        enabled = await q.enabled_sources(conn)
+        return (_row_to_profile(row) if row else ProfileData()), tenants, enabled
 
 
 def _row_to_profile(row) -> ProfileData:

@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% set active = 'sources' %}
+{% block title %}Sources — Trouveur{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Sources</h1>
+  <span class="sub">Where scans look for jobs. Nothing is scanned until you switch one on.</span>
+</div>
+
+<div class="card">
+  <div class="card-head"><h2>Available sources</h2>
+    <span class="hint">{{ active_count }} of {{ sources|length }} active</span>
+  </div>
+  {% if active_count == 0 %}
+    <p class="empty">
+      No source is active, so a scan collects nothing. Switch at least one on below.
+    </p>
+  {% endif %}
+  <table>
+    <thead>
+      <tr><th>Source</th><th>What it covers</th><th>Status</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for row in sources %}
+      <tr>
+        <td>
+          {{ row.info.label }}<br>
+          <code class="hint">{{ row.info.name }}</code>
+        </td>
+        <td class="hint">
+          {{ row.info.description }}
+          {% if row.info.name == 'personio' and row.enabled and tenant_count == 0 %}
+            <br><strong>No companies added yet, so this source yields nothing.</strong>
+            <a href="/companies">Add companies</a>.
+          {% endif %}
+        </td>
+        <td>
+          {% if row.enabled %}<span class="pill ok">active</span>
+          {% else %}<span class="pill">off</span>{% endif %}
+        </td>
+        <td>
+          <form method="post" action="/sources/{{ row.info.name }}/toggle">
+            <input type="hidden" name="enabled" value="{{ 'false' if row.enabled else 'true' }}">
+            <button type="submit" class="btn {{ '' if row.enabled else 'primary' }}">
+              {{ 'Deactivate' if row.enabled else 'Activate' }}
+            </button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

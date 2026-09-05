@@ -128,7 +128,8 @@
             <td class="hint">{{ h.last_run_at.strftime('%Y-%m-%d %H:%M') if h.last_run_at else '—' }}</td>
             <td class="num">{{ h.jobs_seen }}</td>
             <td>
-              {% if h.last_error %}<span class="pill bad" title="{{ h.last_error }}">failing</span>
+              {% if name not in enabled_sources %}<span class="pill">off</span>
+              {% elif h.last_error %}<span class="pill bad" title="{{ h.last_error }}">failing</span>
               {% else %}<span class="pill ok">ok</span>{% endif %}
             </td>
           </tr>

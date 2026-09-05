@@ -25,16 +25,20 @@ uv run trouveur run --dry-run
 `uv run trouveur serve` for the UI and `uv run trouveur runner` if you want scans to actually
 fire on a schedule.
 
-The profile and the list of companies to watch live in the database and are edited in the UI.
-There is no config file for either.
+The profile, the activated sources and the list of companies to watch live in the database and
+are edited in the UI. There is no config file for any of them.
+
+**No source is active on a fresh install**, so the first scan collects nothing until you switch
+at least one on under *Sources* in the UI.
 
 If a run collects nothing, the reason is recorded per source in the `source_state` table rather
 than raised.
 
 ## Sources
 
-Each source is a self-contained adapter. Which ones run is a setting, not a code change, and the
-list is meant to grow over time as new adapters are added as modules.
+Each source is a self-contained adapter. Which ones run is a setting, not a code change: every
+source is off until it is activated on the *Sources* page, and the list is meant to grow over
+time as new adapters are added as modules.
 
 | Source | Coverage | Mechanism |
 |---|---|---|

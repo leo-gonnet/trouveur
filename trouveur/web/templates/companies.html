@@ -7,6 +7,13 @@
   <span class="sub">Employers watched directly through their Personio job feed.</span>
 </div>
 
+{% if not personio_active %}
+<p class="empty">
+  The Personio source is switched off, so these companies are not scanned.
+  <a href="/sources">Activate it under Sources</a>.
+</p>
+{% endif %}
+
 <div class="card">
   <div class="card-head"><h2>Add companies</h2>
     <span class="hint">{{ tenants|length }} watched</span>

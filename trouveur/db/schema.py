@@ -126,6 +126,17 @@ pipeline_schedule = sa.Table(
     sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
 )
 
+# The sources the user has switched on, edited in the web UI. A missing row means "not
+# activated": a fresh install scans nothing until a source is enabled. Separate from `profile`
+# for the same reason as personio_tenant -- toggling a source must not bump profile.version.
+source_activation = sa.Table(
+    "source_activation",
+    metadata,
+    sa.Column("source", sa.Text, primary_key=True),
+    sa.Column("enabled", sa.Boolean, nullable=False, server_default="false"),
+    sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
+)
+
 # Edited in the web UI. Separate from `profile` on purpose: adding a company must not bump
 # profile.version, which would invalidate every cached LLM score.
 personio_tenant = sa.Table(

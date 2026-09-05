@@ -1,4 +1,4 @@
-"""Web UI: login, dashboard, recommendations, search, profile, companies, admin (schedule).
+"""Web UI: login, dashboard, recommendations, search, profile, sources, companies, admin.
 
 Binds loopback only; Caddy terminates TLS in front of it. Reads the database and never fetches
 from sources or runs the pipeline: the admin page only enqueues `pipeline_run` rows for the
@@ -21,6 +21,7 @@ from trouveur.config import get_settings
 from trouveur.db import queries as q
 from trouveur.db.engine import connect
 from trouveur.models import ProfileData, UserState
+from trouveur.sources import AVAILABLE_SOURCES, SOURCE_NAMES
 from trouveur.sources.personio import parse_tenants
 from trouveur.web import auth
 
@@ -95,6 +96,7 @@ async def dashboard(request: Request):
         overview = await q.overview(conn, threshold)
         sources = await q.source_quality(conn, threshold)
         health = {row.source: row for row in await q.source_health(conn)}
+        enabled_sources = set(await q.enabled_sources(conn))
         daily = await q.daily_intake(conn, DASHBOARD_DAYS)
         countries = await q.country_breakdown(conn)
         companies = await q.top_companies(conn, limit=8)
@@ -106,6 +108,7 @@ async def dashboard(request: Request):
             "overview": overview, "sources": sources, "health": health,
             "chart": chart, "countries": countries, "companies": companies,
             "best_sources": best_sources, "threshold": threshold,
+            "enabled_sources": enabled_sources,
         },
     )
 
@@ -322,12 +325,44 @@ async def admin_run(
     return RedirectResponse("/admin", status_code=303)
 
 
+@app.get("/sources", response_class=HTMLResponse)
+async def sources_page(request: Request):
+    if await _current_user(request) is None:
+        return _login_redirect()
+    async with connect() as conn:
+        activation = await q.source_activation_map(conn)
+        tenant_count = len(await q.enabled_personio_tenants(conn))
+    rows = [
+        {"info": info, "enabled": activation.get(info.name, False)}
+        for info in AVAILABLE_SOURCES
+    ]
+    return templates.TemplateResponse(
+        request, "sources.html",
+        {"sources": rows, "active_count": sum(r["enabled"] for r in rows),
+         "tenant_count": tenant_count},
+    )
+
+
+@app.post("/sources/{name}/toggle", response_class=HTMLResponse)
+async def sources_toggle(request: Request, name: str, enabled: bool = Form(False)):
+    if await _current_user(request) is None:
+        return _login_redirect()
+    # Only names from the registry, so a stale form or a typed URL cannot create a row for a
+    # source that will never run.
+    if name not in SOURCE_NAMES:
+        return Response("unknown source", status_code=404)
+    async with connect() as conn:
+        await q.set_source_enabled(conn, name, bool(enabled))
+    return RedirectResponse("/sources", status_code=303)
+
+
 @app.get("/companies", response_class=HTMLResponse)
 async def companies_page(request: Request, added: int = 0, rejected: str = ""):
     if await _current_user(request) is None:
         return _login_redirect()
     async with connect() as conn:
         tenants = await q.list_personio_tenants(conn)
+        personio_active = "personio" in await q.enabled_sources(conn)
     return templates.TemplateResponse(
         request,
         "companies.html",
@@ -335,6 +370,7 @@ async def companies_page(request: Request, added: int = 0, rejected: str = ""):
             "tenants": tenants,
             "added": added,
             "rejected": _split_lines(rejected),
+            "personio_active": personio_active,
         },
     )
 

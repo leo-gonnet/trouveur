@@ -17,6 +17,7 @@ from trouveur.db.schema import (
     pipeline_run,
     pipeline_schedule,
     profile,
+    source_activation,
     source_state,
 )
 from trouveur.models import Job, RuleVerdict, UserState, fold
@@ -398,6 +399,32 @@ async def top_companies(conn: AsyncConnection, limit: int = 8) -> list[sa.Row]:
 async def source_health(conn: AsyncConnection) -> list[sa.Row]:
     return list(
         await conn.execute(sa.select(source_state).order_by(source_state.c.source))
+    )
+
+
+async def source_activation_map(conn: AsyncConnection) -> dict[str, bool]:
+    """Which sources are switched on. A source with no row has never been touched: off."""
+    rows = await conn.execute(sa.select(source_activation.c.source, source_activation.c.enabled))
+    return {row.source: row.enabled for row in rows}
+
+
+async def enabled_sources(conn: AsyncConnection) -> list[str]:
+    rows = await conn.execute(
+        sa.select(source_activation.c.source)
+        .where(source_activation.c.enabled)
+        .order_by(source_activation.c.source)
+    )
+    return [row.source for row in rows]
+
+
+async def set_source_enabled(conn: AsyncConnection, source: str, enabled: bool) -> None:
+    await conn.execute(
+        pg_insert(source_activation)
+        .values(source=source, enabled=enabled)
+        .on_conflict_do_update(
+            index_elements=[source_activation.c.source],
+            set_={"enabled": enabled, "updated_at": sa.func.now()},
+        )
     )
 
 
