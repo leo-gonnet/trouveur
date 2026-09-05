@@ -1,1 +1,1 @@
-All engineering rules for this project live in @AGENTS.md. Read it first.
+@AGENTS.md
