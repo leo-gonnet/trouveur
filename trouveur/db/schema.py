@@ -66,7 +66,7 @@ job = sa.Table(
     sa.Column("posted_at", sa.DateTime(timezone=True)),
     sa.Column("updated_at", sa.DateTime(timezone=True)),
     sa.Column("closes_at", sa.DateTime(timezone=True)),
-    sa.Column("location_raw", ARRAY(sa.Text), nullable=False, server_default="{}"),
+    sa.Column("locations", JSONB, nullable=False, server_default=sa.text("'[]'::jsonb")),
     sa.Column("salary_amount_min", sa.Numeric),
     sa.Column("salary_amount_max", sa.Numeric),
     sa.Column("salary_currency", sa.Text),

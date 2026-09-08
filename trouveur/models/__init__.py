@@ -1,5 +1,11 @@
 from trouveur.models.facets import EmploymentType, JobFacets, Seniority, WorkMode
-from trouveur.models.job import CanonicalJob, SalaryPeriod, SalaryQuote, dedup_key
+from trouveur.models.job import (
+    CanonicalJob,
+    Location,
+    SalaryPeriod,
+    SalaryQuote,
+    dedup_key,
+)
 from trouveur.models.match import Candidate, RerankResult, RuleVerdict, UserState
 from trouveur.models.profile import UserProfile
 from trouveur.models.raw import DocumentKind, RawDocument
@@ -11,6 +17,7 @@ __all__ = [
     "DocumentKind",
     "EmploymentType",
     "JobFacets",
+    "Location",
     "RawDocument",
     "RerankResult",
     "RuleVerdict",

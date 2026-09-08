@@ -80,7 +80,7 @@ def upgrade() -> None:
             posted_at            timestamptz,
             updated_at           timestamptz,
             closes_at            timestamptz,
-            location_raw         text[] NOT NULL DEFAULT '{}',
+            locations            jsonb NOT NULL DEFAULT '[]'::jsonb,
             salary_amount_min    numeric,
             salary_amount_max    numeric,
             salary_currency      text,

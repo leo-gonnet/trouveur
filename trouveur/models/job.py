@@ -31,6 +31,23 @@ class SalaryPeriod(StrEnum):
     UNKNOWN = "UNKNOWN"
 
 
+class Location(BaseModel):
+    """One place a posting names.
+
+    `raw` is always the source's own wording and is never discarded. The structured fields are
+    filled in only when the source itself stated them separately -- Arbeitsagentur gives a proper
+    address, Greenhouse gives free text like "Remote, Canada; Remote, US". Derivation parses `raw`
+    only where structure is absent, so a source that already knows the answer is never second
+    guessed, and a parser fix never has to undo a normaliser's assumption.
+    """
+
+    raw: str
+    city: str | None = None
+    region: str | None = None
+    # Verbatim as the source wrote it ("DEUTSCHLAND", "Italy"). Mapping to ISO is derivation.
+    country: str | None = None
+
+
 class SalaryQuote(BaseModel):
     """A salary exactly as the source stated it. Annualisation happens in derivation."""
 
@@ -52,9 +69,8 @@ class CanonicalJob(BaseModel):
     updated_at: datetime | None = None
     closes_at: datetime | None = None
 
-    # Verbatim, unparsed, and a list because one posting can name several places. Greenhouse
-    # writes free text like "Remote, Canada; Remote, US"; parsing it belongs in derivation.
-    location_raw: list[str] = Field(default_factory=list)
+    # A list because one posting can name several places.
+    locations: list[Location] = Field(default_factory=list)
     salary: SalaryQuote | None = None
 
     # Hints, not facts: a source's own claim, which derivation may confirm, override or ignore.
@@ -80,7 +96,7 @@ class CanonicalJob(BaseModel):
             str(CONTENT_HASH_VERSION),
             normalize_for_hash(self.title),
             normalize_for_hash(self.company),
-            normalize_for_hash(" ".join(self.location_raw)),
+            normalize_for_hash(" ".join(loc.raw for loc in self.locations)),
             normalize_for_hash(self.description),
         ]
         return hashlib.sha256("|".join(parts).encode()).digest()
