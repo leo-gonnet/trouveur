@@ -41,7 +41,8 @@ export SESSION_SECRET=dev-only-insecure-secret
 export ENCRYPTION_KEY=dev-only-change-me
 uv run alembic upgrade head
 uv run trouveur create-user
-uv run trouveur sweep --source greenhouse   # boards come from sources/greenhouse/boards.txt
+uv run trouveur tenants list                # 11 verified boards are seeded by the migration
+uv run trouveur sweep --source greenhouse
 uv run trouveur drain                       # derive, embed, fetch details
 uv run trouveur match --user 1
 ```
@@ -60,11 +61,15 @@ Semantic retrieval needs the local embedding model: `uv sync --extra embeddings`
 `EMBEDDING_PROVIDER=deterministic` to exercise the pipeline (its vectors carry no meaning, and rows
 it writes are stamped so its use is visible in the data).
 
-Profiles and API keys live in the database and are edited in the UI. The list of companies to crawl
-does not: it is configuration, so it lives in `trouveur/sources/greenhouse/boards.txt` and changes
-in a reviewed commit. The corpus a given commit produces is therefore reproducible from that commit,
-and one user cannot enlarge the crawl everyone pays for. The database keeps only per-tenant health,
-shown on the dashboard, so a board that starts 404ing is visible as a line to delete.
+Profiles and API keys live in the database and are edited in the UI. So does the crawl set — which
+companies each per-tenant source sweeps — but it is managed from the server with
+`trouveur tenants add|enable|disable|remove`, not in the web UI: it is shared by every user, so one
+person cannot enlarge the crawl everyone pays for. The dashboard shows it read-only alongside
+per-tenant health, so a board that starts 404ing is visible as one to remove.
+
+The crawl set is a table rather than a file so that a discovery pass can populate it later. Such a
+pass registers candidates **disabled**, for a human to promote; it can never enlarge the crawl on
+its own.
 
 If a sweep collects nothing, the reason is recorded per source in `source_sweep` rather than
 raised — including partition overflow, which is coverage lost with no error anywhere.

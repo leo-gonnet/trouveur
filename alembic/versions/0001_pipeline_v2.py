@@ -39,6 +39,7 @@ def upgrade() -> None:
         ("employment_type",
          "'full_time','part_time','contract','temporary','internship','apprenticeship','unknown'"),
         ("work_kind", "'detail','derive','embed','dedup'"),
+        ("tenant_origin", "'manual','discovered'"),
         ("rule_verdict", "'pass','reject','unknown'"),
         ("user_state", "'new','saved','applied','dismissed'"),
         ("run_status", "'queued','running','success','failed'"),
@@ -248,8 +249,47 @@ def upgrade() -> None:
     )
     op.execute("CREATE INDEX source_sweep_recent_idx ON source_sweep (source, started_at DESC)")
 
-    # Health only. Which tenants are swept is configuration and lives in the repository, so
-    # nothing here decides what gets crawled -- it records what answered when we asked.
+    # The crawl set. Written by an operator through the CLI today and by a discovery pass later,
+    # which is why it lives here rather than in a hand-edited file in the repository.
+    op.execute(
+        """
+        CREATE TABLE source_tenant (
+            source   text NOT NULL,
+            scope    text NOT NULL,
+            enabled  boolean NOT NULL DEFAULT false,
+            origin   tenant_origin NOT NULL DEFAULT 'manual',
+            note     text,
+            added_at timestamptz NOT NULL DEFAULT now(),
+            PRIMARY KEY (source, scope)
+        )
+        """
+    )
+    op.execute(
+        "CREATE INDEX source_tenant_enabled_idx ON source_tenant (source, scope) WHERE enabled"
+    )
+
+    # A starter set so a fresh install collects something before anyone opens the CLI. Each slug
+    # returned HTTP 200 on 2026-09-08; an unverified one would 404 on every sweep thereafter.
+    op.execute(
+        """
+        INSERT INTO source_tenant (source, scope, enabled, origin, note) VALUES
+            ('greenhouse', 'adyen',        true, 'manual', 'verified 2026-09-08'),
+            ('greenhouse', 'celonis',      true, 'manual', 'verified 2026-09-08'),
+            ('greenhouse', 'contentful',   true, 'manual', 'verified 2026-09-08'),
+            ('greenhouse', 'doctolib',     true, 'manual', 'verified 2026-09-08'),
+            ('greenhouse', 'getyourguide', true, 'manual', 'verified 2026-09-08'),
+            ('greenhouse', 'gitlab',       true, 'manual', 'verified 2026-09-08'),
+            ('greenhouse', 'hellofresh',   true, 'manual', 'verified 2026-09-08'),
+            ('greenhouse', 'monzo',        true, 'manual', 'verified 2026-09-08'),
+            ('greenhouse', 'n26',          true, 'manual', 'verified 2026-09-08'),
+            ('greenhouse', 'sumup',        true, 'manual', 'verified 2026-09-08'),
+            ('greenhouse', 'wise',         true, 'manual', 'verified 2026-09-08')
+        """
+    )
+
+    # Health, deliberately a different table from the crawl set above. The one this replaced mixed
+    # an editable board list with health columns nothing ever wrote, so half of it was dead and the
+    # UI reported "last success: -" indefinitely. Configuration and observation stay apart.
     op.execute(
         """
         CREATE TABLE source_scope_health (

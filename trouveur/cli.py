@@ -128,6 +128,116 @@ def refill(kind: str, chunk: int) -> None:
     click.echo(f"queued {asyncio.run(_run())} item(s) for {kind} at version {target}")
 
 
+@main.group()
+def tenants() -> None:
+    """Manage the crawl set: which companies a per-tenant source sweeps.
+
+    Deliberately not in the web UI. The crawl set is shared by every user, so enlarging it is an
+    operator decision -- one user adding five hundred boards would make everyone pay for it.
+    """
+
+
+@tenants.command("list")
+@click.option("--source", default=None, help="Only this source.")
+def tenants_list(source: str | None) -> None:
+    """Show every tenant with its health, including candidates awaiting review."""
+    from trouveur.db.engine import connect
+    from trouveur.db.queries import admin
+
+    async def _run() -> list:
+        async with connect() as conn:
+            return await admin.list_tenants(conn, source)
+
+    rows = asyncio.run(_run())
+    if not rows:
+        click.echo("No tenants registered.")
+        return
+    click.echo(f"{'source':<14}{'scope':<24}{'on':<4}{'origin':<11}{'docs':>7}  {'fails':>5}")
+    for row in rows:
+        click.echo(
+            f"{row.source:<14}{row.scope:<24}{'yes' if row.enabled else 'no':<4}"
+            f"{row.origin:<11}{row.last_documents or 0:>7}  {row.consecutive_failures or 0:>5}"
+            + (f"  {row.last_error[:48]}" if row.last_error else "")
+        )
+
+
+@tenants.command("add")
+@click.argument("source")
+@click.argument("scopes", nargs=-1, required=True)
+@click.option("--disabled", is_flag=True, help="Register without sweeping it yet.")
+@click.option("--note", default=None, help="Why this tenant is here.")
+def tenants_add(source: str, scopes: tuple[str, ...], disabled: bool, note: str | None) -> None:
+    """Register tenants. Accepts a slug or a full careers URL.
+
+    Verify a slug before adding it; an unknown one fails on every sweep thereafter and shows up
+    only as a growing failure count.
+    """
+    from trouveur.db.engine import connect
+    from trouveur.db.queries import admin
+    from trouveur.sources.registry import NORMALIZERS
+    from trouveur.sources.scopes import clean_scope
+
+    if source not in NORMALIZERS:
+        raise SystemExit(f"Unknown source {source!r}; known sources: {', '.join(NORMALIZERS)}.")
+    cleaned = [clean_scope(scope) for scope in scopes]
+
+    async def _run() -> int:
+        async with connect() as conn:
+            return await admin.add_tenants(
+                conn, source, cleaned, enabled=not disabled, note=note
+            )
+
+    added = asyncio.run(_run())
+    click.echo(f"added {added} of {len(cleaned)} ({len(cleaned) - added} already registered)")
+
+
+@tenants.command("enable")
+@click.argument("source")
+@click.argument("scope")
+def tenants_enable(source: str, scope: str) -> None:
+    """Start sweeping a registered tenant."""
+    _set_enabled(source, scope, True)
+
+
+@tenants.command("disable")
+@click.argument("source")
+@click.argument("scope")
+def tenants_disable(source: str, scope: str) -> None:
+    """Stop sweeping a tenant without forgetting it."""
+    _set_enabled(source, scope, False)
+
+
+def _set_enabled(source: str, scope: str, enabled: bool) -> None:
+    from trouveur.db.engine import connect
+    from trouveur.db.queries import admin
+
+    async def _run() -> None:
+        async with connect() as conn:
+            await admin.set_tenant_enabled(conn, source, scope, enabled)
+
+    asyncio.run(_run())
+    click.echo(f"{source}/{scope} {'enabled' if enabled else 'disabled'}")
+
+
+@tenants.command("remove")
+@click.argument("source")
+@click.argument("scope")
+def tenants_remove(source: str, scope: str) -> None:
+    """Forget a tenant entirely, along with its health history.
+
+    Postings already collected from it are kept: they are corpus, not configuration.
+    """
+    from trouveur.db.engine import connect
+    from trouveur.db.queries import admin
+
+    async def _run() -> None:
+        async with connect() as conn:
+            await admin.remove_tenant(conn, source, scope)
+
+    asyncio.run(_run())
+    click.echo(f"removed {source}/{scope}")
+
+
 @main.command("create-user")
 @click.option("--username", prompt=True)
 @click.option("--email", default="", help="Optional; without one this user gets no digest.")

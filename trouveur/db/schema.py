@@ -26,6 +26,7 @@ employment_type = _enum(
     "internship", "apprenticeship", "unknown",
 )
 work_kind = _enum("work_kind", "detail", "derive", "embed", "dedup")
+tenant_origin = _enum("tenant_origin", "manual", "discovered")
 rule_verdict = _enum("rule_verdict", "pass", "reject", "unknown")
 user_state = _enum("user_state", "new", "saved", "applied", "dismissed")
 run_status = _enum("run_status", "queued", "running", "success", "failed")
@@ -173,6 +174,27 @@ source_sweep = sa.Table(
     sa.Column("jobs_upserted", sa.Integer, nullable=False, server_default="0"),
     sa.Column("jobs_closed", sa.Integer, nullable=False, server_default="0"),
     sa.Column("error", sa.Text),
+)
+
+# The crawl set: which tenants a per-tenant source sweeps. Some sources publish no index of their
+# own, so this is the only list of them that exists.
+#
+# In the database rather than the repository because it is written by more than one thing -- an
+# operator today, a discovery pass later -- and a discovery pass proposing hundreds of candidates
+# does not belong in a hand-edited file. The cost accepted in exchange: the corpus a given commit
+# produces is no longer reproducible from that commit alone.
+source_tenant = sa.Table(
+    "source_tenant",
+    metadata,
+    sa.Column("source", sa.Text, primary_key=True),
+    sa.Column("scope", sa.Text, primary_key=True),
+    # Discovery inserts disabled rows and an operator promotes them, so a discovery pass can never
+    # enlarge the crawl -- and the bill, and the politeness budget -- on its own.
+    sa.Column("enabled", sa.Boolean, nullable=False, server_default="false"),
+    sa.Column("origin", tenant_origin, nullable=False, server_default="manual"),
+    sa.Column("note", sa.Text),
+    sa.Column("added_at", sa.DateTime(timezone=True), nullable=False,
+              server_default=sa.func.now()),
 )
 
 # Observation, not configuration. Which tenants exist is decided in the repository (see

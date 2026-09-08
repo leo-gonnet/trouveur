@@ -75,7 +75,9 @@ async def run(
     settings = settings or get_settings()
     report = IngestReport()
 
-    sources = build_sources(only=only_source)
+    async with connect() as conn:
+        tenants = await admin_q.enabled_tenants(conn)
+    sources = build_sources(tenants=tenants, only=only_source)
 
     async with PoliteClient() as client:
         for source in sources:

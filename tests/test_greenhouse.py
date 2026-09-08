@@ -25,40 +25,38 @@ def _url(slug: str) -> str:
     return f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs"
 
 
-def test_the_board_registry_is_valid_and_non_empty():
-    """A malformed slug in boards.txt must fail loudly, not 404 every day in silence."""
-    from trouveur.sources.greenhouse.client import BOARDS_FILE
-    from trouveur.sources.scopes import load_scopes
+def test_a_tenant_scoped_source_is_dropped_when_it_has_no_tenants():
+    """Sweeping it would make no requests, find nothing, and report a healthy empty sweep.
 
-    boards = load_scopes(BOARDS_FILE)
-    assert boards, "boards.txt is empty, so Greenhouse contributes nothing"
-    assert len(boards) == len(set(boards)), "duplicate slugs double the requests to a tenant"
-
-
-def test_a_source_reads_its_own_registry():
-    """Nothing upstream should need to know that this source is tenant-scoped."""
+    That is indistinguishable from a source that is working and finding nothing, which is exactly
+    the silent failure this project exists to avoid.
+    """
     from trouveur.sources import build_sources
 
-    greenhouse_source = next(s for s in build_sources() if s.name == "greenhouse")
-    assert greenhouse_source.boards
+    assert [s.name for s in build_sources()] == ["arbeitsagentur"]
+    assert "greenhouse" in [s.name for s in build_sources(tenants={"greenhouse": ["gitlab"]})]
 
 
-def test_malformed_slugs_are_rejected_at_load(tmp_path):
+def test_tenants_reach_the_source_without_the_caller_naming_it():
+    """build_sources takes a mapping, so no caller branches on which sources are tenant-scoped."""
+    from trouveur.sources import build_sources
+
+    source = next(
+        s for s in build_sources(tenants={"greenhouse": ["a", "b"]}) if s.name == "greenhouse"
+    )
+    assert source.boards == ["a", "b"]
+
+
+def test_slugs_are_validated_and_urls_are_accepted():
+    """Validation happens at the write, because a bad slug otherwise 404s silently forever."""
     from trouveur.sources.errors import SourceError
-    from trouveur.sources.scopes import load_scopes
+    from trouveur.sources.scopes import clean_scope
 
-    path = tmp_path / "boards.txt"
-    path.write_text("good-slug\n# a comment\n\nhttps://example.com/oops\n")
-    with pytest.raises(SourceError, match="not valid slugs"):
-        load_scopes(path)
-
-
-def test_comments_and_blank_lines_are_ignored(tmp_path):
-    from trouveur.sources.scopes import load_scopes
-
-    path = tmp_path / "boards.txt"
-    path.write_text("# header\n\nalpha  # trailing\nbeta\nalpha\n")
-    assert load_scopes(path) == ["alpha", "beta"]
+    assert clean_scope("  GitLab ") == "gitlab"
+    assert clean_scope("https://job-boards.greenhouse.io/doctolib/") == "doctolib"
+    for bad in ("not a slug!", "", "https://example.com/"):
+        with pytest.raises(SourceError):
+            clean_scope(bad)
 
 
 def test_external_id_is_scoped_by_board():

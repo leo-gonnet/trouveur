@@ -345,7 +345,7 @@ async def dashboard(request: Request):
         health = await admin_q.source_health(conn)
         queues = await admin_q.queue_depth(conn)
         countries = await admin_q.facet_breakdown(conn)
-        scopes = await admin_q.scope_health(conn)
+        scopes = await admin_q.list_tenants(conn)
         stats = await match_q.match_stats(conn, session["uid"])
         spend = await users_q.month_spend(conn, session["uid"])
     return templates.TemplateResponse(

@@ -35,16 +35,27 @@ def normalizer_for(source: str) -> tuple[NormalizeFn, int]:
         ) from None
 
 
-def build_sources(*, only: str | None = None) -> list[Source]:
+def build_sources(
+    *, tenants: dict[str, list[str]] | None = None, only: str | None = None
+) -> list[Source]:
     """Assemble the sources for a run.
 
-    Sources read their own configuration from the repository and never touch the database, so a
-    sweep can be exercised against a stub transport with no Postgres anywhere in the test, and the
-    corpus a given commit produces is reproducible from that commit.
+    Tenants arrive as a mapping keyed by source name, so the caller loads the whole crawl set with
+    one query and never branches on which sources happen to be tenant-scoped. Sources still do no
+    I/O of their own here, so a sweep can be exercised against a stub transport with no database.
+
+    A tenant-scoped source with no tenants is dropped rather than run: sweeping it would make no
+    requests, find nothing, and report a healthy empty sweep.
     """
+    tenants = tenants or {}
     sources: list[Source] = [
         arbeitsagentur.ArbeitsagenturSource(),
-        greenhouse.GreenhouseSource(),
+        greenhouse.GreenhouseSource(boards=tenants.get(greenhouse.SOURCE, [])),
+    ]
+    sources = [
+        source
+        for source in sources
+        if not getattr(source, "tenant_scoped", False) or tenants.get(source.name)
     ]
 
     if only:

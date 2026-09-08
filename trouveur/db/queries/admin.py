@@ -15,8 +15,106 @@ from trouveur.db.schema import (
     pipeline_schedule,
     source_scope_health,
     source_sweep,
+    source_tenant,
     work_item,
 )
+
+
+async def enabled_tenants(conn: AsyncConnection) -> dict[str, list[str]]:
+    """The crawl set, grouped by source, so the pipeline loads every source's tenants at once.
+
+    Grouped rather than fetched per source on purpose: the pipeline must not have to know which
+    sources are tenant-scoped, or adding one becomes an edit there as well as in the registry.
+    """
+    rows = await conn.execute(
+        sa.select(source_tenant.c.source, source_tenant.c.scope)
+        .where(source_tenant.c.enabled.is_(True))
+        .order_by(source_tenant.c.source, source_tenant.c.scope)
+    )
+    grouped: dict[str, list[str]] = {}
+    for row in rows:
+        grouped.setdefault(row.source, []).append(row.scope)
+    return grouped
+
+
+async def list_tenants(conn: AsyncConnection, source: str | None = None) -> list[sa.Row]:
+    """Every tenant with its health, including candidates a discovery pass has proposed."""
+    stmt = (
+        sa.select(
+            source_tenant.c.source,
+            source_tenant.c.scope,
+            source_tenant.c.enabled,
+            source_tenant.c.origin,
+            source_tenant.c.note,
+            source_tenant.c.added_at,
+            source_scope_health.c.last_ok_at,
+            source_scope_health.c.last_documents,
+            source_scope_health.c.last_error,
+            source_scope_health.c.consecutive_failures,
+        )
+        .select_from(
+            source_tenant.outerjoin(
+                source_scope_health,
+                sa.and_(
+                    source_scope_health.c.source == source_tenant.c.source,
+                    source_scope_health.c.scope == source_tenant.c.scope,
+                ),
+            )
+        )
+        .order_by(source_tenant.c.source, source_tenant.c.scope)
+    )
+    if source:
+        stmt = stmt.where(source_tenant.c.source == source)
+    return list(await conn.execute(stmt))
+
+
+async def add_tenants(
+    conn: AsyncConnection,
+    source: str,
+    scopes: Sequence[str],
+    *,
+    enabled: bool = True,
+    origin: str = "manual",
+    note: str | None = None,
+) -> int:
+    """Register tenants. Idempotent, and never re-enables one an operator has switched off."""
+    if not scopes:
+        return 0
+    stmt = pg_insert(source_tenant).values(
+        [
+            {"source": source, "scope": scope, "enabled": enabled, "origin": origin, "note": note}
+            for scope in scopes
+        ]
+    )
+    result = await conn.execute(
+        stmt.on_conflict_do_nothing(
+            index_elements=[source_tenant.c.source, source_tenant.c.scope]
+        )
+    )
+    return result.rowcount or 0
+
+
+async def set_tenant_enabled(
+    conn: AsyncConnection, source: str, scope: str, enabled: bool
+) -> None:
+    await conn.execute(
+        source_tenant.update()
+        .where(source_tenant.c.source == source, source_tenant.c.scope == scope)
+        .values(enabled=enabled)
+    )
+
+
+async def remove_tenant(conn: AsyncConnection, source: str, scope: str) -> None:
+    await conn.execute(
+        source_tenant.delete().where(
+            source_tenant.c.source == source, source_tenant.c.scope == scope
+        )
+    )
+    await conn.execute(
+        source_scope_health.delete().where(
+            source_scope_health.c.source == source, source_scope_health.c.scope == scope
+        )
+    )
 
 
 async def record_scope_health(
@@ -86,7 +184,7 @@ async def scope_health(conn: AsyncConnection, failing_only: bool = False) -> lis
 async def prune_scope_health(
     conn: AsyncConnection, source: str, known_scopes: Sequence[str]
 ) -> int:
-    """Forget tenants no longer in the registry, so removing a line also clears its health row."""
+    """Forget tenants no longer registered, so deregistering one also clears its health row."""
     result = await conn.execute(
         source_scope_health.delete().where(
             source_scope_health.c.source == source,

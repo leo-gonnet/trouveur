@@ -109,7 +109,7 @@ query.** Sources sweep by their own structure; users select over the corpus.
 | `trouveur/sources/<name>/client.py` | Network only. Yields `RawDocument`. No parsing. |
 | `trouveur/sources/<name>/normalize.py` | Pure, versioned: archived payload → `CanonicalJob`. |
 | `trouveur/sources/registry.py` | The **only** place source-specific dispatch happens. |
-| `trouveur/sources/<name>/boards.txt` | Tenant registry for a per-tenant source. Configuration, in git. |
+| `trouveur/sources/scopes.py` | Validating a tenant slug. One rule, shared by every writer. |
 | `trouveur/ingest/persist.py` | The single write path from archive to `job`. |
 | `trouveur/ingest/derive.py` | Deterministic interpretation → facets. Pure. |
 | `trouveur/ingest/vocab.py` | **Every** vocabulary, once. |
@@ -201,9 +201,9 @@ so `/v1/boards/` is explicitly permitted. No authentication.
   to the embedder and the reranker.
 - **`location.name` is free text**, and multiple locations arrive semicolon-separated in one string
   (`"Remote, Canada; Remote, US"`). Pass it through unparsed; interpreting it is derivation.
-- **There is no index of tenants anywhere.** `sources/greenhouse/boards.txt` is the only list of
-  boards that exists. An unknown slug returns 404. Verify a slug with one request before adding it,
-  or it fails every day until someone notices.
+- **There is no index of tenants anywhere.** The `source_tenant` table is the only list of boards
+  that exists. An unknown slug returns 404. Verify a slug with one request before adding it, or it
+  fails every day until someone reads the failure count.
 - Scope external ids by slug (`gitlab:8503792002`). Nothing documents Greenhouse ids as globally
   unique, and a collision would silently merge two unrelated postings onto one row.
 
@@ -223,31 +223,36 @@ so `/v1/boards/` is explicitly permitted. No authentication.
 - **Parse defensively.** A missing optional field is `None`, not a `KeyError`. A field you cannot
   parse must not discard the whole record.
 
-## Configuration versus observation
+## The crawl set, and why it is two tables
 
 A per-tenant source needs a list of tenants, because some publish no index of their own. That list
-is **configuration and lives in the repository** (`sources/<name>/boards.txt`), not in the database
-and not editable in the UI. Three reasons, in order of weight:
+lives in the database (`source_tenant`), not in the repository, because it is written by more than
+one thing: an operator through the CLI today, a discovery pass later. A discovery pass proposing
+hundreds of candidates does not belong in a hand-edited file.
 
-1. **It is not per-user.** The corpus is shared, so which companies get crawled is an operator
-   decision. Exposing it per user means one user adding five hundred boards and everyone paying the
-   crawl cost.
-2. **It should be reviewable.** Adding a company is a diff, with the slug verified in the commit
-   that adds it.
-3. **A commit should reproduce its corpus.** With the list in a database, the same code produces
-   different results on two installations and neither is wrong.
+The cost is real and was accepted deliberately: **the corpus a given commit produces is not
+reproducible from that commit alone.** Two installations on the same code crawl different companies.
 
-What the database keeps is the **observation**: `source_scope_health`, one row per tenant, written
-on every sweep. The distinction is load-bearing and was learned the hard way — the table this
-replaced mixed an editable board list with health columns that nothing ever wrote, so the UI
-reported "last success: —" indefinitely, which reads as "not run yet" rather than "never recorded".
+**Configuration and observation stay in separate tables.** `source_tenant` is the crawl set;
+`source_scope_health` is what happened when we asked. This is load-bearing and was learned the hard
+way — the table these replaced mixed an editable board list with health columns that nothing ever
+wrote, so half of it was permanently dead and the UI reported "last success: —" indefinitely, which
+reads as "not run yet" rather than "never recorded". If two kinds of writer own two halves of a
+table, one half will rot unnoticed.
 
-Never put configuration and observation in one table. If a human authors it, it belongs in git; if
-the system produces it, it belongs in Postgres.
+Rules that follow:
 
-Discovering *new* tenants is deliberately not part of the runtime. If it is ever automated, it
-should be a maintenance script that proposes a diff to the registry file for review — never a
-process that writes the crawl set while the pipeline is running.
+- **Managing the crawl set is a CLI action, not a web one** (`trouveur tenants …`). It is shared by
+  every user, so enlarging it is an operator decision — exposing it per user means one person
+  adding five hundred boards and everyone paying the crawl cost. The dashboard shows it read-only.
+- **A discovery pass inserts `enabled = false`, `origin = 'discovered'`.** It proposes; a human
+  promotes. Discovery must never be able to enlarge the crawl, the bill or the politeness budget on
+  its own.
+- **Validate a scope at the write** (`sources/scopes.py`). A malformed slug that reaches the table
+  404s on every sweep afterwards and surfaces only as a slowly growing failure count.
+- **A tenant-scoped source with no enabled tenants is dropped from the run**, not swept. Sweeping
+  it would make no requests, find nothing, and report a perfectly healthy empty sweep — which is
+  indistinguishable from a source that is working and finding nothing.
 
 ## DON'T: robots.txt policy
 
@@ -407,6 +412,8 @@ uv run trouveur sweep --source greenhouse # one source
 uv run trouveur drain                     # work the deferred queues once
 uv run trouveur refill --kind derive      # re-queue everything below the current version
 uv run trouveur match --user 1            # retrieve, cut, rerank for one user
+uv run trouveur tenants list             # the crawl set, with per-tenant health
+uv run trouveur tenants add greenhouse n26   # accepts a slug or a full careers URL
 uv run trouveur create-user               # the ONLY way to create a login
 uv run trouveur serve                     # dev server on 127.0.0.1:8080
 uv run trouveur runner                    # scheduler + queue workers

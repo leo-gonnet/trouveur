@@ -1,51 +1,39 @@
-"""Loading a source's tenant registry from the repository.
+"""Validating a tenant identifier.
 
-Some sources publish no index of their tenants, so the only list that exists is the one we keep.
-That list is **configuration**, not data: a human chooses which companies this installation
-crawls, the choice belongs in a reviewable diff, and the corpus a given commit produces should be
-reproducible from that commit alone.
+The registry itself lives in the database (`source_tenant`), because it is written by more than
+one thing: an operator through the CLI today, a discovery pass later. What stays here is the one
+rule about what a scope may look like, so the CLI and any future discovery writer cannot disagree
+about it.
 
-It deliberately does not live in the database and is deliberately not editable in the UI. The
-crawl set is shared by every user, so it is an operator decision rather than a per-user setting —
-one user adding five hundred boards would make everyone pay for the crawl. What the database keeps
-is the *observation*: which scopes answered, which failed, and for how long. See
-`source_scope_health`.
+Validation happens at the write, not at the read. A malformed slug that reaches the table would
+otherwise 404 on every sweep, quietly, until somebody read the health panel closely.
 """
 
 from __future__ import annotations
 
 import re
-from pathlib import Path
 
 from trouveur.sources.errors import SourceError
 
-# Deliberately strict. A slug is a URL path segment; anything else is a typo that would otherwise
-# become a 404 every single day, quietly, forever.
+# A scope is a URL path segment. Anything else is a typo or a pasted full URL.
 _SLUG = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
 
-def load_scopes(path: Path) -> list[str]:
-    """Read one scope per line. `#` starts a comment; blank lines are ignored.
+def is_valid_scope(scope: str) -> bool:
+    return bool(_SLUG.match(scope))
 
-    Order is not preserved as significant, but duplicates are dropped so that a slug appearing
-    twice does not double the requests made to that tenant.
+
+def clean_scope(raw: str) -> str:
+    """Normalise one operator-supplied entry, or explain why it cannot be one.
+
+    Accepts a bare slug or a full careers URL, since pasting the URL is the obvious mistake and
+    the slug is unambiguously its last path segment.
     """
-    if not path.exists():
-        raise SourceError(f"The scope registry {path} does not exist.")
-
-    scopes: dict[str, None] = {}
-    problems: list[str] = []
-    for number, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
-        line = raw.split("#", 1)[0].strip()
-        if not line:
-            continue
-        if not _SLUG.match(line):
-            problems.append(f"line {number}: {line!r}")
-            continue
-        scopes.setdefault(line, None)
-
-    if problems:
+    candidate = raw.strip().rstrip("/").lower()
+    if "/" in candidate:
+        candidate = candidate.rsplit("/", 1)[-1]
+    if not is_valid_scope(candidate):
         raise SourceError(
-            f"{path.name} contains entries that are not valid slugs: {'; '.join(problems)}."
+            f"{raw!r} is not a valid tenant slug: expected a URL path segment such as 'gitlab'."
         )
-    return list(scopes)
+    return candidate
