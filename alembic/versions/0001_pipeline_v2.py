@@ -83,6 +83,10 @@ def upgrade() -> None:
             updated_at           timestamptz,
             closes_at            timestamptz,
             locations            jsonb NOT NULL DEFAULT '[]'::jsonb,
+            -- The place names, flattened, so they can be searched and indexed. Written by
+            -- persist() rather than expressed over `locations`, because a generated column may
+            -- only use immutable expressions and jsonb extraction here would be fragile.
+            location_text        text NOT NULL DEFAULT '',
             salary_amount_min    numeric,
             salary_amount_max    numeric,
             salary_currency      text,
@@ -105,15 +109,20 @@ def upgrade() -> None:
             search_de tsvector GENERATED ALWAYS AS (
                 setweight(to_tsvector('german', coalesce(title, '')), 'A') ||
                 setweight(to_tsvector('german', coalesce(company, '')), 'B') ||
+                setweight(to_tsvector('german', coalesce(location_text, '')), 'C') ||
                 setweight(to_tsvector('german', coalesce(description, '')), 'D')
             ) STORED,
 
-            -- Title and company only, deliberately. This index exists to match inside German
-            -- compounds ('ingenieur' within 'Wirtschaftsingenieur'), which is a title problem;
-            -- the tsvector already stems descriptions. Including descriptions here would grow
-            -- the GIN index by more than an order of magnitude for almost no extra recall.
+            -- Title, company and place names, deliberately not descriptions. This index exists
+            -- to match inside German compounds ('ingenieur' within 'Wirtschaftsingenieur') and to
+            -- fold umlauts so 'munchen' finds 'München', both of which are title-and-place
+            -- problems; the tsvector already stems descriptions. Including descriptions here
+            -- would grow the GIN index by more than an order of magnitude for almost no recall.
             search_fold text GENERATED ALWAYS AS (
-                lower(f_unaccent(coalesce(title, '') || ' ' || coalesce(company, '')))
+                lower(f_unaccent(
+                    coalesce(title, '') || ' ' || coalesce(company, '') || ' '
+                    || coalesce(location_text, '')
+                ))
             ) STORED,
 
             CONSTRAINT job_provenance_uniq UNIQUE (source, external_id),

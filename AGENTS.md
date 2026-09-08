@@ -328,10 +328,24 @@ A test earns its place only if it can fail for a reason a reviewer would care ab
 behaviour, query shape, cost controls, and **every trap in this file**.
 **Do not write tests for:** getters, pydantic itself, SQLAlchemy itself, or mocks restating mocks.
 
-- **No network and no database in tests.** Use synthetic fixtures and a stubbed transport. The whole
-  suite runs in under a second; keep it that way. To check live API behaviour while debugging, use a
-  throwaway shell command, never a test file — and if what you learn is durable, write it into this
-  file.
+- **No network and no database in the default suite.** Use synthetic fixtures and a stubbed
+  transport. It runs in under a second; keep it that way. To check live API behaviour while
+  debugging, use a throwaway shell command, never a test file — and if what you learn is durable,
+  write it into this file.
+- **One deliberate exception: `tests/test_integration_db.py`**, skipped unless
+  `TROUVEUR_TEST_DATABASE_URL` is set. **SQL that compiles is not SQL that runs**, and nothing else
+  can catch that class of bug — writing it found a query that bundled two statements (asyncpg
+  rejects them), an f-string prefix dropped so a literal `{_HARD_FILTERS}` shipped to the server,
+  and place names missing from both search columns, which broke city search entirely. **Run it
+  against a throwaway database before shipping any change to `db/queries/` or the migration:**
+
+  ```bash
+  podman run -d --rm --name pg -e POSTGRES_USER=trouveur -e POSTGRES_PASSWORD=x \
+      -e POSTGRES_DB=trouveur -p 55432:5432 pgvector/pgvector:pg16
+  export TROUVEUR_TEST_DATABASE_URL=postgresql+asyncpg://trouveur:x@127.0.0.1:55432/trouveur
+  DATABASE_URL=$TROUVEUR_TEST_DATABASE_URL uv run alembic upgrade head
+  uv run pytest
+  ```
 - Name tests `test_<behaviour>_when_<condition>` or as a plain statement of the invariant.
   Arrange/Act/Assert, no cleverness.
 - **When you add a structural guard, verify it can fail** by temporarily introducing the violation.
@@ -344,6 +358,9 @@ behaviour, query shape, cost controls, and **every trap in this file**.
   - `content_hash` is versioned and changes when a description arrives.
   - `%%` never survives SQL compilation.
   - `search_jobs` carries no verdict or score filter.
+  - German search finds `Wirtschaftsingenieur` when the user types `ingenieur`, and finds
+    `München` when the user types `munchen` (both need the integration test).
+  - Closing a posting deletes its embedding.
   - Every source package is registered; `schema.py` and the migration agree; no SQL outside
     `db/queries/`; no source name used as a value downstream.
 
@@ -370,7 +387,7 @@ uv run trouveur runner                    # scheduler + queue workers
 Prefer the narrowest command that proves your change. Do not run a sweep against live sources to
 test a parser — use a fixture.
 
-**Run freely:** `pytest`, `ruff check`, `alembic upgrade head`.
+**Run freely:** `pytest`, `ruff check`, `alembic upgrade head` (against a throwaway database).
 
 **Ask first** — each of these has a side effect you cannot take back:
 

@@ -40,7 +40,7 @@ _HARD_FILTERS = """
 # have any effect, which db.engine.connect() always provides.
 _EF_SEARCH_SQL = f"SET LOCAL hnsw.ef_search = {_EF_SEARCH}"
 
-_DENSE_SQL = """
+_DENSE_SQL = f"""
 SELECT j.id AS job_id
 FROM job_embedding e
 JOIN job j ON j.id = e.job_id

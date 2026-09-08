@@ -119,6 +119,9 @@ def job_row(
         "updated_at": item.updated_at,
         "closes_at": item.closes_at,
         "locations": [loc.model_dump() for loc in item.locations],
+        # Flattened for search. Cities are how people actually look for jobs, and without this
+        # neither search path can see a place name at all.
+        "location_text": " ".join(loc.raw for loc in item.locations),
         "salary_amount_min": salary.amount_min if salary else None,
         "salary_amount_max": salary.amount_max if salary else None,
         "salary_currency": salary.currency if salary else None,
@@ -150,7 +153,7 @@ async def upsert_jobs(
         column: getattr(stmt.excluded, column)
         for column in (
             "scope", "url", "title", "company", "description", "posted_at", "updated_at",
-            "closes_at", "locations", "salary_amount_min", "salary_amount_max",
+            "closes_at", "locations", "location_text", "salary_amount_min", "salary_amount_max",
             "salary_currency", "salary_period", "remote_hint", "employment_type_hint",
             "agency_hint", "language_hint", "department_hint", "content_hash",
             "normalize_version", "listing_document_id", "detail_document_id",

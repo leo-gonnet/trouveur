@@ -46,6 +46,11 @@ uv run trouveur drain                       # derive, embed, fetch details
 uv run trouveur match --user 1
 ```
 
+The test suite is offline and runs in well under a second. A second, opt-in suite exercises every
+SQL path against a real Postgres and is skipped unless `TROUVEUR_TEST_DATABASE_URL` is set — worth
+running before any change to the queries or the migration, because SQL that compiles is not SQL
+that runs.
+
 `uv` is required: this project's target host has no working `venv` module, and CI uses `uv` too.
 `create-user` is the only way to make a login — there is no sign-up route. Then
 `uv run trouveur serve` for the UI and `uv run trouveur runner` if you want scans to fire on a
