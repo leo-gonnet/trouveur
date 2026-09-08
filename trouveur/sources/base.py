@@ -22,6 +22,20 @@ from trouveur.sources.http import PoliteClient
 DocumentSink = Callable[[Sequence[RawDocument]], Awaitable[None]]
 
 
+class ScopeResult(BaseModel):
+    """What happened to one tenant in a sweep, for the health panel.
+
+    Separate from `closable_scopes` because they answer different questions: this records whether
+    the request succeeded, that records whether the response justified retiring postings. They
+    coincide for a complete per-tenant dump and would not for a paginated one.
+    """
+
+    scope: str
+    ok: bool
+    documents: int = 0
+    error: str | None = None
+
+
 class SweepOutcome(BaseModel):
     """What a sweep saw, and -- critically -- whether it saw everything.
 
@@ -42,6 +56,8 @@ class SweepOutcome(BaseModel):
     partitions_done: int = 0
     partitions_overflowed: int = 0
     documents: int = 0
+    # Per tenant, for the health panel. Empty for a source that has no tenants.
+    scope_results: list[ScopeResult] = Field(default_factory=list)
     # What the source claimed was available, when it says. A shortfall against `documents` is a
     # measured coverage hole rather than an assumption that there wasn't one.
     expected: int | None = None

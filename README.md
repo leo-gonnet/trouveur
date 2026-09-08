@@ -41,7 +41,7 @@ export SESSION_SECRET=dev-only-insecure-secret
 export ENCRYPTION_KEY=dev-only-change-me
 uv run alembic upgrade head
 uv run trouveur create-user
-uv run trouveur sweep --source greenhouse   # needs a board added in the UI first
+uv run trouveur sweep --source greenhouse   # boards come from sources/greenhouse/boards.txt
 uv run trouveur drain                       # derive, embed, fetch details
 uv run trouveur match --user 1
 ```
@@ -60,8 +60,11 @@ Semantic retrieval needs the local embedding model: `uv sync --extra embeddings`
 `EMBEDDING_PROVIDER=deterministic` to exercise the pipeline (its vectors carry no meaning, and rows
 it writes are stamped so its use is visible in the data).
 
-Profiles, API keys and the list of companies to watch live in the database and are edited in the
-UI. There is no config file for any of them.
+Profiles and API keys live in the database and are edited in the UI. The list of companies to crawl
+does not: it is configuration, so it lives in `trouveur/sources/greenhouse/boards.txt` and changes
+in a reviewed commit. The corpus a given commit produces is therefore reproducible from that commit,
+and one user cannot enlarge the crawl everyone pays for. The database keeps only per-tenant health,
+shown on the dashboard, so a board that starts 404ing is visible as a line to delete.
 
 If a sweep collects nothing, the reason is recorded per source in `source_sweep` rather than
 raised — including partition overflow, which is coverage lost with no error anywhere.

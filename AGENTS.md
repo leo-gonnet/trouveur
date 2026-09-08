@@ -109,6 +109,7 @@ query.** Sources sweep by their own structure; users select over the corpus.
 | `trouveur/sources/<name>/client.py` | Network only. Yields `RawDocument`. No parsing. |
 | `trouveur/sources/<name>/normalize.py` | Pure, versioned: archived payload → `CanonicalJob`. |
 | `trouveur/sources/registry.py` | The **only** place source-specific dispatch happens. |
+| `trouveur/sources/<name>/boards.txt` | Tenant registry for a per-tenant source. Configuration, in git. |
 | `trouveur/ingest/persist.py` | The single write path from archive to `job`. |
 | `trouveur/ingest/derive.py` | Deterministic interpretation → facets. Pure. |
 | `trouveur/ingest/vocab.py` | **Every** vocabulary, once. |
@@ -200,9 +201,9 @@ so `/v1/boards/` is explicitly permitted. No authentication.
   to the embedder and the reranker.
 - **`location.name` is free text**, and multiple locations arrive semicolon-separated in one string
   (`"Remote, Canada; Remote, US"`). Pass it through unparsed; interpreting it is derivation.
-- **There is no index of tenants anywhere.** The `greenhouse_board` table is the only list of boards
-  that exists. An unknown slug returns 404. The list stays out of git: it reveals who is being
-  watched.
+- **There is no index of tenants anywhere.** `sources/greenhouse/boards.txt` is the only list of
+  boards that exists. An unknown slug returns 404. Verify a slug with one request before adding it,
+  or it fails every day until someone notices.
 - Scope external ids by slug (`gitlab:8503792002`). Nothing documents Greenhouse ids as globally
   unique, and a collision would silently merge two unrelated postings onto one row.
 
@@ -222,6 +223,32 @@ so `/v1/boards/` is explicitly permitted. No authentication.
 - **Parse defensively.** A missing optional field is `None`, not a `KeyError`. A field you cannot
   parse must not discard the whole record.
 
+## Configuration versus observation
+
+A per-tenant source needs a list of tenants, because some publish no index of their own. That list
+is **configuration and lives in the repository** (`sources/<name>/boards.txt`), not in the database
+and not editable in the UI. Three reasons, in order of weight:
+
+1. **It is not per-user.** The corpus is shared, so which companies get crawled is an operator
+   decision. Exposing it per user means one user adding five hundred boards and everyone paying the
+   crawl cost.
+2. **It should be reviewable.** Adding a company is a diff, with the slug verified in the commit
+   that adds it.
+3. **A commit should reproduce its corpus.** With the list in a database, the same code produces
+   different results on two installations and neither is wrong.
+
+What the database keeps is the **observation**: `source_scope_health`, one row per tenant, written
+on every sweep. The distinction is load-bearing and was learned the hard way — the table this
+replaced mixed an editable board list with health columns that nothing ever wrote, so the UI
+reported "last success: —" indefinitely, which reads as "not run yet" rather than "never recorded".
+
+Never put configuration and observation in one table. If a human authors it, it belongs in git; if
+the system produces it, it belongs in Postgres.
+
+Discovering *new* tenants is deliberately not part of the runtime. If it is ever automated, it
+should be a maintenance script that proposes a diff to the registry file for review — never a
+process that writes the crawl set while the pipeline is running.
+
 ## DON'T: robots.txt policy
 
 **Check `robots.txt` before adding any source, and record the finding in the adapter docstring
@@ -239,8 +266,9 @@ The repo is public. Users' career data is not, and must never enter it.
 
 - **Never commit:** `.env`, database dumps, or anything holding a user's objectives, salary
   expectations, employers watched, email address or API key.
-- **Profiles and the board registry live in the database only**, edited through the web UI. There is
-  deliberately no file-based path in or out; do not add one.
+- **Profiles and users' API keys live in the database only**, edited through the web UI. There is
+  deliberately no file-based path in or out for them; do not add one. This does **not** apply to the
+  tenant registry — see below.
 - **Test fixtures are hand-written and synthetic.** Never commit a captured page or a real scraped
   payload — third-party content, repository bloat, and a fixture nobody wrote is a fixture nobody
   understands when it starts failing.

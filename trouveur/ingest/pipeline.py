@@ -75,9 +75,7 @@ async def run(
     settings = settings or get_settings()
     report = IngestReport()
 
-    async with connect() as conn:
-        boards = await admin_q.enabled_greenhouse_boards(conn)
-    sources = build_sources(greenhouse_boards=boards, only=only_source)
+    sources = build_sources(only=only_source)
 
     async with PoliteClient() as client:
         for source in sources:
@@ -125,6 +123,15 @@ async def _sweep_source(
     report.partitions_done = outcome.partitions_done
     report.partitions_overflowed = outcome.partitions_overflowed
     report.complete = outcome.complete
+
+    if outcome.scope_results:
+        async with connect() as conn:
+            await admin_q.record_scope_health(conn, source.name, outcome.scope_results)
+            # Removing a slug from the registry file should also clear its health row, or the
+            # dashboard keeps reporting a tenant nobody crawls any more.
+            await admin_q.prune_scope_health(
+                conn, source.name, [result.scope for result in outcome.scope_results]
+            )
 
     if error is None:
         report.closed = await _apply_lifecycle(source, outcome, started_at, settings)

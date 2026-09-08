@@ -67,9 +67,7 @@ async def drain_queues(settings: Settings) -> dict[str, int]:
     """Work the deferred stages. Bounded per tick so no single kind starves the others."""
     done = {"detail": 0, "derive": 0, "embed": 0, "dedup": 0}
 
-    async with connect() as conn:
-        boards = await admin_q.enabled_greenhouse_boards(conn)
-    sources = {source.name: source for source in build_sources(greenhouse_boards=boards)}
+    sources = {source.name: source for source in build_sources()}
 
     async with PoliteClient() as client:
         async with connect() as conn:

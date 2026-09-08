@@ -10,68 +10,90 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from trouveur.db.schema import (
-    greenhouse_board,
     job,
     pipeline_run,
     pipeline_schedule,
+    source_scope_health,
     source_sweep,
     work_item,
 )
 
 
-async def enabled_greenhouse_boards(conn: AsyncConnection) -> list[str]:
-    rows = await conn.execute(
-        sa.select(greenhouse_board.c.slug)
-        .where(greenhouse_board.c.enabled.is_(True))
-        .order_by(greenhouse_board.c.slug)
+async def record_scope_health(
+    conn: AsyncConnection, source: str, results: Sequence[Any]
+) -> None:
+    """Persist what each tenant did this sweep.
+
+    Called on every sweep, win or lose. Its predecessor was never called at all, so the health
+    columns on the old board table were permanently empty and the page that displayed them showed
+    "last success: —" forever, which reads as "not run yet" rather than "not recorded".
+    """
+    if not results:
+        return
+    rows = [
+        {
+            "source": source,
+            "scope": result.scope,
+            "last_ok_at": (sa.func.now() if result.ok else None),
+            "last_documents": result.documents,
+            "last_error": (result.error or "")[:2000] or None,
+            "consecutive_failures": 0 if result.ok else 1,
+        }
+        for result in results
+    ]
+    stmt = pg_insert(source_scope_health).values(rows)
+    await conn.execute(
+        stmt.on_conflict_do_update(
+            index_elements=[source_scope_health.c.source, source_scope_health.c.scope],
+            set_={
+                # A success resets the streak; a failure extends whatever was already there, so a
+                # slug that has been 404ing for a week is visibly different from one that blipped.
+                "last_ok_at": sa.func.coalesce(
+                    stmt.excluded.last_ok_at, source_scope_health.c.last_ok_at
+                ),
+                "last_documents": stmt.excluded.last_documents,
+                "last_error": stmt.excluded.last_error,
+                "consecutive_failures": sa.case(
+                    (stmt.excluded.consecutive_failures == 0, 0),
+                    else_=source_scope_health.c.consecutive_failures + 1,
+                ),
+                "updated_at": sa.func.now(),
+            },
+        )
     )
-    return [row.slug for row in rows]
 
 
-async def list_greenhouse_boards(conn: AsyncConnection) -> list[sa.Row]:
+async def scope_health(conn: AsyncConnection, failing_only: bool = False) -> list[sa.Row]:
+    """Per-tenant health, worst first.
+
+    A tenant that has been failing for days is a line to remove from the registry file in the
+    repository, so this is the panel that drives an actual code change rather than a UI edit.
+    """
+    stmt = source_scope_health.select()
+    if failing_only:
+        stmt = stmt.where(source_scope_health.c.consecutive_failures > 0)
     return list(
-        await conn.execute(greenhouse_board.select().order_by(greenhouse_board.c.slug))
+        await conn.execute(
+            stmt.order_by(
+                source_scope_health.c.consecutive_failures.desc(),
+                source_scope_health.c.source,
+                source_scope_health.c.scope,
+            )
+        )
     )
 
 
-async def add_greenhouse_boards(conn: AsyncConnection, slugs: Sequence[str]) -> int:
-    if not slugs:
-        return 0
-    stmt = pg_insert(greenhouse_board).values([{"slug": slug} for slug in slugs])
+async def prune_scope_health(
+    conn: AsyncConnection, source: str, known_scopes: Sequence[str]
+) -> int:
+    """Forget tenants no longer in the registry, so removing a line also clears its health row."""
     result = await conn.execute(
-        stmt.on_conflict_do_nothing(index_elements=[greenhouse_board.c.slug])
+        source_scope_health.delete().where(
+            source_scope_health.c.source == source,
+            source_scope_health.c.scope.notin_(list(known_scopes)),
+        )
     )
     return result.rowcount or 0
-
-
-async def set_greenhouse_board_enabled(
-    conn: AsyncConnection, slug: str, enabled: bool
-) -> None:
-    await conn.execute(
-        greenhouse_board.update()
-        .where(greenhouse_board.c.slug == slug)
-        .values(enabled=enabled)
-    )
-
-
-async def delete_greenhouse_board(conn: AsyncConnection, slug: str) -> None:
-    await conn.execute(greenhouse_board.delete().where(greenhouse_board.c.slug == slug))
-
-
-async def record_board_result(
-    conn: AsyncConnection, slug: str, *, ok: bool, error: str | None = None
-) -> None:
-    values: dict[str, Any] = (
-        {"last_ok_at": sa.func.now(), "last_error": None, "consecutive_failures": 0}
-        if ok
-        else {
-            "last_error": (error or "")[:2000],
-            "consecutive_failures": greenhouse_board.c.consecutive_failures + 1,
-        }
-    )
-    await conn.execute(
-        greenhouse_board.update().where(greenhouse_board.c.slug == slug).values(**values)
-    )
 
 
 async def recent_sweeps(conn: AsyncConnection, limit: int = 20) -> list[sa.Row]:

@@ -79,6 +79,34 @@
   </section>
 
   <section class="card">
+    <div class="card-head"><h2>Tenant health</h2></div>
+    <p class="hint">
+      Which companies are crawled is configuration and lives in the repository, not here —
+      <code>trouveur/sources/&lt;source&gt;/boards.txt</code>. This panel says what answered.
+      A tenant failing for several days is a line to delete from that file, in a reviewed commit.
+    </p>
+    {% if scopes %}
+    <table>
+      <tr><th>Source</th><th>Tenant</th><th class="num">Postings</th><th>Last success</th><th class="num">Failures</th></tr>
+      {% for row in scopes %}
+      <tr>
+        <td>{{ row.source }}</td>
+        <td><code>{{ row.scope }}</code></td>
+        <td class="num">{{ '{:,}'.format(row.last_documents) }}</td>
+        <td>{{ row.last_ok_at.strftime('%Y-%m-%d %H:%M') if row.last_ok_at else 'never' }}</td>
+        <td class="num">
+          {% if row.consecutive_failures %}
+            <span class="pill bad">{{ row.consecutive_failures }}</span>
+          {% else %}0{% endif %}
+        </td>
+      </tr>
+      {% if row.last_error %}<tr><td colspan="5" class="hint">{{ row.last_error }}</td></tr>{% endif %}
+      {% endfor %}
+    </table>
+    {% else %}<p class="empty">No tenant-scoped source has run yet.</p>{% endif %}
+  </section>
+
+  <section class="card">
     <div class="card-head"><h2>Open postings by country</h2></div>
     {% if countries %}
     <table>

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import httpx
+import pytest
 
 from trouveur.sources.greenhouse import GreenhouseSource, external_id, normalize
 
@@ -22,6 +23,42 @@ class StubClient:
 
 def _url(slug: str) -> str:
     return f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs"
+
+
+def test_the_board_registry_is_valid_and_non_empty():
+    """A malformed slug in boards.txt must fail loudly, not 404 every day in silence."""
+    from trouveur.sources.greenhouse.client import BOARDS_FILE
+    from trouveur.sources.scopes import load_scopes
+
+    boards = load_scopes(BOARDS_FILE)
+    assert boards, "boards.txt is empty, so Greenhouse contributes nothing"
+    assert len(boards) == len(set(boards)), "duplicate slugs double the requests to a tenant"
+
+
+def test_a_source_reads_its_own_registry():
+    """Nothing upstream should need to know that this source is tenant-scoped."""
+    from trouveur.sources import build_sources
+
+    greenhouse_source = next(s for s in build_sources() if s.name == "greenhouse")
+    assert greenhouse_source.boards
+
+
+def test_malformed_slugs_are_rejected_at_load(tmp_path):
+    from trouveur.sources.errors import SourceError
+    from trouveur.sources.scopes import load_scopes
+
+    path = tmp_path / "boards.txt"
+    path.write_text("good-slug\n# a comment\n\nhttps://example.com/oops\n")
+    with pytest.raises(SourceError, match="not valid slugs"):
+        load_scopes(path)
+
+
+def test_comments_and_blank_lines_are_ignored(tmp_path):
+    from trouveur.sources.scopes import load_scopes
+
+    path = tmp_path / "boards.txt"
+    path.write_text("# header\n\nalpha  # trailing\nbeta\nalpha\n")
+    assert load_scopes(path) == ["alpha", "beta"]
 
 
 def test_external_id_is_scoped_by_board():
@@ -64,6 +101,8 @@ async def test_sweep_marks_each_fetched_board_closable(gh_board):
     assert outcome.closable_scopes == ["beispiel"]
     assert outcome.complete is True
     assert all(doc.scope == "beispiel" for batch in batches for doc in batch)
+    # Recorded per tenant so the dashboard can show which board answered.
+    assert [(r.scope, r.ok, r.documents) for r in outcome.scope_results] == [("beispiel", True, 2)]
 
 
 async def test_a_failing_board_is_never_closable(gh_board):
@@ -83,6 +122,9 @@ async def test_a_failing_board_is_never_closable(gh_board):
     assert outcome.errors and "gone" in outcome.errors[0]
     assert outcome.partitions_done == 1
     assert outcome.partitions_total == 2
+    failed = {r.scope: r for r in outcome.scope_results}
+    assert failed["gone"].ok is False
+    assert failed["good"].ok is True
 
 
 async def _collect(sink: list, documents) -> None:

@@ -334,62 +334,6 @@ async def settings_delete_key(request: Request):
     return RedirectResponse("/settings?deleted=1", status_code=303)
 
 
-@app.get("/companies", response_class=HTMLResponse)
-async def companies(request: Request, added: int = 0, rejected: str = ""):
-    session = _session(request)
-    if not session:
-        return _login_redirect()
-    async with connect() as conn:
-        boards = await admin_q.list_greenhouse_boards(conn)
-    return templates.TemplateResponse(
-        request,
-        "companies.html",
-        {
-            "active": "companies",
-            "boards": boards,
-            "added": added,
-            "rejected": rejected,
-            "username": session["u"],
-        },
-    )
-
-
-@app.post("/companies")
-async def companies_add(request: Request, slugs: str = Form("")):
-    session = _session(request)
-    if not session:
-        return _login_redirect()
-    candidates = [
-        slug.lower() for slug in _lines(slugs.replace(",", "\n")) if slug.replace("-", "").isalnum()
-    ]
-    rejected = [slug for slug in _lines(slugs.replace(",", "\n")) if slug.lower() not in candidates]
-    async with connect() as conn:
-        added = await admin_q.add_greenhouse_boards(conn, candidates)
-    return RedirectResponse(
-        f"/companies?added={added}&rejected={','.join(rejected)}", status_code=303
-    )
-
-
-@app.post("/companies/{slug}/toggle")
-async def companies_toggle(request: Request, slug: str, enabled: bool = Form(False)):
-    session = _session(request)
-    if not session:
-        return _login_redirect()
-    async with connect() as conn:
-        await admin_q.set_greenhouse_board_enabled(conn, slug, enabled)
-    return RedirectResponse("/companies", status_code=303)
-
-
-@app.post("/companies/{slug}/delete")
-async def companies_delete(request: Request, slug: str):
-    session = _session(request)
-    if not session:
-        return _login_redirect()
-    async with connect() as conn:
-        await admin_q.delete_greenhouse_board(conn, slug)
-    return RedirectResponse("/companies", status_code=303)
-
-
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard(request: Request):
     session = _session(request)
@@ -401,6 +345,7 @@ async def dashboard(request: Request):
         health = await admin_q.source_health(conn)
         queues = await admin_q.queue_depth(conn)
         countries = await admin_q.facet_breakdown(conn)
+        scopes = await admin_q.scope_health(conn)
         stats = await match_q.match_stats(conn, session["uid"])
         spend = await users_q.month_spend(conn, session["uid"])
     return templates.TemplateResponse(
@@ -413,6 +358,7 @@ async def dashboard(request: Request):
             "health": health,
             "queues": queues,
             "countries": countries,
+            "scopes": scopes,
             "stats": stats,
             "spend": spend,
             "sources": sorted(NORMALIZERS),

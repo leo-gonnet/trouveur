@@ -35,17 +35,17 @@ def normalizer_for(source: str) -> tuple[NormalizeFn, int]:
         ) from None
 
 
-def build_sources(
-    *, greenhouse_boards: list[str] | None = None, only: str | None = None
-) -> list[Source]:
+def build_sources(*, only: str | None = None) -> list[Source]:
     """Assemble the sources for a run.
 
-    Sources take their configuration as arguments and never read the database, so a sweep can be
-    exercised against a stub transport with no Postgres anywhere in the test.
+    Sources read their own configuration from the repository and never touch the database, so a
+    sweep can be exercised against a stub transport with no Postgres anywhere in the test, and the
+    corpus a given commit produces is reproducible from that commit.
     """
-    sources: list[Source] = [arbeitsagentur.ArbeitsagenturSource()]
-    if greenhouse_boards:
-        sources.append(greenhouse.GreenhouseSource(boards=greenhouse_boards))
+    sources: list[Source] = [
+        arbeitsagentur.ArbeitsagenturSource(),
+        greenhouse.GreenhouseSource(),
+    ]
 
     if only:
         sources = [source for source in sources if source.name == only]

@@ -248,17 +248,25 @@ def upgrade() -> None:
     )
     op.execute("CREATE INDEX source_sweep_recent_idx ON source_sweep (source, started_at DESC)")
 
+    # Health only. Which tenants are swept is configuration and lives in the repository, so
+    # nothing here decides what gets crawled -- it records what answered when we asked.
     op.execute(
         """
-        CREATE TABLE greenhouse_board (
-            slug                 text PRIMARY KEY,
-            enabled              boolean NOT NULL DEFAULT true,
-            added_at             timestamptz NOT NULL DEFAULT now(),
+        CREATE TABLE source_scope_health (
+            source               text NOT NULL,
+            scope                text NOT NULL,
             last_ok_at           timestamptz,
+            last_documents       integer NOT NULL DEFAULT 0,
             last_error           text,
-            consecutive_failures integer NOT NULL DEFAULT 0
+            consecutive_failures integer NOT NULL DEFAULT 0,
+            updated_at           timestamptz NOT NULL DEFAULT now(),
+            PRIMARY KEY (source, scope)
         )
         """
+    )
+    op.execute(
+        "CREATE INDEX source_scope_health_failing_idx ON source_scope_health (source, scope) "
+        "WHERE consecutive_failures > 0"
     )
 
     op.execute(

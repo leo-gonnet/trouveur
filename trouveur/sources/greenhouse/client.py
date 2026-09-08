@@ -9,24 +9,29 @@ two were chosen together:
   - one request returns a tenant's COMPLETE live board, with `meta.total` and no pagination, so
     the response is itself the seen-set and closing is exact rather than inferred;
   - `?content=true` includes the full description, so there is no detail phase at all;
-  - there is no index of tenants anywhere, so the board registry in the database is the only list
-    of boards that exists. An unknown slug returns HTTP 404.
+  - there is no index of tenants anywhere, so boards.txt beside this module is the only list of
+    boards that exists. An unknown slug returns HTTP 404.
 """
 
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 from trouveur.models import DocumentKind, RawDocument
-from trouveur.sources.base import DocumentSink, SweepOutcome
+from trouveur.sources.base import DocumentSink, ScopeResult, SweepOutcome
 from trouveur.sources.errors import FetchError
 from trouveur.sources.http import PoliteClient
+from trouveur.sources.scopes import load_scopes
 
 log = logging.getLogger(__name__)
 
 SOURCE = "greenhouse"
 
 _BOARD_URL = "https://boards-api.greenhouse.io/v1/boards/{slug}/jobs"
+
+# Configuration, in the repository and under review. See trouveur/sources/scopes.py.
+BOARDS_FILE = Path(__file__).with_name("boards.txt")
 
 # A board's jobs are handed to the sink in batches rather than as one 3-4MB list, so a large
 # tenant does not turn into a single oversized transaction.
@@ -47,9 +52,10 @@ class GreenhouseSource:
     # The listing already carries the description, so no second request is ever needed.
     requires_detail = False
 
-    def __init__(self, boards: list[str]) -> None:
-        # Only ever sees the boards stored in the database; there is no global tenant index.
-        self.boards = boards
+    def __init__(self, boards: list[str] | None = None) -> None:
+        # Reads its own registry rather than being handed one, so nothing upstream needs to know
+        # that this source is tenant-scoped at all. The argument exists for tests.
+        self.boards = boards if boards is not None else load_scopes(BOARDS_FILE)
 
     async def sweep(
         self, client: PoliteClient, sink: DocumentSink, *, backfill: bool = False
@@ -62,10 +68,14 @@ class GreenhouseSource:
                 seen = await self._sweep_board(client, sink, slug, outcome)
             except FetchError as exc:
                 outcome.errors.append(f"board={slug}: {exc}")
+                outcome.scope_results.append(
+                    ScopeResult(scope=slug, ok=False, error=str(exc))
+                )
                 log.warning("greenhouse: board %s failed: %s", slug, exc)
                 continue
             outcome.documents += seen
             outcome.partitions_done += 1
+            outcome.scope_results.append(ScopeResult(scope=slug, ok=True, documents=seen))
             # Recorded per board, not per source: one tenant's board failing tells us nothing
             # about another's, and closing a whole source on a partial sweep would retire every
             # posting belonging to the boards that did not answer.

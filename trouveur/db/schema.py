@@ -175,19 +175,21 @@ source_sweep = sa.Table(
     sa.Column("error", sa.Text),
 )
 
-# Greenhouse publishes no index of boards, so this is the only list of tenants we can sweep.
-# Its own table rather than a profile column: adding a company must not bump anyone's profile
-# version, which would invalidate every cached score and bill every user for a re-score.
-greenhouse_board = sa.Table(
-    "greenhouse_board",
+# Observation, not configuration. Which tenants exist is decided in the repository (see
+# trouveur/sources/scopes.py); this records only what happened when we asked them. Keeping the two
+# apart is why this table is written on every sweep, whereas its predecessor mixed an editable
+# board list with health columns that nothing ever filled in.
+source_scope_health = sa.Table(
+    "source_scope_health",
     metadata,
-    sa.Column("slug", sa.Text, primary_key=True),
-    sa.Column("enabled", sa.Boolean, nullable=False, server_default="true"),
-    sa.Column("added_at", sa.DateTime(timezone=True), nullable=False,
-              server_default=sa.func.now()),
+    sa.Column("source", sa.Text, primary_key=True),
+    sa.Column("scope", sa.Text, primary_key=True),
     sa.Column("last_ok_at", sa.DateTime(timezone=True)),
+    sa.Column("last_documents", sa.Integer, nullable=False, server_default="0"),
     sa.Column("last_error", sa.Text),
     sa.Column("consecutive_failures", sa.Integer, nullable=False, server_default="0"),
+    sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False,
+              server_default=sa.func.now()),
 )
 
 app_user = sa.Table(
