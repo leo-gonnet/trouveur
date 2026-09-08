@@ -76,8 +76,15 @@ def drain(rounds: int) -> None:
     from trouveur.runner import drain_queues
 
     settings = get_settings()
-    for _ in range(max(rounds, 1)):
-        click.echo(str(asyncio.run(drain_queues(settings))))
+
+    async def _run() -> None:
+        # All rounds inside one event loop. The database engine is a singleton whose pool binds to
+        # the loop that created it, so a second asyncio.run() would reuse a pool attached to a
+        # loop that has already closed.
+        for _ in range(max(rounds, 1)):
+            click.echo(str(await drain_queues(settings)))
+
+    asyncio.run(_run())
 
 
 @main.command()
