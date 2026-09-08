@@ -73,11 +73,11 @@ def match(user_id: int | None) -> None:
 @click.option("--rounds", default=1, show_default=True, help="How many drain passes to make.")
 def drain(rounds: int) -> None:
     """Work the deferred queues once: detail fetches, derivation, dedupe markers, embeddings."""
-    from trouveur.runner.service import _drain_queues
+    from trouveur.runner import drain_queues
 
     settings = get_settings()
     for _ in range(max(rounds, 1)):
-        click.echo(str(asyncio.run(_drain_queues(settings))))
+        click.echo(str(asyncio.run(drain_queues(settings))))
 
 
 @main.command()

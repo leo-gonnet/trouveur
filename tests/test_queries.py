@@ -109,3 +109,56 @@ def test_empty_profile_filters_match_everything():
 
     for field in ("countries", "work_modes", "seniorities", "employment_types"):
         assert f"cardinality(CAST(:{field} AS text[])) = 0" in _HARD_FILTERS
+
+
+def test_no_query_bundles_two_statements():
+    """asyncpg runs parameterised queries as prepared statements, which reject multiple commands.
+
+    Prepending `SET LOCAL hnsw.ef_search = ...;` to the dense SELECT is the natural way to write
+    it and fails at runtime, only ever against a real database — so it is asserted here, where
+    the suite has none.
+    """
+    from trouveur.db.queries import jobs, match
+
+    statements = {
+        "dense": match._DENSE_SQL,
+        "ef_search": match._EF_SEARCH_SQL,
+        "lexical": match._LEXICAL_SQL,
+        "search": match._SEARCH_SQL,
+        "write_embeddings": jobs._WRITE_EMBEDDINGS,
+    }
+    for name, sql in statements.items():
+        assert ";" not in sql.strip().rstrip(";"), f"{name} bundles more than one statement"
+
+
+def test_parameters_carry_explicit_types_where_context_cannot_infer_them():
+    """asyncpg infers a parameter's type from its position and cannot always do so.
+
+    A bare placeholder compared against a literal, or used to build an ARRAY, raises
+    "could not determine data type of parameter" at runtime rather than at import.
+    """
+    from trouveur.db.queries.match import _HARD_FILTERS, _SEARCH_SQL
+
+    assert "CAST(:min_salary AS numeric)" in _HARD_FILTERS
+    for cast in (
+        "CAST(:query AS text)",
+        "CAST(:country AS text)",
+        "CAST(:work_mode AS text)",
+        "CAST(:include_closed AS boolean)",
+    ):
+        assert cast in _SEARCH_SQL
+
+
+def test_array_parameters_are_cast_in_raw_sql():
+    """`ANY(:param)` raises "could not determine data type of parameter" on asyncpg.
+
+    Scanned rather than spot-checked, so a new query cannot reintroduce it.
+    """
+    import pathlib
+    import re
+
+    offenders = []
+    for path in pathlib.Path("trouveur/db/queries").glob("*.py"):
+        for match in re.finditer(r"ANY\(:\w+\)", path.read_text()):
+            offenders.append(f"{path.name}: {match.group(0)}")
+    assert not offenders, f"uncast array parameters: {offenders}"

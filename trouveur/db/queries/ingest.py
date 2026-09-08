@@ -213,7 +213,10 @@ async def close_unseen(
     """
     if not scopes:
         return 0
-    sql = _CLOSE_SQL.format(cutoff=":cutoff", scope_clause="AND scope = ANY(:scopes)")
+    sql = _CLOSE_SQL.format(
+        cutoff="CAST(:cutoff AS timestamptz)",
+        scope_clause="AND scope = ANY(CAST(:scopes AS text[]))",
+    )
     result = await conn.execute(
         sa.text(sql),
         {"source": source, "cutoff": sweep_started_at, "scopes": list(scopes)},
@@ -230,7 +233,7 @@ async def close_stale(conn: AsyncConnection, source: str, older_than: timedelta)
     window generous. The principled replacement is a full partitioned sweep or per-posting
     liveness probing, neither of which is built.
     """
-    sql = _CLOSE_SQL.format(cutoff="now() - :age", scope_clause="")
+    sql = _CLOSE_SQL.format(cutoff="now() - CAST(:age AS interval)", scope_clause="")
     result = await conn.execute(sa.text(sql), {"source": source, "age": older_than})
     return int(result.scalar_one() or 0)
 
@@ -248,7 +251,7 @@ async def close_retired(conn: AsyncConnection, job_ids: Sequence[int]) -> int:
             """
             WITH closed AS (
                 UPDATE job SET closed_at = now()
-                WHERE id = ANY(:ids) AND closed_at IS NULL
+                WHERE id = ANY(CAST(:ids AS bigint[])) AND closed_at IS NULL
                 RETURNING id
             ), dropped AS (
                 DELETE FROM job_embedding WHERE job_id IN (SELECT id FROM closed)

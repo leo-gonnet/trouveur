@@ -63,7 +63,7 @@ async def _maybe_enqueue_scheduled(conn) -> None:
         log.info("queued scheduled run %s", run_id)
 
 
-async def _drain_queues(settings: Settings) -> dict[str, int]:
+async def drain_queues(settings: Settings) -> dict[str, int]:
     """Work the deferred stages. Bounded per tick so no single kind starves the others."""
     done = {"detail": 0, "derive": 0, "embed": 0, "dedup": 0}
 
@@ -126,7 +126,7 @@ async def _tick(settings: Settings) -> None:
         await release_stale(conn)
         await _maybe_enqueue_scheduled(conn)
 
-    drained = await _drain_queues(settings)
+    drained = await drain_queues(settings)
     if any(drained.values()):
         log.info("queues drained: %s", drained)
 

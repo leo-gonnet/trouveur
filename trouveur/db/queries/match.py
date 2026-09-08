@@ -29,14 +29,18 @@ _HARD_FILTERS = """
     AND (cardinality(CAST(:employment_types AS text[])) = 0
          OR f.employment_type::text = ANY(CAST(:employment_types AS text[])))
     AND (
-        :min_salary <= 0
+        CAST(:min_salary AS numeric) <= 0
         OR f.salary_max_eur_year IS NULL
-        OR f.salary_max_eur_year >= :min_salary
+        OR f.salary_max_eur_year >= CAST(:min_salary AS numeric)
     )
 """
 
-_DENSE_SQL = f"""
-SET LOCAL hnsw.ef_search = {_EF_SEARCH};
+# Issued on its own. asyncpg runs parameterised queries as prepared statements, which reject
+# multiple commands, so this cannot be prepended to the SELECT below. It needs a transaction to
+# have any effect, which db.engine.connect() always provides.
+_EF_SEARCH_SQL = f"SET LOCAL hnsw.ef_search = {_EF_SEARCH}"
+
+_DENSE_SQL = """
 SELECT j.id AS job_id
 FROM job_embedding e
 JOIN job j ON j.id = e.job_id
@@ -84,6 +88,7 @@ async def dense_candidates(
         "vector": "[" + ",".join(f"{value:.6f}" for value in vector) + "]",
         "limit": limit * _DENSE_OVERSAMPLE,
     }
+    await conn.execute(sa.text(_EF_SEARCH_SQL))
     rows = await conn.execute(sa.text(_DENSE_SQL), params)
     return [row.job_id for row in rows][:limit]
 
@@ -328,13 +333,13 @@ SELECT j.id, j.public_id, j.url, j.title, j.company, j.posted_at, j.source, j.cl
 FROM job j
 LEFT JOIN job_facet f ON f.job_id = j.id
 LEFT JOIN user_job_match m ON m.job_id = j.id AND m.user_id = :user_id
-WHERE (:query = '' OR j.search_de @@ websearch_to_tsquery('german', :query)
+WHERE (CAST(:query AS text) = '' OR j.search_de @@ websearch_to_tsquery('german', :query)
        OR j.search_fold LIKE '%' || lower(f_unaccent(:query)) || '%')
-  AND (:country = '' OR f.countries @> ARRAY[:country])
-  AND (:work_mode = '' OR f.work_mode::text = :work_mode)
-  AND (:include_closed OR j.closed_at IS NULL)
+  AND (CAST(:country AS text) = '' OR f.countries @> ARRAY[CAST(:country AS text)])
+  AND (CAST(:work_mode AS text) = '' OR f.work_mode::text = CAST(:work_mode AS text))
+  AND (CAST(:include_closed AS boolean) OR j.closed_at IS NULL)
 ORDER BY
-    CASE WHEN :query = '' THEN 0
+    CASE WHEN CAST(:query AS text) = '' THEN 0
          ELSE ts_rank_cd(j.search_de, websearch_to_tsquery('german', :query)) END DESC,
     j.posted_at DESC NULLS LAST
 LIMIT :limit OFFSET :offset
