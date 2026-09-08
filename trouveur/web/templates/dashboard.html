@@ -1,217 +1,103 @@
-{% extends "base.html" %}
-{% set active = 'dashboard' %}
-{% block title %}Dashboard — Trouveur{% endblock %}
+{% extends "base.html" %}{% block title %}Dashboard · Trouveur{% endblock %}
 {% block content %}
-<div class="page-head">
-  <h1>Dashboard</h1>
-  {% if overview.first_ever %}
-    <span class="sub">tracking since {{ overview.first_ever.strftime('%Y-%m-%d') }}
-      &middot; {{ overview.companies }} distinct companies</span>
-  {% endif %}
-</div>
+<div class="page-head"><h1>Dashboard</h1></div>
 
 <div class="kpis">
-  <div class="kpi">
-    <div class="label">Total scraped</div>
-    <div class="value">{{ overview.total }}</div>
-    <div class="foot">across all sources</div>
-  </div>
-  <div class="kpi">
-    <div class="label">Last 24h</div>
-    <div class="value">{{ overview.last_24h }}</div>
-    <div class="foot">new postings found</div>
-  </div>
-  <div class="kpi">
-    <div class="label">Passed rules</div>
-    <div class="value">{{ overview.passed_rules }}</div>
-    <div class="foot">{{ (100 * overview.passed_rules / overview.total)|round|int if overview.total else 0 }}% of scraped</div>
-  </div>
-  <div class="kpi">
-    <div class="label">Scored</div>
-    <div class="value">{{ overview.scored }}</div>
-    <div class="foot">{{ (100 * overview.scored / overview.passed_rules)|round|int if overview.passed_rules else 0 }}% of rules survivors</div>
-  </div>
-  <div class="kpi">
-    <div class="label">Recommended</div>
-    <div class="value" style="color:var(--good)">{{ overview.recommended }}</div>
-    <div class="foot"><a href="/recommendations">view &rarr;</a></div>
-  </div>
+  <div class="kpi"><span class="num">{{ '{:,}'.format(overview.open) }}</span><span>open postings</span></div>
+  <div class="kpi"><span class="num">{{ '{:,}'.format(overview.total) }}</span><span>ever collected</span></div>
+  <div class="kpi"><span class="num">{{ '{:,}'.format(overview.new_today) }}</span><span>new today</span></div>
+  <div class="kpi"><span class="num">{{ '{:,}'.format(overview.companies) }}</span><span>companies</span></div>
+  <div class="kpi"><span class="num">${{ '%.2f' % (spend.cost_usd if spend else 0) }}</span><span>your spend, this month</span></div>
 </div>
 
-<div class="card">
-  <div class="card-head">
-    <h2>Database growth</h2>
-    <span class="hint">new postings per day, by source, last {{ chart.columns|length }} days</span>
-  </div>
-  {% if chart.columns and chart.max_total > 1 %}
-    <div class="chart">
-      {% for col in chart.columns %}
-        <div class="col" title="{{ col.label }}: {{ col.total }} new job{{ '' if col.total == 1 else 's' }}">
-          {% for src in chart.sources %}
-            {% set n = col.counts[src] %}
-            {% if n > 0 %}
-              <div class="seg" style="height:{{ (n / chart.max_total * 100)|round(1) }}%;
-                                       background:{{ chart.colors[src] }}"></div>
-            {% endif %}
-          {% endfor %}
-        </div>
-      {% endfor %}
-    </div>
-    <div class="chart-x">
-      {% for col in chart.columns %}
-        <span>{% if loop.index0 % 3 == 0 %}{{ col.label }}{% endif %}</span>
-      {% endfor %}
-    </div>
-    <div class="legend">
-      {% for src in chart.sources %}
-        <div class="item"><span class="swatch" style="background:{{ chart.colors[src] }}"></span>{{ src }}</div>
-      {% endfor %}
-    </div>
-  {% else %}
-    <p class="hint">Not enough history yet — check back after a few daily runs.</p>
-  {% endif %}
-</div>
-
-<div class="grid cols-2">
-  <div class="card">
-    <div class="card-head">
-      <h2>Source quality</h2>
-      <span class="hint">match rate = recommended &divide; scraped</span>
-    </div>
-    {% if sources %}
-      <table>
-        <thead><tr>
-          <th>Source</th><th class="num">Scraped</th><th class="num">Passed</th>
-          <th class="num">Scored</th><th class="num">Recommended</th><th>Match rate</th>
-        </tr></thead>
-        <tbody>
-        {% for s in sources %}
-          <tr>
-            <td>{{ s.source }}
-              {% set h = health.get(s.source) %}
-              {% if h and h.last_error %}<span class="pill bad" title="{{ h.last_error }}">error</span>
-              {% elif not h %}<span class="pill warn">never run</span>
-              {% else %}<span class="pill ok">healthy</span>{% endif %}
-            </td>
-            <td class="num">{{ s.scraped }}</td>
-            <td class="num">{{ s.passed_rules }}</td>
-            <td class="num">{{ s.scored }}</td>
-            <td class="num">{{ s.recommended }}</td>
-            <td>
-              {% set rate = (100 * s.recommended / s.scraped)|round|int if s.scraped else 0 %}
-              <div style="display:flex;align-items:center;gap:8px">
-                <div class="bar-track"><div class="bar-fill" style="width:{{ rate }}%"></div></div>
-                <span class="hint">{{ rate }}%</span>
-              </div>
-            </td>
-          </tr>
-        {% endfor %}
-        </tbody>
-      </table>
-    {% else %}
-      <p class="hint">No sources have run yet.</p>
-    {% endif %}
-  </div>
-
-  <div class="card">
-    <div class="card-head">
-      <h2>Source health</h2>
-      <span class="hint">last pipeline run per source</span>
-    </div>
+<div class="grid">
+  <section class="card">
+    <div class="card-head"><h2>Source health</h2></div>
+    <p class="hint">
+      A sweep can succeed and still not have seen everything. <em>Complete</em> means it observed a
+      source's whole live set, which is the only basis on which a posting may be retired.
+      <em>Overflowed</em> counts partitions holding more results than the API will page through —
+      those postings were never fetched, and the count is the only place that shows it.
+    </p>
     {% if health %}
-      <table>
-        <thead><tr><th>Source</th><th>Last run</th><th class="num">Jobs seen</th><th>Status</th></tr></thead>
-        <tbody>
-        {% for name, h in health.items() %}
-          <tr>
-            <td>{{ name }}</td>
-            <td class="hint">{{ h.last_run_at.strftime('%Y-%m-%d %H:%M') if h.last_run_at else '—' }}</td>
-            <td class="num">{{ h.jobs_seen }}</td>
-            <td>
-              {% if h.last_error %}<span class="pill bad" title="{{ h.last_error }}">failing</span>
-              {% else %}<span class="pill ok">ok</span>{% endif %}
-            </td>
-          </tr>
-        {% endfor %}
-        </tbody>
-      </table>
-    {% else %}
-      <p class="hint">No run recorded yet. Run <code>trouveur run</code> once to populate this.</p>
-    {% endif %}
-  </div>
-</div>
-
-<div class="card">
-  <div class="card-head">
-    <h2>Best matching-rate sources</h2>
-    <span class="hint">recommended &divide; scraped &middot; sources with under 5 jobs are excluded</span>
-  </div>
-  {% if best_sources %}
     <table>
-      <tbody>
-      {% for s in best_sources %}
-        <tr>
-          <td style="width:2em" class="hint">{{ loop.index }}</td>
-          <td>{{ s.source }}{% if loop.first and s.rate > 0 %}
-            <span class="pill ok" style="margin-left:6px">top</span>{% endif %}</td>
-          <td style="width:45%">
-            <div style="display:flex;align-items:center;gap:8px">
-              <div class="bar-track">
-                <div class="bar-fill" style="width:{{ (s.rate * 100)|round(1) }}%;
-                  {% if loop.first and s.rate > 0 %}background:var(--good){% endif %}"></div>
-              </div>
-              <span class="hint" style="min-width:3.5em;text-align:right">
-                {{ (s.rate * 100)|round(1) }}%</span>
-            </div>
-          </td>
-          <td class="num hint">{{ s.recommended }}/{{ s.scraped }}</td>
-        </tr>
+      <tr><th>Source</th><th>Last run</th><th>Documents</th><th>Partitions</th><th>Overflowed</th><th>Complete</th><th>Status</th></tr>
+      {% for row in health %}
+      <tr>
+        <td>{{ row.source }}</td>
+        <td>{{ row.started_at.strftime('%Y-%m-%d %H:%M') }}</td>
+        <td class="num">{{ '{:,}'.format(row.documents_seen) }}</td>
+        <td class="num">{{ row.partitions_done }}/{{ row.partitions_total }}</td>
+        <td class="num">{% if row.partitions_overflowed %}<span class="pill bad">{{ row.partitions_overflowed }}</span>{% else %}0{% endif %}</td>
+        <td>{% if row.complete %}<span class="pill good">yes</span>{% else %}<span class="pill">delta</span>{% endif %}</td>
+        <td>{% if row.ok %}<span class="pill good">ok</span>{% else %}<span class="pill bad">failed</span>{% endif %}</td>
+      </tr>
+      {% if row.error %}<tr><td colspan="7" class="hint">{{ row.error }}</td></tr>{% endif %}
       {% endfor %}
-      </tbody>
     </table>
-  {% else %}
-    <p class="hint">Not enough volume per source yet to rank match rates.</p>
-  {% endif %}
-</div>
+    {% else %}<p class="empty">No sweep has run yet.</p>{% endif %}
+    {% set seen = health | map(attribute='source') | list %}
+    {% for name in sources if name not in seen %}
+      <p class="notice warn">Source <code>{{ name }}</code> is configured but has never run.</p>
+    {% endfor %}
+  </section>
 
-<div class="grid cols-2">
-  <div class="card">
-    <div class="card-head"><h2>By country</h2></div>
+  <section class="card">
+    <div class="card-head"><h2>Derived coverage</h2></div>
+    <p class="hint">A posting can be stored and searchable but still invisible to recommendations
+      until its facets and embedding land. This is that gap, rather than it looking like poor recall.</p>
+    <table>
+      <tr><td>Open postings</td><td class="num">{{ '{:,}'.format(coverage.open_jobs) }}</td></tr>
+      <tr><td>With facets derived</td><td class="num">{{ '{:,}'.format(coverage.derived) }}</td></tr>
+      <tr><td>With embeddings</td><td class="num">{{ '{:,}'.format(coverage.embedded) }}</td></tr>
+      <tr>
+        <td>Vector spaces in use</td>
+        <td class="num">
+          {% if coverage.vector_spaces > 1 %}
+            <span class="pill bad">{{ coverage.vector_spaces }}</span>
+          {% else %}{{ coverage.vector_spaces }}{% endif %}
+        </td>
+      </tr>
+    </table>
+    {% if coverage.vector_spaces > 1 %}
+      <p class="notice danger">More than one embedding version is present. Similarity across
+        different vector spaces returns confident nonsense — refill the embed queue to converge.</p>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <div class="card-head"><h2>Work queues</h2></div>
+    {% if queues %}
+    <table>
+      <tr><th>Kind</th><th class="num">Pending</th><th>Oldest</th></tr>
+      {% for row in queues %}
+        <tr><td>{{ row.kind }}</td><td class="num">{{ '{:,}'.format(row.total) }}</td>
+            <td>{{ row.oldest.strftime('%Y-%m-%d %H:%M') if row.oldest else '—' }}</td></tr>
+      {% endfor %}
+    </table>
+    {% else %}<p class="empty">All queues drained.</p>{% endif %}
+  </section>
+
+  <section class="card">
+    <div class="card-head"><h2>Open postings by country</h2></div>
     {% if countries %}
-      <table>
-        <tbody>
-        {% for c in countries %}
-          <tr>
-            <td>{{ c.country }}</td>
-            <td>
-              <div style="display:flex;align-items:center;gap:8px">
-                <div class="bar-track"><div class="bar-fill"
-                  style="width:{{ (100 * c.n / countries[0].n)|round|int }}%"></div></div>
-                <span class="hint num" style="min-width:2.4em;text-align:right">{{ c.n }}</span>
-              </div>
-            </td>
-          </tr>
-        {% endfor %}
-        </tbody>
-      </table>
-    {% else %}
-      <p class="hint">No data yet.</p>
-    {% endif %}
-  </div>
+    <table>
+      {% for row in countries %}
+        <tr><td>{{ row.country }}</td><td class="num">{{ '{:,}'.format(row.jobs) }}</td></tr>
+      {% endfor %}
+    </table>
+    {% else %}<p class="empty">Nothing derived yet.</p>{% endif %}
+  </section>
 
-  <div class="card">
-    <div class="card-head"><h2>Top employers</h2></div>
-    {% if companies %}
-      <table>
-        <tbody>
-        {% for c in companies %}
-          <tr><td>{{ c.company }}</td><td class="num">{{ c.n }}</td></tr>
-        {% endfor %}
-        </tbody>
-      </table>
-    {% else %}
-      <p class="hint">No data yet.</p>
-    {% endif %}
-  </div>
+  <section class="card">
+    <div class="card-head"><h2>Your matches</h2></div>
+    <table>
+      <tr><td>Retrieved</td><td class="num">{{ '{:,}'.format(stats.retrieved) }}</td></tr>
+      <tr><td>Passed rules</td><td class="num">{{ '{:,}'.format(stats.passed) }}</td></tr>
+      <tr><td>Scored</td><td class="num">{{ '{:,}'.format(stats.scored) }}</td></tr>
+      <tr><td>Saved</td><td class="num">{{ stats.saved }}</td></tr>
+      <tr><td>Applied</td><td class="num">{{ stats.applied }}</td></tr>
+    </table>
+  </section>
 </div>
 {% endblock %}

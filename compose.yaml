@@ -38,7 +38,8 @@ services:
     command: ["trouveur", "serve", "--host", "0.0.0.0", "--port", "8080"]
     expose: ["8080"]
 
-  # The only process that runs a scan. Owns the schedule (a DB row, edited in the web UI).
+  # The only process that sweeps sources and drains the work queues. Owns the schedule (a DB row,
+  # edited in the web UI). Embedding happens here, so this is the container that wants CPU.
   runner:
     <<: *app
     command: ["trouveur", "runner"]

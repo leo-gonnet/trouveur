@@ -41,11 +41,13 @@ async def list_users(conn: AsyncConnection) -> list[sa.Row]:
     return list(await conn.execute(app_user.select().order_by(app_user.c.username)))
 
 
-async def create_user(conn: AsyncConnection, username: str, password_hash: str) -> int:
+async def create_user(
+    conn: AsyncConnection, username: str, password_hash: str, email: str | None = None
+) -> int:
     user_id = (
         await conn.execute(
             app_user.insert()
-            .values(username=username, password_hash=password_hash)
+            .values(username=username, password_hash=password_hash, email=email)
             .returning(app_user.c.id)
         )
     ).scalar_one()

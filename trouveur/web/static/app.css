@@ -225,3 +225,73 @@ code, kbd { font-family: var(--mono); font-size: .86em; background: var(--surfac
 
 .htmx-request { opacity: .55; transition: opacity .1s; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+/* --- v2 additions ------------------------------------------------------- */
+
+.login {
+  max-width: 22rem;
+  margin: 12vh auto;
+  display: grid;
+  gap: var(--space-4);
+}
+.login h1 { display: flex; align-items: center; gap: var(--space-2); margin: 0; }
+.login form { display: grid; gap: var(--space-3); }
+
+.form label,
+.card form label {
+  display: grid;
+  gap: var(--space-1);
+  margin-bottom: var(--space-3);
+  font-weight: 500;
+}
+.card form input,
+.card form select,
+.card form textarea { font: inherit; }
+.card form textarea { resize: vertical; font-family: var(--mono); font-size: .85rem; }
+
+/* Keeps a destructive action on the same line as the form above it without a wrapping block. */
+form.inline { display: inline; }
+
+.job-head { display: flex; gap: var(--space-4); align-items: flex-start; }
+.job-head > div { min-width: 0; }
+
+.flags { display: flex; flex-wrap: wrap; gap: var(--space-1); margin: var(--space-2) 0 0; }
+
+.pager {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  justify-content: center;
+  padding: var(--space-4) 0;
+}
+
+.description {
+  white-space: pre-wrap;
+  line-height: 1.65;
+  max-height: 34rem;
+  overflow-y: auto;
+}
+
+.state { font-size: .8rem; padding: .15rem .5rem; border-radius: var(--radius-sm); }
+.state-saved     { background: var(--accent-soft); color: var(--accent); }
+.state-applied   { background: var(--good-soft);   color: var(--good); }
+.state-dismissed { background: var(--surface-2);   color: var(--fg-muted); }
+
+.score.good { background: var(--good-soft); color: var(--good); }
+.score.ok   { background: var(--accent-soft); color: var(--accent); }
+.score.low  { background: var(--surface-2); color: var(--fg-muted); }
+
+.pill.good { background: var(--good-soft); color: var(--good); border-color: transparent; }
+.pill.warn { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
+.pill.bad  { background: var(--bad-soft);  color: var(--bad);  border-color: transparent; }
+
+.notice.good   { background: var(--good-soft); color: var(--good); }
+.notice.warn   { background: var(--warn-soft); color: var(--warn); }
+.notice.danger { background: var(--bad-soft);  color: var(--bad); }
+
+button.danger {
+  background: transparent;
+  color: var(--bad);
+  border: 1px solid var(--border);
+}
+button.danger:hover { background: var(--bad-soft); }

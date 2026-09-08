@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-USER_AGENT = "trouveur/0.1 (+self-hosted job search; contact via repository owner)"
+USER_AGENT = "trouveur/0.2 (+self-hosted job search; contact via repository owner)"
 
 
 class Settings(BaseSettings):
@@ -20,18 +20,16 @@ class Settings(BaseSettings):
     # a key derivable from the database would not be protecting anything.
     encryption_key: str = "dev-only-insecure-encryption-key"
 
-    # Every default below is an eval result, not a preference. The harness and the labelled
-    # dataset are kept outside this repo; re-run them before changing a value here.
-    openrouter_api_key: str | None = None
-    # The unsuffixed id is NOT a "latest" pointer: it resolves to the 0423 snapshot. The moving
-    # alias is `~deepseek/deepseek-v4-flash-latest`, retested head to head and no better here.
-    llm_model: str = "deepseek/deepseek-v4-flash"
-    # Unpinned, OpenRouter spreads one model across ~17 backends at a 6.5x price spread and
+    # Offered as the starting values on a new user's Settings page. There is no installation-wide
+    # key: reranking runs on each user's own credential, so model and provider are per user and
+    # these are only defaults.
+    default_llm_model: str = "deepseek/deepseek-v4-flash"
+    # Unpinned, OpenRouter spreads one model across many backends at a wide price spread and
     # differing quantisation, so neither cost nor scores are reproducible. Provider slugs are
-    # quantisation-qualified, so this pins fp8. The cheapest fp8 backend is not the best one.
-    llm_provider: str | None = "deepinfra/fp8"
-    # Backends vary wildly in speed (p90 for a 10-job batch: 12s to 157s), so the 30s
-    # http_timeout_seconds below is far too short to survive a slow one.
+    # quantisation-qualified, so this pins fp8.
+    default_llm_provider: str | None = "deepinfra/fp8"
+    # Backends vary widely in latency for a batch of this size, so the http_timeout_seconds below
+    # is far too short to survive a slow one.
     llm_timeout_seconds: float = 300.0
 
     smtp_host: str | None = None
@@ -39,7 +37,6 @@ class Settings(BaseSettings):
     smtp_user: str | None = None
     smtp_password: str | None = None
     smtp_from: str | None = None
-    smtp_to: str | None = None
 
     # Stays true even over an SSH tunnel: http://localhost is a secure context in modern browsers.
     cookie_secure: bool = True

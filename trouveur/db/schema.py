@@ -194,6 +194,10 @@ app_user = sa.Table(
     metadata,
     sa.Column("id", sa.BigInteger, primary_key=True),
     sa.Column("username", sa.Text, nullable=False, unique=True),
+    # Optional: a user with no address simply gets no digest. The web UI is the primary surface,
+    # email is a convenience, and requiring one would make an account harder to create than it
+    # needs to be for something with no self-service registration.
+    sa.Column("email", sa.Text),
     sa.Column("password_hash", sa.Text, nullable=False),
     sa.Column("is_active", sa.Boolean, nullable=False, server_default="true"),
     sa.Column("failed_attempts", sa.Integer, nullable=False, server_default="0"),

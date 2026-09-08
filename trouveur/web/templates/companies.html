@@ -1,72 +1,59 @@
-{% extends "base.html" %}
-{% set active = 'companies' %}
-{% block title %}Companies — Trouveur{% endblock %}
+{% extends "base.html" %}{% block title %}Companies · Trouveur{% endblock %}
 {% block content %}
 <div class="page-head">
-  <h1>Companies</h1>
-  <span class="sub">Employers watched directly through their Personio job feed.</span>
+  <h1>Greenhouse boards</h1>
+  <p class="hint">
+    Greenhouse publishes no index of boards, so this list is the only one that exists — a company
+    is swept only if its slug is here. The slug is the last path segment of its careers URL,
+    e.g. <code>job-boards.greenhouse.io/<strong>gitlab</strong></code>.
+  </p>
 </div>
 
-<div class="card">
-  <div class="card-head"><h2>Add companies</h2>
-    <span class="hint">{{ tenants|length }} watched</span>
-  </div>
+{% if added %}<p class="notice good">Added {{ added }} board(s).</p>{% endif %}
+{% if rejected %}<p class="notice warn">Ignored, not a valid slug: {{ rejected }}</p>{% endif %}
+
+<section class="card">
   <form method="post" action="/companies">
-    <label for="tenants">One per line — a slug or a careers-page URL</label>
-    <textarea id="tenants" name="tenants" rows="6"
-              placeholder="acme-gmbh&#10;https://musterfirma.jobs.personio.de/"></textarea>
-    <div class="hint">
-      Personio publishes no directory of its customers, so nothing is discoverable — a company is
-      only scanned once it is listed here. The name is the subdomain of its careers page:
-      <code>https://acme-gmbh.jobs.personio.de/</code> is <code>acme-gmbh</code>. Pasting the full
-      URL works too. Duplicates are ignored.
-    </div>
-    <input class="btn primary" type="submit" value="Add" style="margin-top:var(--space-6)">
+    <label>Add boards <span class="hint">one per line, or comma separated</span>
+      <textarea name="slugs" rows="3" placeholder="gitlab&#10;doctolib"></textarea></label>
+    <button class="primary" type="submit">Add</button>
   </form>
+</section>
 
-  {% if added %}
-    <p class="hint">Added {{ added }} {{ 'company' if added == 1 else 'companies' }}.</p>
-  {% endif %}
-  {% if rejected %}
-    <p class="hint">Not recognised, so not added:</p>
-    <ul class="hint">{% for line in rejected %}<li><code>{{ line }}</code></li>{% endfor %}</ul>
-  {% endif %}
-</div>
-
-<div class="card">
-  <div class="card-head"><h2>Watched</h2></div>
-  {% if not tenants %}
-    <p class="empty">Nothing here yet. Personio contributes no jobs until you add a company.</p>
-  {% else %}
+<section class="card">
+  <div class="card-head"><h2>{{ boards | length }} board(s)</h2></div>
+  {% if boards %}
   <table>
-    <thead>
-      <tr><th>Company</th><th>Feed</th><th>Scanned</th><th></th></tr>
-    </thead>
-    <tbody>
-      {% for tenant in tenants %}
-      <tr>
-        <td><code>{{ tenant.slug }}</code></td>
-        <td>
-          <a href="https://{{ tenant.slug }}.jobs.personio.de/" target="_blank"
-             rel="noopener noreferrer">careers page</a>
-        </td>
-        <td>
-          <form method="post" action="/companies/{{ tenant.slug }}/toggle">
-            <input type="hidden" name="enabled" value="{{ 'false' if tenant.enabled else 'true' }}">
-            <button type="submit" class="btn">
-              {{ 'Yes — pause' if tenant.enabled else 'Paused — resume' }}
-            </button>
-          </form>
-        </td>
-        <td>
-          <form method="post" action="/companies/{{ tenant.slug }}/delete">
-            <button type="submit" class="btn danger">Remove</button>
-          </form>
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
+    <tr><th>Slug</th><th>Enabled</th><th>Last success</th><th>Failures</th><th></th></tr>
+    {% for board in boards %}
+    <tr>
+      <td><code>{{ board.slug }}</code></td>
+      <td>
+        <form method="post" action="/companies/{{ board.slug }}/toggle" class="inline">
+          <input type="hidden" name="enabled" value="{{ 'false' if board.enabled else 'true' }}">
+          <button class="pill{% if board.enabled %} primary{% endif %}" type="submit">
+            {{ 'enabled' if board.enabled else 'disabled' }}</button>
+        </form>
+      </td>
+      <td>{{ board.last_ok_at.strftime('%Y-%m-%d %H:%M') if board.last_ok_at else '—' }}</td>
+      <td class="num">
+        {% if board.consecutive_failures %}
+          <span class="pill bad">{{ board.consecutive_failures }}</span>
+        {% else %}0{% endif %}
+      </td>
+      <td>
+        <form method="post" action="/companies/{{ board.slug }}/delete" class="inline">
+          <button class="danger" type="submit">Remove</button>
+        </form>
+      </td>
+    </tr>
+    {% if board.last_error %}
+      <tr><td colspan="5" class="hint">{{ board.last_error }}</td></tr>
+    {% endif %}
+    {% endfor %}
   </table>
+  {% else %}
+    <p class="empty">No boards yet. Without at least one, Greenhouse contributes nothing.</p>
   {% endif %}
-</div>
+</section>
 {% endblock %}

@@ -1,0 +1,49 @@
+{% extends "base.html" %}{% import "_macros.html" as m %}
+{% block title %}{{ job.title }} · Trouveur{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>{{ job.title }}</h1>
+  <p class="hint">{{ job.company or 'company not stated' }} · {{ m.places(job) }} · {{ m.salary(job) }}</p>
+  <p class="actions">
+    <a class="pill primary" href="{{ job.url }}" target="_blank" rel="noopener noreferrer">Open advert ↗</a>
+    <span class="pill">{{ job.source }}</span>
+    {% if job.closed_at %}<span class="pill bad">closed</span>{% endif %}
+    {% for state in ['saved','applied','dismissed'] %}
+      <button hx-post="/job/{{ job.id }}/state" hx-vals='{"state":"{{ state }}"}' hx-swap="outerHTML"
+              class="pill{% if job.state == state %} primary{% endif %}">{{ state }}</button>
+    {% endfor %}
+  </p>
+</div>
+
+<div class="grid">
+  <section class="card">
+    <div class="card-head"><h2>Assessment</h2></div>
+    <table>
+      <tr><td>Score</td><td class="num">{{ m.score_pill(job.llm_score) }}</td></tr>
+      <tr><td>Reason</td><td>{{ job.llm_reason or '—' }}</td></tr>
+      <tr><td>Rules</td><td>{{ job.rule_verdict or 'unknown' }}{% if job.rule_reason %} — {{ job.rule_reason }}{% endif %}</td></tr>
+      <tr><td>Red flags</td><td>{% for flag in job.llm_red_flags or [] %}<span class="pill warn">{{ flag }}</span>{% else %}—{% endfor %}</td></tr>
+    </table>
+  </section>
+
+  <section class="card">
+    <div class="card-head"><h2>Derived facets</h2></div>
+    <table>
+      <tr><td>Work mode</td><td>{{ job.work_mode }}</td></tr>
+      <tr><td>Seniority</td><td>{{ job.seniority }}</td></tr>
+      <tr><td>Employment</td><td>{{ job.employment_type }}</td></tr>
+      <tr><td>Countries</td><td>{{ (job.countries or []) | join(', ') or '—' }}</td></tr>
+      <tr><td>Cities</td><td>{{ (job.cities or []) | join(', ') or '—' }}</td></tr>
+      <tr><td>Salary</td><td>{{ m.salary(job) }}{% if job.salary_annualised %} <span class="hint">(annualised)</span>{% endif %}</td></tr>
+      <tr><td>Agency</td><td>{% if job.is_agency is none %}unknown{% else %}{{ 'yes' if job.is_agency else 'no' }}{% endif %}</td></tr>
+      <tr><td>Skills</td><td>{% for skill in job.skills or [] %}<span class="pill">{{ skill }}</span>{% else %}—{% endfor %}</td></tr>
+    </table>
+    <p class="hint">Facets are derived once and read everywhere; nothing here is re-parsed per page.</p>
+  </section>
+</div>
+
+<section class="card">
+  <div class="card-head"><h2>Advert</h2></div>
+  <p class="description">{{ job.description or 'No description was collected for this posting.' }}</p>
+</section>
+{% endblock %}

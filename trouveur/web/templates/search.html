@@ -1,35 +1,34 @@
-{% extends "base.html" %}
-{% set active = 'search' %}
-{% block title %}Search — Trouveur{% endblock %}
+{% extends "base.html" %}{% block title %}Search · Trouveur{% endblock %}
 {% block content %}
 <div class="page-head">
   <h1>Search</h1>
-  <span class="sub">every job ever scraped, matched or not</span>
+  <p class="hint">
+    Every posting collected, whatever the filters decided — including rejected, unscored and
+    closed ones. This is the view of what was actually scraped.
+  </p>
 </div>
-<div class="card" style="margin-bottom:var(--space-5)">
-  <div class="searchbar">
-    <input type="text" name="q" value="{{ query }}" placeholder="e.g. ingenieur, münchen, supply chain"
-           autofocus
-           hx-get="/search" hx-trigger="input changed delay:300ms, search"
-           hx-target="#results" hx-include="[name='country'],[name='remote']"
-           hx-push-url="true">
-    <select name="country" hx-get="/search" hx-target="#results"
-            hx-include="[name='q'],[name='remote']">
-      <option value="">All countries</option>
-      {% for c in ['AT','DE','CH'] %}
-        <option value="{{ c }}" {% if country==c %}selected{% endif %}>{{ c }}</option>
-      {% endfor %}
-    </select>
-    <select name="remote" hx-get="/search" hx-target="#results"
-            hx-include="[name='q'],[name='country']">
-      <option value="">Any location type</option>
-      <option value="yes" {% if remote=='yes' %}selected{% endif %}>Remote</option>
-      <option value="no" {% if remote=='no' %}selected{% endif %}>On-site</option>
-    </select>
-  </div>
-  <p class="hint" style="margin-top:var(--space-3)">
-    Umlauts are optional — <code>munchen</code> finds <code>München</code>, and
-    <code>ingenieur</code> also matches inside <code>Wirtschaftsingenieur</code>.</p>
-</div>
+
+<form class="searchbar" hx-get="/search" hx-target="#results" hx-push-url="true"
+      hx-trigger="submit, change from:select, change from:input[type=checkbox]">
+  <input name="q" value="{{ q }}" placeholder="Title, company, description…" autofocus>
+  <select name="country">
+    <option value="">Any country</option>
+    {% for code in ['AT','DE','CH','NL','FR','GB','US'] %}
+      <option value="{{ code }}" {% if country==code %}selected{% endif %}>{{ code }}</option>
+    {% endfor %}
+  </select>
+  <select name="work_mode">
+    <option value="">Any work mode</option>
+    {% for mode in ['remote','hybrid','onsite','unknown'] %}
+      <option value="{{ mode }}" {% if work_mode==mode %}selected{% endif %}>{{ mode }}</option>
+    {% endfor %}
+  </select>
+  <label class="check">
+    <input type="checkbox" name="include_closed" value="true" {% if include_closed %}checked{% endif %}>
+    include closed
+  </label>
+  <button class="primary" type="submit">Search</button>
+</form>
+
 <div id="results">{% include "_results.html" %}</div>
 {% endblock %}

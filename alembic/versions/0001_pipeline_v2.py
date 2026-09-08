@@ -257,6 +257,7 @@ def upgrade() -> None:
         CREATE TABLE app_user (
             id              bigserial PRIMARY KEY,
             username        text NOT NULL UNIQUE,
+            email           text,
             password_hash   text NOT NULL,
             is_active       boolean NOT NULL DEFAULT true,
             failed_attempts integer NOT NULL DEFAULT 0,

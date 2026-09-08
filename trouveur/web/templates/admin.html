@@ -1,76 +1,68 @@
-{% extends "base.html" %}
-{% set active = 'admin' %}
-{% block title %}Scans — Trouveur{% endblock %}
+{% extends "base.html" %}{% block title %}Scans · Trouveur{% endblock %}
 {% block content %}
 <div class="page-head">
   <h1>Scans</h1>
-  <span class="sub">The runner service executes these. Times are UTC.</span>
+  <p class="hint">
+    The web app only ever queues a run. The runner service executes it — they share nothing but
+    the database, so either can be restarted without disturbing the other.
+  </p>
 </div>
 
-<div class="card">
-  <div class="card-head"><h2>Schedule</h2>
-    <span class="hint">{% if schedule.enabled %}daily at
-      {{ '%02d:%02d'|format(schedule.run_hour, schedule.run_minute) }} UTC{% else %}paused{% endif %}</span>
-  </div>
-  <form method="post" action="/admin/schedule">
-    <label class="check" for="enabled">
-      <input type="checkbox" id="enabled" name="enabled" value="true"
-             {% if schedule.enabled %}checked{% endif %}>
-      Run automatically every day
-    </label>
-    <div class="row">
-      <div>
-        <label for="run_hour">Hour (0–23)</label>
-        <input type="number" id="run_hour" name="run_hour" value="{{ schedule.run_hour }}"
-               min="0" max="23">
-      </div>
-      <div>
-        <label for="run_minute">Minute (0–59)</label>
-        <input type="number" id="run_minute" name="run_minute" value="{{ schedule.run_minute }}"
-               min="0" max="59">
-      </div>
-      <div>
-        <label for="lookback_days">Look-back days</label>
-        <input type="number" id="lookback_days" name="lookback_days"
-               value="{{ schedule.lookback_days }}" min="1" max="90">
-        <div class="hint">How far back each scheduled scan looks. 1 for a daily run.</div>
-      </div>
-    </div>
-    <input class="btn primary" type="submit" value="Save schedule"
-           style="margin-top:var(--space-6)">
-  </form>
+<div class="grid">
+  <section class="card">
+    <div class="card-head"><h2>Schedule</h2></div>
+    <form method="post" action="/admin/schedule">
+      <label class="check">
+        <input type="checkbox" name="enabled" value="true" {% if schedule.enabled %}checked{% endif %}>
+        run daily
+      </label>
+      <label>Hour<input name="run_hour" type="number" min="0" max="23" value="{{ schedule.run_hour }}"></label>
+      <label>Minute<input name="run_minute" type="number" min="0" max="59" value="{{ schedule.run_minute }}"></label>
+      <button class="primary" type="submit">Save schedule</button>
+    </form>
+  </section>
+
+  <section class="card">
+    <div class="card-head"><h2>Run now</h2></div>
+    <form method="post" action="/admin/run">
+      <label>Source
+        <select name="only_source">
+          <option value="">all sources</option>
+          {% for name in sources %}<option value="{{ name }}">{{ name }}</option>{% endfor %}
+        </select>
+      </label>
+      <label class="check"><input type="checkbox" name="backfill" value="true"> backfill (wider window)</label>
+      <button class="primary" type="submit" {% if active_run %}disabled{% endif %}>Queue a run</button>
+      {% if active_run %}<p class="hint">A run is already {{ active_run.status }}.</p>{% endif %}
+    </form>
+  </section>
 </div>
 
-<div class="card">
-  <div class="card-head"><h2>Run now</h2></div>
-  <form method="post" action="/admin/run">
-    <div class="row">
-      <div>
-        <label for="days">Look-back days</label>
-        <input type="number" id="days" name="days" value="7" min="1" max="90">
-      </div>
-      <div>
-        <label class="check" for="use_llm">
-          <input type="checkbox" id="use_llm" name="use_llm" value="true" checked>
-          Run the LLM scoring stage <span class="hint">(costs money)</span>
-        </label>
-        <label class="check" for="send_email">
-          <input type="checkbox" id="send_email" name="send_email" value="true">
-          Send the email digest
-        </label>
-      </div>
-    </div>
-    <input class="btn primary" type="submit" value="Queue a scan"
-           style="margin-top:var(--space-6)"
-           {% if active %}disabled{% endif %}>
-    {% if active %}<span class="hint">A scan is already {{ active.status }}.</span>{% endif %}
-  </form>
-</div>
-
-<div class="card">
+<section class="card">
   <div class="card-head"><h2>Recent runs</h2></div>
-  <div id="runs" hx-get="/admin/runs" hx-trigger="every 10s" hx-swap="innerHTML">
+  <div hx-get="/admin/runs" hx-trigger="every 5s" hx-swap="innerHTML">
     {% include "_admin_runs.html" %}
   </div>
-</div>
+</section>
+
+<section class="card">
+  <div class="card-head"><h2>Recent sweeps</h2></div>
+  {% if sweeps %}
+  <table>
+    <tr><th>Source</th><th>Started</th><th class="num">Docs</th><th class="num">Upserted</th>
+        <th class="num">Closed</th><th class="num">Overflow</th><th>Complete</th></tr>
+    {% for s in sweeps %}
+      <tr>
+        <td>{{ s.source }}</td>
+        <td>{{ s.started_at.strftime('%m-%d %H:%M') }}</td>
+        <td class="num">{{ '{:,}'.format(s.documents_seen) }}</td>
+        <td class="num">{{ '{:,}'.format(s.jobs_upserted) }}</td>
+        <td class="num">{{ s.jobs_closed }}</td>
+        <td class="num">{% if s.partitions_overflowed %}<span class="pill bad">{{ s.partitions_overflowed }}</span>{% else %}0{% endif %}</td>
+        <td>{% if s.complete %}<span class="pill good">yes</span>{% else %}<span class="pill">delta</span>{% endif %}</td>
+      </tr>
+    {% endfor %}
+  </table>
+  {% else %}<p class="empty">No sweeps recorded.</p>{% endif %}
+</section>
 {% endblock %}

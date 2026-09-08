@@ -1,34 +1,21 @@
-{% set tone = {"success": "ok", "failed": "bad", "running": "warn", "queued": "warn"} %}
-{% if not runs %}
-  <p class="hint">No scans have run yet.</p>
-{% else %}
+{% if runs %}
 <table>
-  <thead>
-    <tr><th>Queued (UTC)</th><th>Trigger</th><th>Status</th><th>Result</th></tr>
-  </thead>
-  <tbody>
-  {% for r in runs %}
-    <tr>
-      <td>{{ r.queued_at.strftime('%Y-%m-%d %H:%M') }}</td>
-      <td>{{ r.trigger }}</td>
-      <td><span class="pill {{ tone.get(r.status, '') }}">{{ r.status }}</span></td>
-      <td>
-        {% if r.status == 'success' and r.report %}
-          {{ r.report.new }} new &middot; {{ r.report.rules_passed }} passed &middot;
-          {{ r.report.scored }} scored &middot; {{ r.report.notified }} emailed
-          {% if r.report.errors %}
-            <span class="pill bad">{{ r.report.errors|length }} source error(s)</span>
-          {% endif %}
-        {% elif r.status == 'failed' %}
-          <span class="hint">{{ (r.error or '').splitlines()|last }}</span>
-        {% elif r.status == 'queued' and r.attempts > 0 %}
-          <span class="hint">retry pending</span>
-        {% else %}
-          <span class="hint">—</span>
-        {% endif %}
-      </td>
-    </tr>
+  <tr><th>Queued</th><th>Trigger</th><th>Status</th><th>Scope</th><th>Result</th></tr>
+  {% for run in runs %}
+  <tr>
+    <td>{{ run.queued_at.strftime('%m-%d %H:%M') }}</td>
+    <td>{{ run.trigger }}</td>
+    <td>
+      <span class="pill {% if run.status == 'success' %}good{% elif run.status == 'failed' %}bad{% endif %}">
+        {{ run.status }}</span>
+    </td>
+    <td>{{ run.only_source or 'all' }}{% if run.backfill %} · backfill{% endif %}</td>
+    <td class="hint">
+      {%- if run.error -%}{{ run.error[:160] }}
+      {%- elif run.report -%}{{ run.report.get('summary', '') }}
+      {%- else -%}—{%- endif -%}
+    </td>
+  </tr>
   {% endfor %}
-  </tbody>
 </table>
-{% endif %}
+{% else %}<p class="empty">No runs yet.</p>{% endif %}
