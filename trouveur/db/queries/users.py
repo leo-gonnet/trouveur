@@ -124,7 +124,7 @@ async def save_credential(
     api_key_fingerprint: str,
     model: str,
     provider_pin: str | None,
-    monthly_budget_eur: Decimal,
+    monthly_budget_usd: Decimal,
 ) -> None:
     stmt = pg_insert(user_llm_credential).values(
         user_id=user_id,
@@ -132,7 +132,7 @@ async def save_credential(
         api_key_fingerprint=api_key_fingerprint,
         model=model,
         provider_pin=provider_pin,
-        monthly_budget_eur=monthly_budget_eur,
+        monthly_budget_usd=monthly_budget_usd,
     )
     await conn.execute(
         stmt.on_conflict_do_update(
@@ -142,7 +142,7 @@ async def save_credential(
                 "api_key_fingerprint": stmt.excluded.api_key_fingerprint,
                 "model": stmt.excluded.model,
                 "provider_pin": stmt.excluded.provider_pin,
-                "monthly_budget_eur": stmt.excluded.monthly_budget_eur,
+                "monthly_budget_usd": stmt.excluded.monthly_budget_usd,
                 "updated_at": sa.func.now(),
             },
         )
@@ -150,12 +150,12 @@ async def save_credential(
 
 
 async def update_budget(
-    conn: AsyncConnection, user_id: int, monthly_budget_eur: Decimal
+    conn: AsyncConnection, user_id: int, monthly_budget_usd: Decimal
 ) -> None:
     await conn.execute(
         user_llm_credential.update()
         .where(user_llm_credential.c.user_id == user_id)
-        .values(monthly_budget_eur=monthly_budget_eur, updated_at=sa.func.now())
+        .values(monthly_budget_usd=monthly_budget_usd, updated_at=sa.func.now())
     )
 
 
@@ -187,9 +187,13 @@ async def add_spend(
     *,
     tokens_in: int,
     tokens_out: int,
-    cost_eur: Decimal,
+    cost_usd: Decimal,
 ) -> Decimal:
-    """Record spend and return the new month-to-date total.
+    """Record spend and return the new month-to-date total, in USD.
+
+    USD because that is the currency OpenRouter actually bills in. Storing a euro figure would
+    require an exchange rate between the meter and the cap, and a stale rate makes a budget limit
+    quietly wrong in whichever direction the rate moved.
 
     Written in the same transaction as the scores it paid for, so a crash cannot leave a user
     holding results they were not charged for or a charge for results they never got.
@@ -199,7 +203,7 @@ async def add_spend(
         period_month=_month(),
         tokens_in=tokens_in,
         tokens_out=tokens_out,
-        cost_eur=cost_eur,
+        cost_usd=cost_usd,
         calls=1,
     )
     stmt = stmt.on_conflict_do_update(
@@ -207,11 +211,11 @@ async def add_spend(
         set_={
             "tokens_in": user_llm_spend.c.tokens_in + stmt.excluded.tokens_in,
             "tokens_out": user_llm_spend.c.tokens_out + stmt.excluded.tokens_out,
-            "cost_eur": user_llm_spend.c.cost_eur + stmt.excluded.cost_eur,
+            "cost_usd": user_llm_spend.c.cost_usd + stmt.excluded.cost_usd,
             "calls": user_llm_spend.c.calls + 1,
             "updated_at": sa.func.now(),
         },
-    ).returning(user_llm_spend.c.cost_eur)
+    ).returning(user_llm_spend.c.cost_usd)
     return (await conn.execute(stmt)).scalar_one()
 
 

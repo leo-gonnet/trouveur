@@ -300,7 +300,7 @@ def upgrade() -> None:
             api_key_fingerprint text NOT NULL,
             model              text NOT NULL,
             provider_pin       text,
-            monthly_budget_eur numeric NOT NULL DEFAULT 5,
+            monthly_budget_usd numeric NOT NULL DEFAULT 5,
             updated_at         timestamptz NOT NULL DEFAULT now()
         )
         """
@@ -313,7 +313,7 @@ def upgrade() -> None:
             period_month date NOT NULL,
             tokens_in    bigint NOT NULL DEFAULT 0,
             tokens_out   bigint NOT NULL DEFAULT 0,
-            cost_eur     numeric NOT NULL DEFAULT 0,
+            cost_usd     numeric NOT NULL DEFAULT 0,
             calls        integer NOT NULL DEFAULT 0,
             updated_at   timestamptz NOT NULL DEFAULT now(),
             PRIMARY KEY (user_id, period_month)

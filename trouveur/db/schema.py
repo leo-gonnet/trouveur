@@ -242,7 +242,7 @@ user_llm_credential = sa.Table(
     # Unpinned, OpenRouter spreads one model across many backends at a wide price spread and
     # differing quantisation, so neither cost nor scores are reproducible.
     sa.Column("provider_pin", sa.Text),
-    sa.Column("monthly_budget_eur", sa.Numeric, nullable=False, server_default="5"),
+    sa.Column("monthly_budget_usd", sa.Numeric, nullable=False, server_default="5"),
     sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False,
               server_default=sa.func.now()),
 )
@@ -256,7 +256,7 @@ user_llm_spend = sa.Table(
     sa.Column("period_month", sa.Date, primary_key=True),
     sa.Column("tokens_in", sa.BigInteger, nullable=False, server_default="0"),
     sa.Column("tokens_out", sa.BigInteger, nullable=False, server_default="0"),
-    sa.Column("cost_eur", sa.Numeric, nullable=False, server_default="0"),
+    sa.Column("cost_usd", sa.Numeric, nullable=False, server_default="0"),
     sa.Column("calls", sa.Integer, nullable=False, server_default="0"),
     sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False,
               server_default=sa.func.now()),

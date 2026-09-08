@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
 from typing import Any
 
@@ -194,6 +195,34 @@ async def count_pending_rerank(
     )
 
 
+async def pending_rules(
+    conn: AsyncConnection, user_id: int, limit: int
+) -> list[sa.Row]:
+    """Retrieved jobs this user has no rule verdict for yet.
+
+    Distinct from pending_rerank, which selects rows that have ALREADY passed the rules. Reusing
+    that query here would mean the rules stage only ever re-judged rows it had previously passed,
+    and every newly retrieved job would stay 'unknown' forever -- invisible to recommendations,
+    with no error anywhere.
+    """
+    return list(
+        await conn.execute(
+            sa.text(
+                """
+                SELECT m.job_id, j.content_hash, j.title, j.company, j.description
+                FROM user_job_match m
+                JOIN job j ON j.id = m.job_id
+                WHERE m.user_id = :user_id AND m.rule_verdict = 'unknown'
+                  AND j.closed_at IS NULL
+                ORDER BY m.retrieval_score DESC NULLS LAST
+                LIMIT :limit
+                """
+            ),
+            {"user_id": user_id, "limit": limit},
+        )
+    )
+
+
 async def cached_scores(
     conn: AsyncConnection, user_id: int, profile_version: int, hashes: Sequence[bytes]
 ) -> dict[bytes, sa.Row]:
@@ -232,10 +261,11 @@ async def apply_scores(conn: AsyncConnection, user_id: int, rows: Sequence[dict]
         sa.text(
             """
             UPDATE user_job_match m
-            SET llm_score = t.score, llm_reason = t.reason, llm_red_flags = t.flags,
+            SET llm_score = t.score, llm_reason = t.reason,
+                llm_red_flags = CAST(t.flags AS jsonb),
                 profile_version = :profile_version, scored_at = now()
             FROM unnest(CAST(:job_ids AS bigint[]), CAST(:scores AS smallint[]),
-                        CAST(:reasons AS text[]), CAST(:flags AS jsonb[]))
+                        CAST(:reasons AS text[]), CAST(:flags AS text[]))
                  AS t(job_id, score, reason, flags)
             WHERE m.user_id = :user_id AND m.job_id = t.job_id
             """
@@ -246,7 +276,7 @@ async def apply_scores(conn: AsyncConnection, user_id: int, rows: Sequence[dict]
             "job_ids": [row["job_id"] for row in rows],
             "scores": [row["score"] for row in rows],
             "reasons": [row["reason"] for row in rows],
-            "flags": [row["red_flags"] for row in rows],
+            "flags": [json.dumps(row["red_flags"]) for row in rows],
         },
     )
 
