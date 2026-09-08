@@ -56,7 +56,7 @@ JOIN job_facet f ON f.job_id = j.id
 WHERE {_HARD_FILTERS}
   AND (
       j.search_de @@ websearch_to_tsquery('german', :query)
-      OR j.search_fold LIKE '%%' || lower(f_unaccent(:query)) || '%%'
+      OR j.search_fold LIKE '%' || lower(f_unaccent(:query)) || '%'
   )
 ORDER BY
     ts_rank_cd(j.search_de, websearch_to_tsquery('german', :query)) DESC,
@@ -329,7 +329,7 @@ FROM job j
 LEFT JOIN job_facet f ON f.job_id = j.id
 LEFT JOIN user_job_match m ON m.job_id = j.id AND m.user_id = :user_id
 WHERE (:query = '' OR j.search_de @@ websearch_to_tsquery('german', :query)
-       OR j.search_fold LIKE '%%' || lower(f_unaccent(:query)) || '%%')
+       OR j.search_fold LIKE '%' || lower(f_unaccent(:query)) || '%')
   AND (:country = '' OR f.countries @> ARRAY[:country])
   AND (:work_mode = '' OR f.work_mode::text = :work_mode)
   AND (:include_closed OR j.closed_at IS NULL)

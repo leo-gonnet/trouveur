@@ -1,0 +1,35 @@
+{
+  "jobs": [
+    {
+      "id": 4001,
+      "internal_job_id": 9001,
+      "title": "Senior Process Engineer",
+      "company_name": "Beispiel Tech",
+      "absolute_url": "https://job-boards.greenhouse.io/beispiel/jobs/4001",
+      "location": {"name": "Remote, Germany; Remote, Austria"},
+      "offices": [{"id": 1, "name": "Germany", "location": null}],
+      "departments": [{"id": 7, "name": "Operations"}],
+      "language": "en",
+      "first_published": "2026-08-20T10:00:00-04:00",
+      "updated_at": "2026-09-02T11:30:00-04:00",
+      "application_deadline": null,
+      "content": "&lt;div class=&quot;content-intro&quot;&gt;&lt;p&gt;We are an all-remote company.&lt;/p&gt;&lt;/div&gt;&lt;p&gt;You will own process improvement using Lean Management and Kubernetes.&lt;/p&gt;"
+    },
+    {
+      "id": 4002,
+      "internal_job_id": 9002,
+      "title": "Werkstudent Logistik",
+      "company_name": "Beispiel Tech",
+      "absolute_url": "https://job-boards.greenhouse.io/beispiel/jobs/4002",
+      "location": {"name": "Wien, Austria"},
+      "offices": [{"id": 2, "name": "Austria", "location": null}],
+      "departments": [{"id": 8, "name": "Supply Chain"}],
+      "language": "de",
+      "first_published": "2026-09-01T09:00:00-04:00",
+      "updated_at": "2026-09-01T09:00:00-04:00",
+      "application_deadline": null,
+      "content": "&lt;p&gt;Wir bieten flexible paid time off und ein tolles Team.&lt;/p&gt;"
+    }
+  ],
+  "meta": {"total": 2}
+}

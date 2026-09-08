@@ -235,6 +235,32 @@ async def close_stale(conn: AsyncConnection, source: str, older_than: timedelta)
     return int(result.scalar_one() or 0)
 
 
+async def close_retired(conn: AsyncConnection, job_ids: Sequence[int]) -> int:
+    """Close postings whose source reported them gone (a 404 on the detail endpoint).
+
+    This is evidence rather than the age heuristic: the posting itself said it no longer exists.
+    Deletes the embedding in the same statement, keeping job_embedding an index of the live set.
+    """
+    if not job_ids:
+        return 0
+    result = await conn.execute(
+        sa.text(
+            """
+            WITH closed AS (
+                UPDATE job SET closed_at = now()
+                WHERE id = ANY(:ids) AND closed_at IS NULL
+                RETURNING id
+            ), dropped AS (
+                DELETE FROM job_embedding WHERE job_id IN (SELECT id FROM closed)
+            )
+            SELECT count(*) FROM closed
+            """
+        ),
+        {"ids": list(job_ids)},
+    )
+    return int(result.scalar_one() or 0)
+
+
 async def start_sweep(conn: AsyncConnection, source: str) -> tuple[int, datetime]:
     row = (
         await conn.execute(

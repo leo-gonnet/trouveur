@@ -1,3 +1,10 @@
+"""Shared fixtures.
+
+Fixtures here are hand-written and synthetic. Never commit a captured page or a real scraped
+payload: it is third-party content, it bloats the repository, and a fixture nobody wrote is a
+fixture nobody understands when it starts failing.
+"""
+
 from __future__ import annotations
 
 import json
@@ -13,10 +20,20 @@ def load(name: str) -> dict:
 
 
 @pytest.fixture
-def search_payload() -> dict:
-    return load("arbeitsagentur_search.json")
+def aa_listing() -> dict:
+    return load("arbeitsagentur_listing.json")
 
 
 @pytest.fixture
-def detail_payload() -> dict:
+def aa_detail() -> dict:
     return load("arbeitsagentur_detail.json")
+
+
+@pytest.fixture
+def aa_agency_detail() -> dict:
+    return load("arbeitsagentur_agency_detail.json")
+
+
+@pytest.fixture
+def gh_board() -> dict:
+    return load("greenhouse_board.json")

@@ -199,18 +199,7 @@ async def drain_detail(
     for source_name, external_ids in fetched.items():
         await persist(conn, source_name, external_ids, requires_detail=True)
     if retired:
-        await conn.execute(
-            sa.text(
-                """
-                WITH closed AS (
-                    UPDATE job SET closed_at = now() WHERE id = ANY(:ids) AND closed_at IS NULL
-                    RETURNING id
-                )
-                DELETE FROM job_embedding WHERE job_id IN (SELECT id FROM closed)
-                """
-            ),
-            {"ids": retired},
-        )
+        await ingest_q.close_retired(conn, retired)
     await complete(conn, done)
     return len(done)
 
