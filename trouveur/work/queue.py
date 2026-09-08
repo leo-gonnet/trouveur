@@ -34,6 +34,7 @@ STALE_CLAIM_AFTER = timedelta(minutes=30)
 
 
 class WorkKind(StrEnum):
+    DETAIL = "detail"
     DERIVE = "derive"
     EMBED = "embed"
     DEDUP = "dedup"
@@ -152,6 +153,14 @@ def _stale_query(kind: WorkKind, target_version: str, after_job_id: int, limit: 
     Keyset, not OFFSET: this is the query that runs over the whole corpus after a version bump,
     and OFFSET would re-scan everything it had already skipped on each successive chunk.
     """
+    if kind is WorkKind.DETAIL:
+        # Detail work is enqueued by the sweep that discovered the posting, because only the
+        # source knows whether it has a detail phase at all. Refilling it here would mean
+        # encoding that per-source fact in the queue, which is exactly the leak the registry
+        # exists to prevent. A detail that will not fetch is parked and visible, not re-derived.
+        raise ValueError(
+            "Detail work is enqueued at ingest by the source that needs it and is never refilled."
+        )
     if kind is WorkKind.DERIVE:
         return (
             sa.select(job_facet.c.job_id)

@@ -31,6 +31,10 @@ class RawDocument(BaseModel):
     source: str
     external_id: str
     kind: DocumentKind
+    # The sub-population this document belongs to, when the source has one -- a Greenhouse board,
+    # say. Lifecycle closes within a scope, so this is what lets one tenant's complete dump retire
+    # its own stale postings without touching a tenant whose board failed to answer.
+    scope: str | None = None
     payload: dict[str, Any]
     fetched_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 

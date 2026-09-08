@@ -48,9 +48,12 @@ class EmploymentType(StrEnum):
 
 
 class JobFacets(BaseModel):
-    country: str | None = None
-    region: str | None = None
-    city: str | None = None
+    # Lists, because one posting can legitimately name several places, and collapsing
+    # "Remote, Canada; Remote, US" to a single country would silently drop half of what a
+    # country filter is supposed to match against.
+    countries: list[str] = Field(default_factory=list)
+    regions: list[str] = Field(default_factory=list)
+    cities: list[str] = Field(default_factory=list)
 
     work_mode: WorkMode = WorkMode.UNKNOWN
     seniority: Seniority = Seniority.UNKNOWN

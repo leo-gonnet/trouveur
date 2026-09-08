@@ -25,7 +25,7 @@ employment_type = _enum(
     "employment_type", "full_time", "part_time", "contract", "temporary",
     "internship", "apprenticeship", "unknown",
 )
-work_kind = _enum("work_kind", "derive", "embed", "dedup")
+work_kind = _enum("work_kind", "detail", "derive", "embed", "dedup")
 rule_verdict = _enum("rule_verdict", "pass", "reject", "unknown")
 user_state = _enum("user_state", "new", "saved", "applied", "dismissed")
 run_status = _enum("run_status", "queued", "running", "success", "failed")
@@ -39,6 +39,7 @@ source_document = sa.Table(
     sa.Column("source", sa.Text, nullable=False),
     sa.Column("external_id", sa.Text, nullable=False),
     sa.Column("kind", document_kind, nullable=False),
+    sa.Column("scope", sa.Text),
     sa.Column("payload", JSONB, nullable=False),
     sa.Column("payload_sha256", BYTEA, nullable=False),
     sa.Column("fetched_at", sa.DateTime(timezone=True), nullable=False,
@@ -59,6 +60,7 @@ job = sa.Table(
     sa.Column("public_id", UUID(as_uuid=True), nullable=False),
     sa.Column("source", sa.Text, nullable=False),
     sa.Column("external_id", sa.Text, nullable=False),
+    sa.Column("scope", sa.Text),
     sa.Column("url", sa.Text, nullable=False),
     sa.Column("title", sa.Text, nullable=False),
     sa.Column("company", sa.Text),
@@ -98,9 +100,9 @@ job_facet = sa.Table(
     metadata,
     sa.Column("job_id", sa.BigInteger, primary_key=True),
     sa.Column("derive_version", sa.Integer, nullable=False, server_default="0"),
-    sa.Column("country", sa.CHAR(2)),
-    sa.Column("region", sa.Text),
-    sa.Column("city", sa.Text),
+    sa.Column("countries", ARRAY(sa.Text), nullable=False, server_default="{}"),
+    sa.Column("regions", ARRAY(sa.Text), nullable=False, server_default="{}"),
+    sa.Column("cities", ARRAY(sa.Text), nullable=False, server_default="{}"),
     sa.Column("work_mode", work_mode, nullable=False, server_default="unknown"),
     sa.Column("seniority", seniority, nullable=False, server_default="unknown"),
     sa.Column("employment_type", employment_type, nullable=False, server_default="unknown"),

@@ -38,7 +38,7 @@ def upgrade() -> None:
         ("seniority", "'intern','junior','mid','senior','lead','executive','unknown'"),
         ("employment_type",
          "'full_time','part_time','contract','temporary','internship','apprenticeship','unknown'"),
-        ("work_kind", "'derive','embed','dedup'"),
+        ("work_kind", "'detail','derive','embed','dedup'"),
         ("rule_verdict", "'pass','reject','unknown'"),
         ("user_state", "'new','saved','applied','dismissed'"),
         ("run_status", "'queued','running','success','failed'"),
@@ -53,6 +53,7 @@ def upgrade() -> None:
             source         text NOT NULL,
             external_id    text NOT NULL,
             kind           document_kind NOT NULL,
+            scope          text,
             payload        jsonb NOT NULL,
             payload_sha256 bytea NOT NULL,
             fetched_at     timestamptz NOT NULL DEFAULT now(),
@@ -73,6 +74,7 @@ def upgrade() -> None:
             public_id            uuid NOT NULL DEFAULT gen_random_uuid(),
             source               text NOT NULL,
             external_id          text NOT NULL,
+            scope                text,
             url                  text NOT NULL,
             title                text NOT NULL,
             company              text,
@@ -125,7 +127,8 @@ def upgrade() -> None:
     op.execute("CREATE INDEX job_search_fold_trgm_idx ON job USING gin (search_fold gin_trgm_ops)")
     op.execute("CREATE INDEX job_open_posted_idx ON job (posted_at DESC NULLS LAST) "
                "WHERE closed_at IS NULL")
-    op.execute("CREATE INDEX job_source_seen_idx ON job (source, last_seen_at) "
+    # Serves lifecycle: "open postings in this scope not seen since the sweep began".
+    op.execute("CREATE INDEX job_source_seen_idx ON job (source, scope, last_seen_at) "
                "WHERE closed_at IS NULL")
     op.execute("CREATE INDEX job_content_hash_idx ON job (content_hash)")
     op.execute("CREATE INDEX job_dedup_group_idx ON job (dedup_group) "
@@ -140,9 +143,9 @@ def upgrade() -> None:
         CREATE TABLE job_facet (
             job_id              bigint PRIMARY KEY REFERENCES job(id) ON DELETE CASCADE,
             derive_version      integer NOT NULL DEFAULT 0,
-            country             char(2),
-            region              text,
-            city                text,
+            countries           text[] NOT NULL DEFAULT '{}',
+            regions             text[] NOT NULL DEFAULT '{}',
+            cities              text[] NOT NULL DEFAULT '{}',
             work_mode           work_mode NOT NULL DEFAULT 'unknown',
             seniority           seniority NOT NULL DEFAULT 'unknown',
             employment_type     employment_type NOT NULL DEFAULT 'unknown',
@@ -157,7 +160,8 @@ def upgrade() -> None:
         """
     )
     op.execute("CREATE INDEX job_facet_stale_idx ON job_facet (derive_version)")
-    op.execute("CREATE INDEX job_facet_country_idx ON job_facet (country)")
+    op.execute("CREATE INDEX job_facet_country_idx ON job_facet USING gin (countries)")
+    op.execute("CREATE INDEX job_facet_city_idx ON job_facet USING gin (cities)")
     op.execute("CREATE INDEX job_facet_work_mode_idx ON job_facet (work_mode)")
     op.execute("CREATE INDEX job_facet_seniority_idx ON job_facet (seniority)")
     op.execute("CREATE INDEX job_facet_salary_idx ON job_facet (salary_min_eur_year)")

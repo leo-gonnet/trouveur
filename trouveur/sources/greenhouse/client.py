@@ -99,6 +99,7 @@ class GreenhouseSource:
                     source=SOURCE,
                     external_id=external_id(slug, job["id"]),
                     kind=DocumentKind.LISTING,
+                    scope=slug,
                     payload=job,
                 )
                 for job in jobs[start : start + _BATCH]
