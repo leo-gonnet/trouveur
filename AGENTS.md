@@ -121,6 +121,7 @@ query.** Sources sweep by their own structure; users select over the corpus.
 | `trouveur/web/` | Routes, auth, templates. Reads the DB; never fetches, never sweeps. |
 | `trouveur/runner/` | Schedules runs and drains queues. The only caller of `ingest.run`. |
 | `trouveur/versions.py` | Every derived stage's version, in one file. |
+| `trouveur/eval/` | Retrieval evaluation: personas, planted needles, scorecard. |
 
 ## Critical code patterns
 
@@ -436,6 +437,57 @@ still holds the old readings and no re-derive has been scheduled.
     offline, `schema.py` ↔ server in integration.
   - A stored API key never appears in a rendered page.
 
+## Retrieval evaluation
+
+`trouveur eval` measures whether retrieval finds what it should. It is **not a test**: it produces
+numbers to compare against a baseline, and it never gates a merge.
+
+**Planted known items.** Labelling a corpus is the expensive part of evaluating search, so this
+does the opposite: a haystack of real postings that nobody labels, into which ~27 hand-written
+needles are planted whose relevance is known by construction.
+
+**What it can and cannot measure.** Recall is rigorous — a needle either came back or it did not.
+**Precision is not measurable**, because the haystack is real and an unplanted posting ranking
+highly is unjudged, not wrong. Reporting a precision number here would be inventing one. Planted
+negatives give the usable substitute: postings the deterministic pipeline must exclude, so "did
+anything that should have been filtered survive" is answerable without judging the haystack.
+
+**Needles are tiered by which retriever should find them**, because one aggregate number cannot
+answer the question worth asking — whether the hybrid earns its cost:
+
+| Tier | Shape | Should be found by |
+|---|---|---|
+| `T1` | shares the persona's vocabulary | lexical alone |
+| `T2` | same role, **no shared vocabulary** | dense only |
+| `T3` | adjacent role, different title, sometimes another language | dense + query expansion |
+| `N` | must be excluded by rules or hard filters | nothing — it should never survive |
+
+**A T2 or T3 needle that shares a content word with its persona is worthless** — it silently
+becomes a T1 and the tier stops measuring dense recall. Four of twelve leaked a word on the first
+draft (`startup`, `maintenance`, `Auswertung`), so `tests/unit/test_eval_needles.py` enforces it.
+
+Other rules the harness depends on:
+
+- **Personas are fictional.** They must never be a real user's profile — this repo is public.
+- **Needles are planted through the real ingest path**, not inserted into `job`. A needle that
+  skipped normalisation and derivation would be a row the pipeline could never have produced.
+- **The haystack is real postings from occupational fields the personas plausibly compete in.**
+  Filling it with retail vacancies would let the hard filters remove most of it for free and
+  flatter every number.
+- **Drain details before scoring.** The needles carry descriptions; a haystack of title-only
+  postings is not the corpus production has, and the comparison would be between unlike things.
+- **Run it with the real embedding model.** `EMBEDDING_PROVIDER=deterministic` makes every dense
+  number noise, so the harness warns rather than letting you read it as a result.
+- **`TROUVEUR_EVAL_DATABASE_URL` is required and must be a scratch database.** The harness plants
+  fake postings and overwrites personas' profiles.
+
+```bash
+export TROUVEUR_EVAL_DATABASE_URL=postgresql+asyncpg://trouveur:x@127.0.0.1:55433/trouveur
+DATABASE_URL=$TROUVEUR_EVAL_DATABASE_URL uv run alembic upgrade head
+uv run trouveur eval --sweep                 # fetch a haystack, then score
+uv run trouveur eval --save-baseline         # record the result for future comparison
+```
+
 ## Commands
 
 ```bash
@@ -474,6 +526,7 @@ test a parser — use a fixture.
 | `trouveur refill --kind embed` | re-embeds the corpus; hours of CPU |
 | `trouveur test-notify` | reaches a real inbox |
 | `trouveur runner` | long-running; starts real scans on a schedule |
+| `trouveur eval --sweep` | hits live APIs to build a haystack |
 | `git push`, `gh` commands that create or comment | public and hard to undo |
 
 ## Commit style

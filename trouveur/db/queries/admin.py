@@ -254,6 +254,24 @@ async def corpus_overview(conn: AsyncConnection) -> sa.Row:
     ).one()
 
 
+async def description_coverage(conn: AsyncConnection) -> int:
+    """Open postings that actually have a description.
+
+    A posting with only a title embeds on far less text, so the share of the corpus that has one
+    changes what any retrieval measurement means.
+    """
+    return int(
+        (
+            await conn.execute(
+                sa.select(sa.func.count())
+                .select_from(job)
+                .where(job.c.closed_at.is_(None), job.c.description.isnot(None))
+            )
+        ).scalar_one()
+        or 0
+    )
+
+
 async def derived_coverage(conn: AsyncConnection) -> sa.Row:
     """How much of the open corpus is actually usable by retrieval.
 

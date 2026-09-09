@@ -128,6 +128,57 @@ def refill(kind: str, chunk: int) -> None:
     click.echo(f"queued {asyncio.run(_run())} item(s) for {kind} at version {target}")
 
 
+@main.command("eval")
+@click.option("--limit", "k", default=200, show_default=True, help="Retrieval depth to score at.")
+@click.option("--save-baseline", is_flag=True, help="Record this run as the new baseline.")
+@click.option("--sweep", is_flag=True, help="Fetch a fresh haystack from live sources first.")
+def evaluate_retrieval(k: int, save_baseline: bool, sweep: bool) -> None:
+    """Score retrieval against planted needles. Measures recall; never gates anything.
+
+    Requires TROUVEUR_EVAL_DATABASE_URL pointing at a scratch database. Refusing to run against
+    DATABASE_URL is deliberate: the harness plants fake postings and rewrites personas' profiles,
+    and doing that to a real corpus would be unrecoverable.
+
+    Populate the scratch corpus first with a real sweep, so the needles have to compete with real
+    postings. Against an empty haystack every number is 100% and means nothing.
+    """
+    import os
+
+    eval_url = os.environ.get("TROUVEUR_EVAL_DATABASE_URL")
+    if not eval_url:
+        raise SystemExit(
+            "Set TROUVEUR_EVAL_DATABASE_URL to a scratch database. The harness writes fake "
+            "postings and overwrites profiles; it must never point at a real corpus."
+        )
+    os.environ["DATABASE_URL"] = eval_url
+
+    from trouveur.eval import harness
+
+    if get_settings().embedding_provider == "deterministic":
+        click.echo(
+            "warning: EMBEDDING_PROVIDER=deterministic produces meaningless vectors, so every "
+            "dense number below is noise.",
+            err=True,
+        )
+
+    if sweep:
+        click.echo("fetching a haystack from live sources...", err=True)
+        click.echo(f"collected {asyncio.run(harness.snapshot_haystack())} postings", err=True)
+
+    card = asyncio.run(harness.run_eval(limit=k))
+    baseline = harness.read_baseline()
+    click.echo(harness.render(card, baseline))
+
+    if lost := harness.regressions(card, baseline):
+        click.echo("\nrecall regressed:", err=True)
+        for line in lost:
+            click.echo(f"  {line}", err=True)
+
+    if save_baseline:
+        harness.write_baseline(card)
+        click.echo(f"\nbaseline written to {harness.BASELINE}")
+
+
 @main.group()
 def tenants() -> None:
     """Manage the crawl set: which companies a per-tenant source sweeps.

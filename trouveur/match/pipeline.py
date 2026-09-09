@@ -21,9 +21,7 @@ from trouveur.crypto import CredentialError, decrypt
 from trouveur.db.engine import connect
 from trouveur.db.queries import match as match_q
 from trouveur.db.queries import users as users_q
-from trouveur.ingest.embed import get_provider
-from trouveur.match import expand, llm, rerank
-from trouveur.match.fuse import best_ranks, reciprocal_rank_fusion
+from trouveur.match import expand, llm, rerank, retrieve
 from trouveur.match.rules import evaluate
 from trouveur.models import Candidate, RuleVerdict, UserProfile
 from trouveur.versions import QUERY_EXPANSION_VERSION
@@ -151,20 +149,9 @@ async def _retrieve(
     conn: AsyncConnection, profile: UserProfile, queries: list[str], report: MatchReport
 ) -> None:
     """Hybrid retrieval: one dense search per query, one lexical search per query, fused by rank."""
-    provider = get_provider()
-    vectors = await provider.embed_queries(queries)
-
-    per_query = max(profile.retrieval_limit // max(len(queries), 1), 25)
-    dense_lists = [
-        await match_q.dense_candidates(conn, profile, vector, per_query) for vector in vectors
-    ]
-    lexical_lists = [
-        await match_q.lexical_candidates(conn, profile, query, per_query) for query in queries
-    ]
-
-    fused = reciprocal_rank_fusion([*dense_lists, *lexical_lists])[: profile.retrieval_limit]
-    dense_rank = best_ranks(dense_lists)
-    lexical_rank = best_ranks(lexical_lists)
+    arms = await retrieve.retrieve_arms(conn, profile, queries)
+    fused = retrieve.fuse(arms, profile.retrieval_limit)
+    dense_rank, lexical_rank = retrieve.ranks(arms)
 
     rows = [
         {

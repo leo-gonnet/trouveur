@@ -1,11 +1,13 @@
 """Local ONNX embeddings. No network, no per-document cost, no torch.
 
-multilingual-e5-small handles German and English in one vector space, which this corpus needs: an
-Austrian advert and its English equivalent must land near each other.
+The model handles German and English in one vector space, which this corpus needs: an Austrian
+advert and its English equivalent must land near each other.
 
-The e5 family is trained with "passage: " and "query: " prefixes and loses noticeable recall
-without them. They are applied here rather than by callers, because a caller that forgets is
-indistinguishable from one that remembers until you measure retrieval quality.
+Prefixes are a property of the model, declared here rather than applied by callers. This one is
+symmetric -- trained for sentence similarity, so a query and a document are encoded identically
+and it takes no prefix. The e5 family is the opposite: it expects "passage: " and "query: " and
+loses noticeable recall without them. Getting this backwards is silent either way, so a model
+swap must set the prefixes alongside the name, and both belong in one place.
 """
 
 from __future__ import annotations
@@ -18,7 +20,9 @@ from trouveur.ingest.embed.base import EMBEDDING_DIM
 
 log = logging.getLogger(__name__)
 
-MODEL = "intfloat/multilingual-e5-small"
+MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+DOCUMENT_PREFIX = ""
+QUERY_PREFIX = ""
 _BATCH = 64
 
 
@@ -43,11 +47,14 @@ class LocalOnnxProvider:
             self._model = TextEmbedding(model_name=MODEL)
         return self._model
 
+    document_prefix = DOCUMENT_PREFIX
+    query_prefix = QUERY_PREFIX
+
     async def embed_documents(self, texts: list[str]) -> list[list[float]]:
-        return await self._embed([f"passage: {text}" for text in texts])
+        return await self._embed([f"{self.document_prefix}{text}" for text in texts])
 
     async def embed_queries(self, texts: list[str]) -> list[list[float]]:
-        return await self._embed([f"query: {text}" for text in texts])
+        return await self._embed([f"{self.query_prefix}{text}" for text in texts])
 
     async def _embed(self, texts: list[str]) -> list[list[float]]:
         if not texts:

@@ -22,12 +22,15 @@ class DeterministicProvider:
     name = "deterministic"
     model = "sha256"
     dim = EMBEDDING_DIM
+    # Asymmetric on purpose, so tests exercise the prefix path even though the vectors are noise.
+    document_prefix = "passage: "
+    query_prefix = "query: "
 
     async def embed_documents(self, texts: list[str]) -> list[list[float]]:
-        return [self._vector(f"passage: {text}") for text in texts]
+        return [self._vector(f"{self.document_prefix}{text}") for text in texts]
 
     async def embed_queries(self, texts: list[str]) -> list[list[float]]:
-        return [self._vector(f"query: {text}") for text in texts]
+        return [self._vector(f"{self.query_prefix}{text}") for text in texts]
 
     def _vector(self, text: str) -> list[float]:
         raw = b""

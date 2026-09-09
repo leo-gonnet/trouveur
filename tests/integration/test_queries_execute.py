@@ -66,6 +66,7 @@ def _arguments(ctx: dict) -> dict[str, dict]:
         "admin.source_health": {},
         "admin.corpus_overview": {},
         "admin.derived_coverage": {},
+        "admin.description_coverage": {},
         "admin.ensure_schedule": {},
         "admin.get_schedule": {},
         "admin.update_schedule": {"values": {"enabled": True, "run_hour": 6, "run_minute": 30}},

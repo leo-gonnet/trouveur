@@ -6,9 +6,10 @@ every time.
 
 Two rules the protocol exists to enforce:
 
-Embedding is asymmetric. Retrieval models are trained with different prefixes for documents and
-for queries, and embedding both the same way costs real recall while looking like it works. Hence
-two methods rather than one with a flag.
+Documents and queries are embedded through separate methods, because whether they need different
+treatment is a property of the model. e5-family models expect "passage: " and "query: " prefixes
+and lose real recall without them; sentence-similarity models are symmetric and take none. Either
+mistake is silent, so the provider owns the prefixes and no caller can forget or misapply them.
 
 The version is a string, never an integer. It names the provider, the model and the width, so a
 row's vector space is legible from the row. An integer could not express that two rows came from
@@ -29,6 +30,8 @@ class EmbeddingProvider(Protocol):
     name: str
     model: str
     dim: int
+    document_prefix: str
+    query_prefix: str
 
     async def embed_documents(self, texts: list[str]) -> list[list[float]]: ...
 

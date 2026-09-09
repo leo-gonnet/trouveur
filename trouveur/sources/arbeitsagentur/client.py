@@ -64,6 +64,13 @@ class ArbeitsagenturSource:
     # drains it at a polite constant rate instead of the sweep paying ~36k requests inline.
     requires_detail = True
 
+    def __init__(self, partition_filter: list[str] | None = None) -> None:
+        # Restricts the sweep to occupational fields whose name contains one of these strings.
+        # For debugging a single partition and for building an evaluation corpus; a production
+        # sweep leaves it unset, and a run that sets it logs the narrowing so a corpus that
+        # stopped growing is traceable to this rather than to the source.
+        self.partition_filter = partition_filter
+
     async def sweep(
         self, client: PoliteClient, sink: DocumentSink, *, backfill: bool = False
     ) -> SweepOutcome:
@@ -75,6 +82,14 @@ class ArbeitsagenturSource:
             )
 
         partitions, expected = await self._partitions(client, window)
+        if self.partition_filter:
+            wanted = [f.lower() for f in self.partition_filter]
+            partitions = [p for p in partitions if any(w in p.lower() for w in wanted)]
+            log.warning(
+                "arbeitsagentur: restricted to %d of the available occupational fields; this is "
+                "not a full sweep",
+                len(partitions),
+            )
         # A delta sweep observes only postings published inside its window, so it can never
         # establish that an older posting has gone. closable_scopes stays empty, which forbids
         # lifecycle from closing anything on the strength of this sweep. See SweepOutcome.
