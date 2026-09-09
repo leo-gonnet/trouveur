@@ -39,7 +39,7 @@ from trouveur.db.queries import ingest as ingest_q
 from trouveur.db.queries import jobs as jobs_q
 from trouveur.db.queries import users as users_q
 from trouveur.ingest.persist import persist
-from trouveur.ingest.workers import drain_derive, drain_embed
+from trouveur.ingest.workers import drain_dedup, drain_derive, drain_embed
 from trouveur.match import retrieve
 from trouveur.match.expand import deterministic_queries
 from trouveur.match.rules import evaluate
@@ -153,7 +153,9 @@ async def drain_everything(batch: int = 256) -> None:
             derived = await drain_derive(conn, limit=1000)
         async with connect() as conn:
             embedded = await drain_embed(conn, limit=batch)
-        if not derived and not embedded:
+        async with connect() as conn:
+            marked = await drain_dedup(conn)
+        if not derived and not embedded and not marked:
             break
     async with connect() as conn:
         remaining = await backlog(conn)
@@ -247,11 +249,13 @@ async def _evaluate_persona(
         # then the user, so it is scored after the cut rather than at retrieval. Uses the real
         # rules, not a copy: a second implementation here would grade the wrong thing.
         surviving = 0
+        agency = await jobs_q.agency_flags(conn, retrieved_negatives)
         for row in await jobs_q.load_for_derive(conn, retrieved_negatives):
             verdict, _ = evaluate(
                 Candidate(
                     job_id=row.id, content_hash=b"", title=row.title,
                     company=row.company, description=row.description,
+                    is_agency=agency.get(row.id),
                 ),
                 profile,
             )

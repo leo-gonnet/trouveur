@@ -6,11 +6,28 @@
       "title": "Wirtschaftsingenieur",
       "years_experience": 3,
       "objectives": "Nach dem M.Sc. Wirtschaftsingenieurwesen arbeite ich als wissenschaftlicher Assistent an nachhaltigen Produkt-Ökosystemen: Ökobilanzierung, Kreislaufwirtschaft und Wiederverwendungskonzepte für langlebige Investitionsgüter. Davor ein Traineeprogramm bei einem Bauunternehmen. Ich suche eine Position, die technisches Verständnis mit Nachhaltigkeitsstrategie verbindet, gern an der Schnittstelle zwischen Entwicklung und Management.",
-      "languages": ["de", "en"],
-      "keywords": ["Wirtschaftsingenieur", "Nachhaltigkeit", "Kreislaufwirtschaft", "Produktentwicklung"],
-      "must_have": ["Nachhaltigkeitsbezug"],
-      "deal_breakers": ["Zeitarbeit", "reiner Vertrieb"],
-      "countries": ["DE", "AT"],
+      "languages": [
+        "de",
+        "en"
+      ],
+      "keywords": [
+        "Wirtschaftsingenieur",
+        "Nachhaltigkeit",
+        "Kreislaufwirtschaft",
+        "Produktentwicklung",
+        "ISO 14001"
+      ],
+      "must_have": [
+        "Nachhaltigkeitsbezug"
+      ],
+      "deal_breakers": [
+        "Zeitarbeit",
+        "reiner Vertrieb"
+      ],
+      "countries": [
+        "DE",
+        "AT"
+      ],
       "seniorities": [],
       "employment_types": [],
       "min_salary_eur_year": 0
@@ -23,11 +40,25 @@
       "title": "Backend Software Engineer",
       "years_experience": 5,
       "objectives": "I build backend services in Java with Spring Boot and MongoDB, plus some Kotlin. I want a small product company or startup where I own services end to end, rather than a large enterprise with heavy process. Comfortable with Docker, Kubernetes and event-driven architectures.",
-      "languages": ["en", "de"],
-      "keywords": ["Java", "Spring Boot", "MongoDB", "Backend"],
+      "languages": [
+        "en",
+        "de"
+      ],
+      "keywords": [
+        "Java",
+        "Spring Boot",
+        "MongoDB",
+        "Backend"
+      ],
       "must_have": [],
-      "deal_breakers": ["Zeitarbeit", "Arbeitnehmerüberlassung"],
-      "countries": ["DE", "AT"],
+      "deal_breakers": [
+        "Zeitarbeit",
+        "Arbeitnehmerüberlassung"
+      ],
+      "countries": [
+        "DE",
+        "AT"
+      ],
       "seniorities": [],
       "employment_types": [],
       "min_salary_eur_year": 0
@@ -40,11 +71,23 @@
       "title": "Maschinenbauingenieur",
       "years_experience": 6,
       "objectives": "Ich bin Maschinenbauingenieur in der Instandhaltung und habe mich über Jahre zur Datenanalyse hin entwickelt: Auswertung von Sensordaten, Predictive Maintenance, Python und SQL. Ich möchte vollständig in eine datengetriebene Rolle wechseln, idealerweise im industriellen Umfeld, wo mein Maschinenverständnis noch zählt.",
-      "languages": ["de", "en"],
-      "keywords": ["Python", "SQL", "Predictive Maintenance"],
+      "languages": [
+        "de",
+        "en"
+      ],
+      "keywords": [
+        "Python",
+        "SQL",
+        "Predictive Maintenance"
+      ],
       "must_have": [],
-      "deal_breakers": ["Zeitarbeit"],
-      "countries": ["DE", "AT"],
+      "deal_breakers": [
+        "Zeitarbeit"
+      ],
+      "countries": [
+        "DE",
+        "AT"
+      ],
       "seniorities": [],
       "employment_types": [],
       "min_salary_eur_year": 0

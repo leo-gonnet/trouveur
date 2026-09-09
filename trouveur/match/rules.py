@@ -39,4 +39,10 @@ def evaluate(candidate: Candidate, profile: UserProfile) -> tuple[RuleVerdict, s
         if folded and folded in full_text:
             return RuleVerdict.REJECT, f"deal-breaker: {term}"
 
+    # The source said so in a structured field, which is far more reliable than finding
+    # "Zeitarbeit" in prose -- an advert can be a staffing placement without ever using the word.
+    # Only True rejects: None means no detail has arrived, and absence is not evidence.
+    if candidate.is_agency is True:
+        return RuleVerdict.REJECT, "staffing agency (source flag)"
+
     return RuleVerdict.PASS, "passed rules"

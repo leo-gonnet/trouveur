@@ -111,3 +111,28 @@ def test_combine_deduplicates_case_insensitively_and_keeps_user_words_first():
     combined = combine(["Wirtschaftsingenieur"], ["wirtschaftsingenieur", "Industrial Engineer"])
     assert combined[0] == "Wirtschaftsingenieur"
     assert combined == ["Wirtschaftsingenieur", "Industrial Engineer"]
+
+
+def test_a_staffing_agency_is_rejected_by_the_source_flag_not_by_prose():
+    """The evaluation harness found this: is_agency was derived and then never read.
+
+    Every persona whose deal-breakers happened to include the exact word was protected, and every
+    persona whose did not sent staffing placements to a paid reranker and then to the user. An
+    advert can be a placement without ever printing "Zeitarbeit", which is why the structured flag
+    exists in the first place.
+    """
+    profile = UserProfile(user_id=1, deal_breakers=[])
+    flagged = _candidate(title="Wirtschaftsingenieur (m/w/d)", company="Vermittlung GmbH",
+                         description="Eine spannende Aufgabe bei unserem Kunden.", is_agency=True)
+    verdict, reason = evaluate(flagged, profile)
+    assert verdict is RuleVerdict.REJECT
+    assert "agency" in reason
+
+
+def test_an_unknown_agency_flag_does_not_reject():
+    """None means no detail has arrived yet. Absence of evidence is not evidence."""
+    profile = UserProfile(user_id=1)
+    unknown = _candidate(title="Wirtschaftsingenieur (m/w/d)", is_agency=None)
+    assert evaluate(unknown, profile)[0] is RuleVerdict.PASS
+    known_good = _candidate(title="Wirtschaftsingenieur (m/w/d)", is_agency=False)
+    assert evaluate(known_good, profile)[0] is RuleVerdict.PASS

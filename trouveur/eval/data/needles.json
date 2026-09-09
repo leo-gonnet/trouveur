@@ -744,5 +744,89 @@
       "updated_at": "2026-09-01T09:00:00-04:00",
       "content": "&lt;p&gt;You will work on the shop floor data of heavy machinery: understanding failure modes, building models that anticipate them, and helping repair teams act on the result.&lt;/p&gt;&lt;p&gt;An engineering background around machines matters more to us than a statistics degree.&lt;/p&gt;"
     }
+  },
+  {
+    "id": "wing_t1_rare_iso",
+    "persona": "wing_nachhaltigkeit",
+    "tier": "T1",
+    "source": "arbeitsagentur",
+    "note": "Semantically distant title carrying a rare exact token from the persona. Dense should smear ISO 14001 into generic quality management; lexical should match it exactly. This is the shape that decides whether fusion earns its cost.",
+    "listing": {
+      "referenznummer": "EVAL-wing-t1c",
+      "stellenangebotsTitel": "Fachkraft für Managementsysteme (m/w/d)",
+      "firma": "Westmark Verbundstoffe GmbH",
+      "arbeitszeitVollzeit": true,
+      "datumErsteVeroeffentlichung": "2026-09-02",
+      "stellenlokationen": [
+        {
+          "adresse": {
+            "ort": "Bielefeld",
+            "region": "NORDRHEIN_WESTFALEN",
+            "land": "DEUTSCHLAND"
+          }
+        }
+      ]
+    },
+    "detail": {
+      "referenznummer": "EVAL-wing-t1c",
+      "istArbeitnehmerUeberlassung": false,
+      "stellenangebotsBeschreibung": "Sie pflegen und auditieren unsere Managementsysteme nach ISO 14001 und begleiten interne wie externe Auditoren. Erfahrung mit Umweltkennzahlen ist von Vorteil."
+    }
+  },
+  {
+    "id": "java_t1_rare_mongo",
+    "persona": "backend_java",
+    "tier": "T1",
+    "source": "arbeitsagentur",
+    "note": "Title a vector would not associate with backend engineering, but it names MongoDB exactly once. Lexical should find it; dense probably should not.",
+    "listing": {
+      "referenznummer": "EVAL-java-t1c",
+      "stellenangebotsTitel": "Mitarbeiter:in Datenplattform (m/w/d)",
+      "firma": "Uferlicht Medien GmbH",
+      "arbeitszeitVollzeit": true,
+      "datumErsteVeroeffentlichung": "2026-09-02",
+      "stellenlokationen": [
+        {
+          "adresse": {
+            "ort": "Potsdam",
+            "region": "BRANDENBURG",
+            "land": "DEUTSCHLAND"
+          }
+        }
+      ]
+    },
+    "detail": {
+      "referenznummer": "EVAL-java-t1c",
+      "istArbeitnehmerUeberlassung": false,
+      "stellenangebotsBeschreibung": "Sie betreuen unsere Speicherschicht, überwiegend MongoDB, und sorgen für Verfügbarkeit und Sicherungen. Enge Abstimmung mit den Produktteams."
+    }
+  },
+  {
+    "id": "data_t1_rare_pdm",
+    "persona": "maschinenbau_zu_daten",
+    "tier": "T1",
+    "source": "arbeitsagentur",
+    "note": "An unremarkable maintenance title that names Predictive Maintenance once in the body.",
+    "listing": {
+      "referenznummer": "EVAL-data-t1c",
+      "stellenangebotsTitel": "Fachreferent:in Anlagenverfügbarkeit (m/w/d)",
+      "firma": "Kranzberg Werke AG",
+      "arbeitszeitVollzeit": true,
+      "datumErsteVeroeffentlichung": "2026-09-02",
+      "stellenlokationen": [
+        {
+          "adresse": {
+            "ort": "Ingolstadt",
+            "region": "BAYERN",
+            "land": "DEUTSCHLAND"
+          }
+        }
+      ]
+    },
+    "detail": {
+      "referenznummer": "EVAL-data-t1c",
+      "istArbeitnehmerUeberlassung": false,
+      "stellenangebotsBeschreibung": "Sie verantworten die Verfügbarkeit unserer Fertigungslinien und führen Predictive Maintenance als festen Bestandteil der Wartungsplanung ein."
+    }
   }
 ]

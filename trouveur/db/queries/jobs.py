@@ -43,6 +43,18 @@ async def write_facets(conn: AsyncConnection, rows: Sequence[dict]) -> None:
     )
 
 
+async def agency_flags(conn: AsyncConnection, job_ids: Sequence[int]) -> dict[int, bool | None]:
+    """The derived staffing-agency flag per job, for callers applying the rules cut."""
+    if not job_ids:
+        return {}
+    rows = await conn.execute(
+        sa.select(job_facet.c.job_id, job_facet.c.is_agency).where(
+            job_facet.c.job_id.in_(list(job_ids))
+        )
+    )
+    return {row.job_id: row.is_agency for row in rows}
+
+
 async def load_for_embedding(conn: AsyncConnection, job_ids: Sequence[int]) -> list[sa.Row]:
     if not job_ids:
         return []

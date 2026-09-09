@@ -1,0 +1,172 @@
+{
+  "corpus_open": 4110,
+  "corpus_with_description": 1193,
+  "embedding_version": "local-onnx:sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2:384",
+  "limit": 200,
+  "personas": [
+    {
+      "corpus_open": 4110,
+      "inversions": 7,
+      "missed": [],
+      "negatives_retrieved": 2,
+      "negatives_surviving_rules": 0,
+      "negatives_total": 3,
+      "persona": "wing_nachhaltigkeit",
+      "queries": 7,
+      "recall": {
+        "dense": {
+          "T1": {
+            "found": 2,
+            "total": 3
+          },
+          "T2": {
+            "found": 2,
+            "total": 2
+          },
+          "T3": {
+            "found": 2,
+            "total": 2
+          }
+        },
+        "fused": {
+          "T1": {
+            "found": 3,
+            "total": 3
+          },
+          "T2": {
+            "found": 2,
+            "total": 2
+          },
+          "T3": {
+            "found": 2,
+            "total": 2
+          }
+        },
+        "lexical": {
+          "T1": {
+            "found": 3,
+            "total": 3
+          },
+          "T2": {
+            "found": 0,
+            "total": 2
+          },
+          "T3": {
+            "found": 0,
+            "total": 2
+          }
+        }
+      }
+    },
+    {
+      "corpus_open": 4110,
+      "inversions": 5,
+      "missed": [],
+      "negatives_retrieved": 2,
+      "negatives_surviving_rules": 0,
+      "negatives_total": 3,
+      "persona": "backend_java",
+      "queries": 6,
+      "recall": {
+        "dense": {
+          "T1": {
+            "found": 3,
+            "total": 3
+          },
+          "T2": {
+            "found": 2,
+            "total": 2
+          },
+          "T3": {
+            "found": 2,
+            "total": 2
+          }
+        },
+        "fused": {
+          "T1": {
+            "found": 3,
+            "total": 3
+          },
+          "T2": {
+            "found": 2,
+            "total": 2
+          },
+          "T3": {
+            "found": 2,
+            "total": 2
+          }
+        },
+        "lexical": {
+          "T1": {
+            "found": 3,
+            "total": 3
+          },
+          "T2": {
+            "found": 0,
+            "total": 2
+          },
+          "T3": {
+            "found": 0,
+            "total": 2
+          }
+        }
+      }
+    },
+    {
+      "corpus_open": 4110,
+      "inversions": 4,
+      "missed": [
+        "data_t2b"
+      ],
+      "negatives_retrieved": 1,
+      "negatives_surviving_rules": 0,
+      "negatives_total": 3,
+      "persona": "maschinenbau_zu_daten",
+      "queries": 5,
+      "recall": {
+        "dense": {
+          "T1": {
+            "found": 3,
+            "total": 3
+          },
+          "T2": {
+            "found": 2,
+            "total": 2
+          },
+          "T3": {
+            "found": 2,
+            "total": 2
+          }
+        },
+        "fused": {
+          "T1": {
+            "found": 3,
+            "total": 3
+          },
+          "T2": {
+            "found": 1,
+            "total": 2
+          },
+          "T3": {
+            "found": 2,
+            "total": 2
+          }
+        },
+        "lexical": {
+          "T1": {
+            "found": 3,
+            "total": 3
+          },
+          "T2": {
+            "found": 0,
+            "total": 2
+          },
+          "T3": {
+            "found": 0,
+            "total": 2
+          }
+        }
+      }
+    }
+  ]
+}

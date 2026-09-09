@@ -37,6 +37,9 @@ class Candidate(BaseModel):
     salary_min_eur_year: int | None = None
     salary_max_eur_year: int | None = None
     work_mode: str | None = None
+    # Derived from the source's own structured flag, not from prose. None means the posting has
+    # no detail yet, which is genuinely unknown rather than "not an agency".
+    is_agency: bool | None = None
     retrieval_score: float = 0.0
     dense_rank: int | None = None
     lexical_rank: int | None = None

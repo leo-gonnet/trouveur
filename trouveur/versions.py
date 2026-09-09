@@ -11,7 +11,7 @@ variable is not a bump; fixing a parser is.
 from __future__ import annotations
 
 # Deterministic facet derivation: location parsing, salary annualisation, seniority, work mode.
-DERIVE_VERSION = 1
+DERIVE_VERSION = 2
 
 # Semantic-duplicate marker pass. Markers only; this never merges or deletes rows.
 DEDUP_VERSION = 1

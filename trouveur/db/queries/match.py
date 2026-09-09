@@ -214,9 +214,11 @@ async def pending_rules(
         await conn.execute(
             sa.text(
                 """
-                SELECT m.job_id, j.content_hash, j.title, j.company, j.description
+                SELECT m.job_id, j.content_hash, j.title, j.company, j.description,
+                       f.is_agency
                 FROM user_job_match m
                 JOIN job j ON j.id = m.job_id
+                JOIN job_facet f ON f.job_id = j.id
                 WHERE m.user_id = :user_id AND m.rule_verdict = 'unknown'
                   AND j.closed_at IS NULL
                 ORDER BY m.retrieval_score DESC NULLS LAST

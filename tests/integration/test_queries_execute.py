@@ -102,6 +102,7 @@ def _arguments(ctx: dict) -> dict[str, dict]:
         # jobs
         "jobs.load_for_derive": {"job_ids": [job_id]},
         "jobs.write_facets": {"rows": [ctx["facet_row"]]},
+        "jobs.agency_flags": {"job_ids": [job_id]},
         "jobs.load_for_embedding": {"job_ids": [job_id]},
         "jobs.write_embeddings": {"rows": [(job_id, "probe:probe:384", [0.01] * 384)]},
         "jobs.load_for_dedup": {"job_ids": [job_id]},

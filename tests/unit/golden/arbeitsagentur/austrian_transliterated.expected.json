@@ -1,0 +1,52 @@
+{
+  "derive_version": 2,
+  "facets": {
+    "cities": [
+      "Wien"
+    ],
+    "countries": [
+      "AT"
+    ],
+    "employment_type": "full_time",
+    "is_agency": null,
+    "language": "de",
+    "regions": [],
+    "salary_annualised": true,
+    "salary_max_eur_year": "72800",
+    "salary_min_eur_year": "58800",
+    "seniority": "unknown",
+    "skills": [],
+    "work_mode": "unknown"
+  },
+  "job": {
+    "agency_hint": null,
+    "closes_at": null,
+    "company": "Donauwerk Anlagenbau GmbH",
+    "department_hint": null,
+    "description": null,
+    "employment_type_hint": "vollzeit",
+    "external_id": "10000-austria-S",
+    "language_hint": "de",
+    "locations": [
+      {
+        "city": "Wien",
+        "country": "OESTERREICH",
+        "raw": "Wien, WIEN, OESTERREICH",
+        "region": "WIEN"
+      }
+    ],
+    "posted_at": "2026-09-02T00:00:00Z",
+    "remote_hint": null,
+    "salary": {
+      "amount_max": "5200",
+      "amount_min": "4200",
+      "currency": "EUR",
+      "period": "MONTH"
+    },
+    "source": "arbeitsagentur",
+    "title": "Wirtschaftsingenieur (m/w/d) Nachhaltigkeit",
+    "updated_at": null,
+    "url": "https://www.arbeitsagentur.de/jobsuche/jobdetail/10000-austria-S"
+  },
+  "normalize_version": 1
+}

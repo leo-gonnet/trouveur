@@ -180,6 +180,7 @@ async def _apply_rules(
             title=row.title,
             company=row.company,
             description=row.description,
+            is_agency=row.is_agency,
         )
         verdict, reason = evaluate(candidate, profile)
         verdicts.append(

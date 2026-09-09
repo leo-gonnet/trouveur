@@ -16,9 +16,15 @@ from trouveur.models.facets import EmploymentType, Seniority, WorkMode
 
 # Both the source's own spelling and the usual English/German names. Unlisted countries derive to
 # nothing rather than to a guess.
+#
+# German country names must appear BOTH umlauted and transliterated. Folding "Österreich" gives
+# "osterreich", but Arbeitsagentur writes "OESTERREICH", which folds to "oesterreich" and matched
+# nothing: every Austrian posting silently lost its country and became invisible to any country
+# filter. That was 4.3% of a live sample, in a product whose whole point is DACH. Same trap for
+# Dänemark/DAENEMARK and Rumänien/RUMAENIEN. Add both spellings for any name with an umlaut.
 COUNTRIES: dict[str, str] = {
     "deutschland": "DE", "germany": "DE", "allemagne": "DE", "de": "DE",
-    "osterreich": "AT", "austria": "AT", "at": "AT",
+    "osterreich": "AT", "oesterreich": "AT", "austria": "AT", "at": "AT",
     "schweiz": "CH", "switzerland": "CH", "suisse": "CH", "ch": "CH",
     "luxemburg": "LU", "luxembourg": "LU",
     "niederlande": "NL", "netherlands": "NL", "holland": "NL",
@@ -33,9 +39,9 @@ COUNTRIES: dict[str, str] = {
     "slowenien": "SI", "slovenia": "SI",
     "ungarn": "HU", "hungary": "HU",
     "kroatien": "HR", "croatia": "HR",
-    "rumanien": "RO", "romania": "RO",
+    "rumanien": "RO", "rumaenien": "RO", "romania": "RO",
     "bulgarien": "BG", "bulgaria": "BG",
-    "danemark": "DK", "denmark": "DK",
+    "danemark": "DK", "daenemark": "DK", "denmark": "DK",
     "schweden": "SE", "sweden": "SE",
     "norwegen": "NO", "norway": "NO",
     "finnland": "FI", "finland": "FI",
@@ -52,6 +58,8 @@ COUNTRIES: dict[str, str] = {
     "singapur": "SG", "singapore": "SG",
     "australien": "AU", "australia": "AU",
     "japan": "JP", "brasilien": "BR", "brazil": "BR",
+    "turkei": "TR", "tuerkei": "TR", "turkey": "TR",
+    "sudafrika": "ZA", "suedafrika": "ZA", "south africa": "ZA",
 }
 
 # Arbeitsagentur writes German federal states in screaming snake case.

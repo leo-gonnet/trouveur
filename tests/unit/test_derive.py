@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+import pytest
+
 from trouveur.ingest.derive import derive
 from trouveur.models import (
     CanonicalJob,
@@ -159,3 +161,32 @@ def test_employment_hint_outranks_title_matching():
     assert (
         derive(_job(title="Praktikum Logistik")).employment_type is EmploymentType.INTERNSHIP
     )
+
+
+# Spellings observed in live Arbeitsagentur payloads on 2026-09-09. The API transliterates
+# umlauts, so a vocabulary keyed only on the umlauted form matches none of them.
+LIVE_COUNTRY_SPELLINGS = {
+    "DEUTSCHLAND": "DE",
+    "OESTERREICH": "AT",
+    "SCHWEIZ": "CH",
+    "NIEDERLANDE": "NL",
+    "POLEN": "PL",
+    "SUEDAFRIKA": "ZA",
+    "DAENEMARK": "DK",
+    "RUMAENIEN": "RO",
+}
+
+
+@pytest.mark.parametrize(("land", "expected"), sorted(LIVE_COUNTRY_SPELLINGS.items()))
+def test_transliterated_country_names_resolve(land: str, expected: str):
+    """Arbeitsagentur writes OESTERREICH, not Österreich.
+
+    The retrieval evaluation found this: every Austrian posting derived to no country at all and
+    was therefore invisible to every country filter, in a product built for DACH. 4.3% of a live
+    sample. It raised nothing, because "never guess" correctly declines to invent a country -- the
+    vocabulary simply had the wrong key.
+    """
+    facets = derive(
+        _job(title="Ingenieur", locations=[Location(raw=f"Wien, {land}", country=land)])
+    )
+    assert facets.countries == [expected]

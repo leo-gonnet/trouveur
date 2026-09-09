@@ -45,6 +45,9 @@ Three rules follow, and none of them are negotiable:
   re-derive rather than a re-crawl.
 - **Never guess.** Every enum has UNKNOWN and every scalar is nullable. A wrong facet is worse than
   a missing one: it silently poisons every filter and ranking that reads it while looking like data.
+  The corollary is that a *missing* facet is equally silent, so anything that derives to nothing
+  needs a vocabulary wide enough to cover how sources actually spell things -- `OESTERREICH` cost
+  4.3% of a live sample its country before the evaluation caught it.
 - **Never re-derive downstream.** If the matcher or a template parses a location again, there are
   two answers to one question and they will diverge — which surfaces as a filter and a score
   disagreeing about the same posting, and is close to undebuggable from the symptom.
@@ -427,6 +430,11 @@ still holds the old readings and no re-derive has been scheduled.
   - German search finds `Wirtschaftsingenieur` when the user types `ingenieur`, and finds
     `München` when the user types `munchen` (both need the integration test).
   - Closing a posting deletes its embedding.
+  - **Transliterated German country names resolve** (`OESTERREICH`, not only `Österreich`). The
+    API transliterates umlauts; a vocabulary keyed only on the umlauted form silently gave every
+    Austrian posting no country at all.
+  - **A staffing agency is rejected by the source's structured flag**, not by finding "Zeitarbeit"
+    in prose.
   - Every source package is registered; `schema.py` and the migration agree; no SQL outside
     `db/queries/`; no source name used as a value downstream.
   - **Every route rejects an anonymous caller** (`tests/unit/test_web_auth.py`, parametrized over
