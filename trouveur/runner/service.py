@@ -22,6 +22,7 @@ from trouveur.db.queries import admin as admin_q
 from trouveur.ingest import pipeline as ingest
 from trouveur.ingest import workers
 from trouveur.match import pipeline as matching
+from trouveur.models import RunStatus, RunTrigger
 from trouveur.notify import send_digests
 from trouveur.sources import build_sources
 from trouveur.sources.http import PoliteClient
@@ -56,10 +57,10 @@ def is_scheduled_run_due(schedule, now: datetime, last_queued_at: datetime | Non
 async def _maybe_enqueue_scheduled(conn) -> None:
     schedule = await admin_q.get_schedule(conn)
     runs = await admin_q.recent_runs(conn, limit=50)
-    scheduled = [run for run in runs if run.trigger == "scheduled"]
+    scheduled = [run for run in runs if run.trigger == RunTrigger.SCHEDULED]
     last = scheduled[0].queued_at if scheduled else None
     if is_scheduled_run_due(schedule, datetime.now(UTC), last):
-        run_id = await admin_q.enqueue_run(conn, trigger="scheduled")
+        run_id = await admin_q.enqueue_run(conn, trigger=RunTrigger.SCHEDULED)
         log.info("queued scheduled run %s", run_id)
 
 
@@ -116,7 +117,7 @@ async def _execute(settings: Settings, run) -> None:
         "digests_sent": notified,
     }
     async with connect() as conn:
-        await admin_q.finish_run(conn, run.id, status="success", report=payload)
+        await admin_q.finish_run(conn, run.id, status=RunStatus.SUCCESS, report=payload)
 
 
 async def _tick(settings: Settings) -> None:
@@ -142,7 +143,10 @@ async def _tick(settings: Settings) -> None:
         log.exception("run %s failed", run.id)
         async with connect() as conn:
             await admin_q.finish_run(
-                conn, run.id, status="failed", error=f"{type(exc).__name__}: {exc}"
+                conn,
+                run.id,
+                status=RunStatus.FAILED,
+                error=f"{type(exc).__name__}: {exc}",
             )
 
 

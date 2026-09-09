@@ -301,7 +301,8 @@ async def recommendations(
             sa.text(
                 """
                 SELECT j.id, j.public_id, j.url, j.title, j.company, j.posted_at, j.source,
-                       j.locations, f.countries, f.cities, f.work_mode::text AS work_mode,
+                       j.closed_at, j.locations, f.countries, f.cities,
+                       f.work_mode::text AS work_mode,
                        f.salary_min_eur_year, f.salary_max_eur_year, f.skills,
                        m.llm_score, m.llm_reason, m.llm_red_flags, m.state::text AS state
                 FROM user_job_match m
@@ -329,7 +330,8 @@ _SEARCH_SQL = """
 SELECT j.id, j.public_id, j.url, j.title, j.company, j.posted_at, j.source, j.closed_at,
        j.locations, f.countries, f.cities, f.work_mode::text AS work_mode,
        f.salary_min_eur_year, f.salary_max_eur_year,
-       m.llm_score, m.rule_verdict::text AS rule_verdict, m.state::text AS state
+       m.llm_score, m.llm_reason, m.llm_red_flags,
+       m.rule_verdict::text AS rule_verdict, m.state::text AS state
 FROM job j
 LEFT JOIN job_facet f ON f.job_id = j.id
 LEFT JOIN user_job_match m ON m.job_id = j.id AND m.user_id = :user_id

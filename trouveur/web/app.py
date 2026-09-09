@@ -19,6 +19,7 @@ from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from jinja2 import StrictUndefined
 
 from trouveur.config import get_settings
 from trouveur.crypto import encrypt, fingerprint
@@ -27,7 +28,7 @@ from trouveur.db.queries import admin as admin_q
 from trouveur.db.queries import match as match_q
 from trouveur.db.queries import users as users_q
 from trouveur.match.pipeline import profile_from_row
-from trouveur.models import UserState
+from trouveur.models import RunTrigger, UserState
 from trouveur.sources.registry import NORMALIZERS
 from trouveur.web import auth
 
@@ -36,7 +37,11 @@ log = logging.getLogger(__name__)
 BASE = Path(__file__).parent
 app = FastAPI(title="Trouveur", docs_url=None, redoc_url=None, openapi_url=None)
 app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")
+# StrictUndefined, not Jinja's default. The default renders an unknown attribute as an empty
+# string, so a template reading a field its query does not select produces a blank cell and a
+# green test suite -- the exact silent-wrong-answer failure this codebase is built to avoid.
 templates = Jinja2Templates(directory=BASE / "templates")
+templates.env.undefined = StrictUndefined
 
 
 def _lines(raw: str) -> list[str]:
@@ -54,22 +59,47 @@ def _decimal(raw: str, default: Decimal) -> Decimal:
         return default
 
 
+# Public by opt-in, never by omission. A route absent from this set requires a session, so the
+# failure mode of forgetting to think about auth is "locked", not "open".
+PUBLIC_PATHS = frozenset({"/", "/login", "/logout", "/healthz"})
+PUBLIC_PREFIXES = ("/static/",)
+
+
 def _session(request: Request) -> dict | None:
     return auth.read_session(get_settings(), request)
 
 
-def _login_redirect() -> RedirectResponse:
-    return RedirectResponse("/login", status_code=303)
+def _is_public(path: str) -> bool:
+    return path in PUBLIC_PATHS or path.startswith(PUBLIC_PREFIXES)
+
+
+@app.middleware("http")
+async def require_session(request: Request, call_next):
+    """Enforce authentication before anything else looks at the request.
+
+    Middleware rather than a per-handler check or a dependency, because both of those run after
+    FastAPI has already parsed and validated the request body: an anonymous POST with a malformed
+    form was answering 422, which means attacker-controlled input was being processed before the
+    caller was known. Nothing leaked, but the ordering was safe only by accident.
+
+    Doing it here also removes the two-line check that was repeated in every handler, which is the
+    repetition that guarantees somebody eventually forgets it on a new route.
+    """
+    session = _session(request)
+    request.state.session = session
+    if session is None and not _is_public(request.url.path):
+        return RedirectResponse("/login", status_code=303)
+    return await call_next(request)
 
 
 @app.get("/", response_class=HTMLResponse)
 async def root(request: Request):
-    return RedirectResponse("/recommendations" if _session(request) else "/login", 303)
+    return RedirectResponse("/recommendations" if request.state.session else "/login", 303)
 
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_form(request: Request):
-    if _session(request):
+    if request.state.session:
         return RedirectResponse("/recommendations", 303)
     return templates.TemplateResponse(request, "login.html", {"error": None})
 
@@ -97,9 +127,7 @@ async def logout():
 
 @app.get("/recommendations", response_class=HTMLResponse)
 async def recommendations(request: Request):
-    session = _session(request)
-    if not session:
-        return _login_redirect()
+    session = request.state.session
     async with connect() as conn:
         profile_row = await users_q.get_profile(conn, session["uid"])
         threshold = profile_row.notify_threshold if profile_row else 70
@@ -129,9 +157,7 @@ async def search(
     include_closed: bool = False,
     page: int = 1,
 ):
-    session = _session(request)
-    if not session:
-        return _login_redirect()
+    session = request.state.session
     page = max(page, 1)
     limit = 50
     async with connect() as conn:
@@ -164,9 +190,7 @@ async def search(
 
 @app.get("/job/{public_id}", response_class=HTMLResponse)
 async def job_detail(request: Request, public_id: str):
-    session = _session(request)
-    if not session:
-        return _login_redirect()
+    session = request.state.session
     async with connect() as conn:
         job = await match_q.get_job(conn, session["uid"], public_id)
     if job is None:
@@ -178,9 +202,7 @@ async def job_detail(request: Request, public_id: str):
 
 @app.post("/job/{job_id}/state", response_class=HTMLResponse)
 async def set_state(request: Request, job_id: int, state: str = Form(...)):
-    session = _session(request)
-    if not session:
-        return _login_redirect()
+    session = request.state.session
     try:
         parsed = UserState(state)
     except ValueError:
@@ -192,9 +214,7 @@ async def set_state(request: Request, job_id: int, state: str = Form(...)):
 
 @app.get("/profile", response_class=HTMLResponse)
 async def profile_form(request: Request):
-    session = _session(request)
-    if not session:
-        return _login_redirect()
+    session = request.state.session
     async with connect() as conn:
         row = await users_q.get_profile(conn, session["uid"])
         profile = profile_from_row(row)
@@ -234,9 +254,7 @@ async def profile_save(
     rerank_limit: int = Form(150),
     notify_threshold: int = Form(70),
 ):
-    session = _session(request)
-    if not session:
-        return _login_redirect()
+    session = request.state.session
     values = {
         "title": title.strip(),
         "years_experience": max(0, years_experience),
@@ -265,9 +283,7 @@ async def profile_save(
 
 @app.get("/settings", response_class=HTMLResponse)
 async def settings_form(request: Request):
-    session = _session(request)
-    if not session:
-        return _login_redirect()
+    session = request.state.session
     async with connect() as conn:
         credential = await users_q.get_credential(conn, session["uid"])
         spend = await users_q.month_spend(conn, session["uid"])
@@ -298,9 +314,7 @@ async def settings_save(
     provider_pin: str = Form(""),
     monthly_budget_usd: str = Form("5"),
 ):
-    session = _session(request)
-    if not session:
-        return _login_redirect()
+    session = request.state.session
     async with connect() as conn:
         budget = _decimal(monthly_budget_usd, Decimal(5))
         chosen_model = model.strip() or get_settings().default_llm_model
@@ -326,9 +340,7 @@ async def settings_save(
 
 @app.post("/settings/delete-key")
 async def settings_delete_key(request: Request):
-    session = _session(request)
-    if not session:
-        return _login_redirect()
+    session = request.state.session
     async with connect() as conn:
         await users_q.delete_credential(conn, session["uid"])
     return RedirectResponse("/settings?deleted=1", status_code=303)
@@ -336,9 +348,7 @@ async def settings_delete_key(request: Request):
 
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard(request: Request):
-    session = _session(request)
-    if not session:
-        return _login_redirect()
+    session = request.state.session
     async with connect() as conn:
         overview = await admin_q.corpus_overview(conn)
         coverage = await admin_q.derived_coverage(conn)
@@ -369,9 +379,7 @@ async def dashboard(request: Request):
 
 @app.get("/admin", response_class=HTMLResponse)
 async def admin(request: Request):
-    session = _session(request)
-    if not session:
-        return _login_redirect()
+    session = request.state.session
     async with connect() as conn:
         schedule = await admin_q.get_schedule(conn)
         runs = await admin_q.recent_runs(conn)
@@ -399,9 +407,6 @@ async def admin_schedule(
     run_hour: int = Form(7),
     run_minute: int = Form(0),
 ):
-    session = _session(request)
-    if not session:
-        return _login_redirect()
     async with connect() as conn:
         await admin_q.update_schedule(
             conn,
@@ -417,21 +422,18 @@ async def admin_schedule(
 @app.post("/admin/run")
 async def admin_run(request: Request, only_source: str = Form(""), backfill: bool = Form(False)):
     """Enqueue a run. The web app never executes one; the runner owns that entirely."""
-    session = _session(request)
-    if not session:
-        return _login_redirect()
     async with connect() as conn:
         await admin_q.enqueue_run(
-            conn, trigger="manual", only_source=only_source or None, backfill=backfill
+            conn,
+            trigger=RunTrigger.MANUAL,
+            only_source=only_source or None,
+            backfill=backfill,
         )
     return RedirectResponse("/admin", status_code=303)
 
 
 @app.get("/admin/runs", response_class=HTMLResponse)
 async def admin_runs_fragment(request: Request):
-    session = _session(request)
-    if not session:
-        return _login_redirect()
     async with connect() as conn:
         runs = await admin_q.recent_runs(conn)
         active = await admin_q.active_run(conn)

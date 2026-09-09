@@ -18,6 +18,7 @@ from trouveur.db.schema import (
     source_tenant,
     work_item,
 )
+from trouveur.models import RunStatus, RunTrigger, TenantOrigin
 
 
 async def enabled_tenants(conn: AsyncConnection) -> dict[str, list[str]]:
@@ -74,7 +75,7 @@ async def add_tenants(
     scopes: Sequence[str],
     *,
     enabled: bool = True,
-    origin: str = "manual",
+    origin: TenantOrigin = TenantOrigin.MANUAL,
     note: str | None = None,
 ) -> int:
     """Register tenants. Idempotent, and never re-enables one an operator has switched off."""
@@ -82,7 +83,13 @@ async def add_tenants(
         return 0
     stmt = pg_insert(source_tenant).values(
         [
-            {"source": source, "scope": scope, "enabled": enabled, "origin": origin, "note": note}
+            {
+                "source": source,
+                "scope": scope,
+                "enabled": enabled,
+                "origin": TenantOrigin(origin).value,
+                "note": note,
+            }
             for scope in scopes
         ]
     )
@@ -294,13 +301,17 @@ async def update_schedule(conn: AsyncConnection, values: dict[str, Any]) -> None
 
 
 async def enqueue_run(
-    conn: AsyncConnection, *, trigger: str, only_source: str | None = None,
+    conn: AsyncConnection, *, trigger: RunTrigger, only_source: str | None = None,
     backfill: bool = False,
 ) -> int:
     return (
         await conn.execute(
             pipeline_run.insert()
-            .values(trigger=trigger, only_source=only_source, backfill=backfill)
+            .values(
+                trigger=RunTrigger(trigger).value,
+                only_source=only_source,
+                backfill=backfill,
+            )
             .returning(pipeline_run.c.id)
         )
     ).scalar_one()
@@ -315,7 +326,7 @@ async def claim_next_run(conn: AsyncConnection) -> sa.Row | None:
     ready = (
         sa.select(pipeline_run.c.id)
         .where(
-            pipeline_run.c.status == "queued",
+            pipeline_run.c.status == RunStatus.QUEUED.value,
             pipeline_run.c.not_before <= sa.func.now(),
         )
         .order_by(pipeline_run.c.not_before, pipeline_run.c.id)
@@ -328,7 +339,7 @@ async def claim_next_run(conn: AsyncConnection) -> sa.Row | None:
             pipeline_run.update()
             .where(pipeline_run.c.id.in_(ready))
             .values(
-                status="running",
+                status=RunStatus.RUNNING.value,
                 started_at=sa.func.now(),
                 attempts=pipeline_run.c.attempts + 1,
             )
@@ -338,14 +349,14 @@ async def claim_next_run(conn: AsyncConnection) -> sa.Row | None:
 
 
 async def finish_run(
-    conn: AsyncConnection, run_id: int, *, status: str, report: dict | None = None,
+    conn: AsyncConnection, run_id: int, *, status: RunStatus, report: dict | None = None,
     error: str | None = None,
 ) -> None:
     await conn.execute(
         pipeline_run.update()
         .where(pipeline_run.c.id == run_id)
         .values(
-            status=status, finished_at=sa.func.now(), report=report,
+            status=RunStatus(status).value, finished_at=sa.func.now(), report=report,
             error=(error or "")[:4000] or None,
         )
     )
@@ -363,7 +374,7 @@ async def active_run(conn: AsyncConnection) -> sa.Row | None:
     return (
         await conn.execute(
             pipeline_run.select()
-            .where(pipeline_run.c.status.in_(["queued", "running"]))
+            .where(pipeline_run.c.status.in_([RunStatus.QUEUED.value, RunStatus.RUNNING.value]))
             .order_by(pipeline_run.c.queued_at)
             .limit(1)
         )
@@ -375,11 +386,11 @@ async def fail_orphaned_runs(conn: AsyncConnection) -> int:
     result = await conn.execute(
         pipeline_run.update()
         .where(
-            pipeline_run.c.status == "running",
+            pipeline_run.c.status == RunStatus.RUNNING.value,
             pipeline_run.c.started_at < sa.func.now() - sa.text("interval '6 hours'"),
         )
         .values(
-            status="failed",
+            status=RunStatus.FAILED.value,
             finished_at=sa.func.now(),
             error="The runner process disappeared while this run was in progress.",
         )

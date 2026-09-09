@@ -1,0 +1,18 @@
+{
+  "detail": null,
+  "listing": {
+    "firma": "Beispiel",
+    "gehaltsspanneVon": 5000,
+    "referenznummer": "10000-unknown-S",
+    "stellenangebotsTitel": "Ingenieur (m/w/d)",
+    "stellenlokationen": [
+      {
+        "adresse": {
+          "land": "ATLANTIS",
+          "ort": "Atlantis"
+        }
+      }
+    ],
+    "verguetungsangabe": "UNBEKANNT"
+  }
+}

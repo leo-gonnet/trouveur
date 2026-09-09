@@ -361,16 +361,24 @@ A test earns its place only if it can fail for a reason a reviewer would care ab
 behaviour, query shape, cost controls, and **every trap in this file**.
 **Do not write tests for:** getters, pydantic itself, SQLAlchemy itself, or mocks restating mocks.
 
-- **No network and no database in the default suite.** Use synthetic fixtures and a stubbed
-  transport. It runs in under a second; keep it that way. To check live API behaviour while
-  debugging, use a throwaway shell command, never a test file — and if what you learn is durable,
-  write it into this file.
-- **One deliberate exception: `tests/test_integration_db.py`**, skipped unless
-  `TROUVEUR_TEST_DATABASE_URL` is set. **SQL that compiles is not SQL that runs**, and nothing else
-  can catch that class of bug — writing it found a query that bundled two statements (asyncpg
-  rejects them), an f-string prefix dropped so a literal `{_HARD_FILTERS}` shipped to the server,
-  and place names missing from both search columns, which broke city search entirely. **Run it
-  against a throwaway database before shipping any change to `db/queries/` or the migration:**
+### Layout: split by whether a database is needed
+
+That split is the one with operational meaning — it decides what can gate a merge without a
+service container.
+
+| Path | Needs Postgres | Runs |
+|---|---|---|
+| `tests/unit/` | no | every push, under a second |
+| `tests/integration/` | yes | every push in CI, via a `pgvector` service |
+
+`tests/integration/` is skipped at collection unless `TROUVEUR_TEST_DATABASE_URL` is set, so a
+plain `uv run pytest` stays offline and instant.
+
+- **No network anywhere, ever.** Use synthetic fixtures and a stubbed transport. To check live API
+  behaviour while debugging, use a throwaway shell command, never a test file — and if what you
+  learn is durable, write it into this file.
+- **Run the integration suite before shipping any change to `db/queries/`, the migration, or a
+  template.** **SQL that compiles is not SQL that runs**, and a template only runs when rendered:
 
   ```bash
   podman run -d --rm --name pg -e POSTGRES_USER=trouveur -e POSTGRES_PASSWORD=x \
@@ -379,6 +387,30 @@ behaviour, query shape, cost controls, and **every trap in this file**.
   DATABASE_URL=$TROUVEUR_TEST_DATABASE_URL uv run alembic upgrade head
   uv run pytest
   ```
+
+### Golden files
+
+`tests/unit/golden/` pins the **entire** output of normalisation and derivation per source. The
+core of this system is two pure functions, and a change to either moves every posting in the
+corpus, so example-based tests covering the fields somebody thought of are not enough.
+
+```bash
+uv run pytest tests/unit/test_golden.py --update-goldens   # then READ the diff
+```
+
+Never regenerate to turn a red test green without reading what moved. Each case records the
+versions it was generated at: a facet diff with an unchanged `derive_version` means production
+still holds the old readings and no re-derive has been scheduled.
+
+### Two mechanisms that make the above work
+
+- **`StrictUndefined` in Jinja.** The default renders an unknown attribute as an empty string, so
+  a template reading a field its query does not select produces a blank cell and a green suite.
+  Turning it on immediately found two: the job-card macro read `llm_reason` that `search_jobs`
+  never selected, and `closed_at` that `recommendations` never selected.
+- **Rendering tests must render a job card.** A page test over an empty list proves the query
+  returned and nothing else. The `seeded` fixture creates one scored, rule-passed match so the
+  card template is actually executed.
 - Name tests `test_<behaviour>_when_<condition>` or as a plain statement of the invariant.
   Arrange/Act/Assert, no cleverness.
 - **When you add a structural guard, verify it can fail** by temporarily introducing the violation.
@@ -396,13 +428,22 @@ behaviour, query shape, cost controls, and **every trap in this file**.
   - Closing a posting deletes its embedding.
   - Every source package is registered; `schema.py` and the migration agree; no SQL outside
     `db/queries/`; no source name used as a value downstream.
+  - **Every route rejects an anonymous caller** (`tests/unit/test_web_auth.py`, parametrized over
+    the router, so a new route is covered the moment it exists).
+  - **Every query in `db/queries/` executes** against a real server, and adding one without an
+    execution entry fails.
+  - **Every Postgres enum has a Python counterpart and the members match** — Python ↔ `schema.py`
+    offline, `schema.py` ↔ server in integration.
+  - A stored API key never appears in a rendered page.
 
 ## Commands
 
 ```bash
 uv sync                                   # install/refresh dependencies
 uv sync --extra embeddings                # add the local ONNX embedding provider
-uv run pytest                             # full suite (no network, no database)
+uv run pytest                             # unit only, unless TROUVEUR_TEST_DATABASE_URL is set
+uv run pytest tests/unit -q               # the fast gate
+uv run pytest tests/unit/test_golden.py --update-goldens   # regenerate, then read the diff
 uv run ruff check trouveur/               # lint
 uv run alembic upgrade head               # apply migrations
 uv run alembic revision -m "add X"        # new migration

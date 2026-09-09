@@ -1,0 +1,18 @@
+{
+  "detail": null,
+  "external_id": "beispiel:4099",
+  "listing": {
+    "absolute_url": "https://job-boards.greenhouse.io/beispiel/jobs/4099",
+    "company_name": "Beispiel Tech",
+    "content": "&lt;p&gt;Sie arbeiten mit &lt;b&gt;SAP&lt;/b&gt; und Six Sigma.&lt;/p&gt;",
+    "departments": [],
+    "first_published": "2026-09-01T09:00:00-04:00",
+    "id": 4099,
+    "language": "de",
+    "location": {
+      "name": "Graz"
+    },
+    "title": "Prozessingenieur",
+    "updated_at": "2026-09-02T09:00:00-04:00"
+  }
+}

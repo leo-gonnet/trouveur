@@ -19,6 +19,15 @@ def load(name: str) -> dict:
     return json.loads((FIXTURES / name).read_text(encoding="utf-8"))
 
 
+def pytest_addoption(parser):
+    parser.addoption(
+        "--update-goldens",
+        action="store_true",
+        default=False,
+        help="Rewrite golden expectations from current behaviour, then read the diff.",
+    )
+
+
 @pytest.fixture
 def aa_listing() -> dict:
     return load("arbeitsagentur_listing.json")

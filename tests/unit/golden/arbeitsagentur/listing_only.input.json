@@ -1,0 +1,33 @@
+{
+  "detail": null,
+  "listing": {
+    "aenderungsdatum": "2026-09-05T09:12:33.100",
+    "arbeitszeitVollzeit": true,
+    "artDerVerguetung": "GEHALTSSPANNE",
+    "datumErsteVeroeffentlichung": "2026-09-01",
+    "externeURL": "https://beispiel.example/karriere/wing-42",
+    "firma": "Beispiel Industrie GmbH",
+    "gehaltsspanneBis": 78000.0,
+    "gehaltsspanneVon": 62000.0,
+    "hauptberuf": "Wirtschaftsingenieur",
+    "homeofficemoeglich": false,
+    "istGeringfuegigeBeschaeftigung": false,
+    "referenznummer": "10000-1234567890abcdef-S",
+    "stellenangebotsTitel": "Wirtschaftsingenieur (m/w/d) Prozessoptimierung",
+    "stellenangebotsart": "ARBEIT",
+    "stellenlokationen": [
+      {
+        "adresse": {
+          "hausnummer": "1",
+          "land": "DEUTSCHLAND",
+          "ort": "München, Oberbayern",
+          "plz": "80331",
+          "region": "BAYERN",
+          "strasse": "Musterweg"
+        }
+      }
+    ],
+    "verguetungsangabe": "JAHRESGEHALT",
+    "vertragsdauer": "KEINE_ANGABE"
+  }
+}

@@ -16,7 +16,7 @@ import trouveur.sources as sources_pkg
 from trouveur.db.schema import metadata
 from trouveur.sources.registry import NORMALIZERS
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 MIGRATION = ROOT / "alembic" / "versions" / "0001_pipeline_v2.py"
 
 
