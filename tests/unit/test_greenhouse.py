@@ -32,8 +32,14 @@ def test_a_tenant_scoped_source_is_dropped_when_it_has_no_tenants():
     the silent failure this project exists to avoid.
     """
     from trouveur.sources import build_sources
+    from trouveur.sources.registry import SOURCES
 
-    assert [s.name for s in build_sources()] == ["arbeitsagentur"]
+    # Asserted against the registry rather than a hardcoded list, so adding a source cannot make
+    # this pass for the wrong reason -- a new tenant-scoped source that forgot to declare itself
+    # one would appear here rather than in a sweep that quietly does nothing.
+    tenant_scoped = {name for name, spec in SOURCES.items() if spec.tenant_scoped}
+    assert tenant_scoped, "no tenant-scoped sources; this test is not checking anything"
+    assert not tenant_scoped & {s.name for s in build_sources()}
     assert "greenhouse" in [s.name for s in build_sources(tenants={"greenhouse": ["gitlab"]})]
 
 
@@ -50,13 +56,13 @@ def test_tenants_reach_the_source_without_the_caller_naming_it():
 def test_slugs_are_validated_and_urls_are_accepted():
     """Validation happens at the write, because a bad slug otherwise 404s silently forever."""
     from trouveur.sources.errors import SourceError
-    from trouveur.sources.scopes import clean_scope
+    from trouveur.sources.registry import clean_scope
 
-    assert clean_scope("  GitLab ") == "gitlab"
-    assert clean_scope("https://job-boards.greenhouse.io/doctolib/") == "doctolib"
+    assert clean_scope("greenhouse", "  GitLab ") == "gitlab"
+    assert clean_scope("greenhouse", "https://job-boards.greenhouse.io/doctolib/") == "doctolib"
     for bad in ("not a slug!", "", "https://example.com/"):
         with pytest.raises(SourceError):
-            clean_scope(bad)
+            clean_scope("greenhouse", bad)
 
 
 def test_external_id_is_scoped_by_board():

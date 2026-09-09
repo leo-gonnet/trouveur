@@ -1,0 +1,55 @@
+{
+  "derive_version": 3,
+  "facets": {
+    "cities": [
+      "Wien",
+      "Graz"
+    ],
+    "countries": [],
+    "employment_type": "unknown",
+    "is_agency": null,
+    "language": null,
+    "regions": [],
+    "salary_annualised": false,
+    "salary_max_eur_year": null,
+    "salary_min_eur_year": null,
+    "seniority": "unknown",
+    "skills": [
+      "airflow",
+      "dbt"
+    ],
+    "work_mode": "remote"
+  },
+  "job": {
+    "agency_hint": null,
+    "closes_at": null,
+    "company": null,
+    "department_hint": "Data",
+    "description": "Wir suchen eine Person fuer unsere Datenplattform.\n\nDu baust Pipelines mit dbt und Airflow.\n\nWir bieten Weiterbildung.",
+    "employment_type_hint": "Full-time",
+    "external_id": "beispiel:681fbc53-1e34-4a46-8677-3a78118674eb",
+    "language_hint": null,
+    "locations": [
+      {
+        "city": null,
+        "country": null,
+        "raw": "Wien",
+        "region": null
+      },
+      {
+        "city": null,
+        "country": null,
+        "raw": "Graz",
+        "region": null
+      }
+    ],
+    "posted_at": "2026-08-29T00:00:00Z",
+    "remote_hint": true,
+    "salary": null,
+    "source": "lever",
+    "title": "Data Engineer (m/w/d)",
+    "updated_at": null,
+    "url": "https://jobs.lever.co/beispiel/681fbc53"
+  },
+  "normalize_version": 1
+}

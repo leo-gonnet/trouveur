@@ -21,6 +21,14 @@ from trouveur.sources.http import PoliteClient
 
 DocumentSink = Callable[[Sequence[RawDocument]], Awaitable[None]]
 
+# The scope a source with no tenants sweeps under.
+#
+# Lifecycle closes within a scope, so a global source still needs one to name -- without it a
+# complete backfill of such a source could never retire anything, because `closable_scopes` would
+# have nothing to list. Reserved rather than left to each adapter to invent, since two adapters
+# spelling it differently would silently partition one corpus into two lifecycles.
+GLOBAL_SCOPE = "*"
+
 
 class ScopeResult(BaseModel):
     """What happened to one tenant in a sweep, for the health panel.

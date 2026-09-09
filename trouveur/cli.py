@@ -225,12 +225,15 @@ def tenants_add(source: str, scopes: tuple[str, ...], disabled: bool, note: str 
     """
     from trouveur.db.engine import connect
     from trouveur.db.queries import admin
-    from trouveur.sources.registry import NORMALIZERS
-    from trouveur.sources.scopes import clean_scope
+    from trouveur.sources.errors import SourceError
+    from trouveur.sources.registry import clean_scope
 
-    if source not in NORMALIZERS:
-        raise SystemExit(f"Unknown source {source!r}; known sources: {', '.join(NORMALIZERS)}.")
-    cleaned = [clean_scope(scope) for scope in scopes]
+    # Each source spells a tenant its own way -- a Greenhouse board is a slug, a Workday board is
+    # tenant:instance:site -- so the grammar comes from the registry rather than from here.
+    try:
+        cleaned = [clean_scope(source, scope) for scope in scopes]
+    except SourceError as exc:
+        raise SystemExit(str(exc)) from None
 
     async def _run() -> int:
         async with connect() as conn:

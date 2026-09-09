@@ -1,0 +1,45 @@
+{
+  "derive_version": 3,
+  "facets": {
+    "cities": [
+      "Wien"
+    ],
+    "countries": [],
+    "employment_type": "unknown",
+    "is_agency": null,
+    "language": null,
+    "regions": [],
+    "salary_annualised": false,
+    "salary_max_eur_year": null,
+    "salary_min_eur_year": null,
+    "seniority": "unknown",
+    "skills": [],
+    "work_mode": "unknown"
+  },
+  "job": {
+    "agency_hint": null,
+    "closes_at": null,
+    "company": "Beispiel SE & Co. KG",
+    "department_hint": "Operations",
+    "description": "Aufgaben\nProzessoptimierung und Supply Chain.\n\nProfil\nAbgeschlossenes Studium.",
+    "employment_type_hint": "permanent full-time",
+    "external_id": "beispiel:1834171",
+    "language_hint": null,
+    "locations": [
+      {
+        "city": null,
+        "country": null,
+        "raw": "Wien",
+        "region": null
+      }
+    ],
+    "posted_at": "2026-08-30T14:10:41Z",
+    "remote_hint": null,
+    "salary": null,
+    "source": "personio",
+    "title": "Wirtschaftsingenieur (m/w/d)",
+    "updated_at": null,
+    "url": "https://beispiel.jobs.personio.de/job/1834171"
+  },
+  "normalize_version": 1
+}

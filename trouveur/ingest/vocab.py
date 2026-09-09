@@ -85,6 +85,10 @@ REGIONS: dict[str, str] = {
 REMOTE_TERMS = (
     "remote", "homeoffice", "home office", "telearbeit", "ortsunabhangig",
     "work from home", "fully remote", "100% remote", "vollstandig remote",
+    # Remote-first boards state the place of work as a word rather than a location. Without these
+    # the term is read as the city -- Jobicy postings derived a city of "Anywhere", which matches
+    # no filter and reads as a real place to anyone looking at the row.
+    "anywhere", "worldwide", "weltweit", "anywhere in the world", "global",
 )
 # Every term here must be unambiguous about WHERE the work happens. "flexible" was removed after
 # it classified a Bangalore role as hybrid by matching "flexible paid time off"; a benefits list

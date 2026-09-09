@@ -1,0 +1,54 @@
+{
+  "derive_version": 3,
+  "facets": {
+    "cities": [
+      "Vienna",
+      "Graz"
+    ],
+    "countries": [
+      "AT"
+    ],
+    "employment_type": "unknown",
+    "is_agency": null,
+    "language": null,
+    "regions": [],
+    "salary_annualised": false,
+    "salary_max_eur_year": null,
+    "salary_min_eur_year": null,
+    "seniority": "unknown",
+    "skills": [],
+    "work_mode": "unknown"
+  },
+  "job": {
+    "agency_hint": null,
+    "closes_at": null,
+    "company": "Beispiel GmbH",
+    "department_hint": "Sales",
+    "description": "Du betreust Bestandskunden.\n\nBeispiel verkauft Software.",
+    "employment_type_hint": "Salaried, full-time",
+    "external_id": "beispiel:75ad50c6-778f-42ee-9c63-70d1cd687202",
+    "language_hint": null,
+    "locations": [
+      {
+        "city": null,
+        "country": null,
+        "raw": "Vienna, Austria",
+        "region": null
+      },
+      {
+        "city": null,
+        "country": null,
+        "raw": "Graz, Austria",
+        "region": null
+      }
+    ],
+    "posted_at": "2026-08-13T08:54:48.317000Z",
+    "remote_hint": null,
+    "salary": null,
+    "source": "rippling",
+    "title": "Account Executive",
+    "updated_at": null,
+    "url": "https://ats.rippling.com/beispiel/jobs/75ad50c6"
+  },
+  "normalize_version": 1
+}

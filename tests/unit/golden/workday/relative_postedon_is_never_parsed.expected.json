@@ -1,0 +1,55 @@
+{
+  "derive_version": 3,
+  "facets": {
+    "cities": [
+      "Vienna",
+      "Munich"
+    ],
+    "countries": [
+      "AT",
+      "DE"
+    ],
+    "employment_type": "unknown",
+    "is_agency": null,
+    "language": null,
+    "regions": [],
+    "salary_annualised": false,
+    "salary_max_eur_year": null,
+    "salary_min_eur_year": null,
+    "seniority": "senior",
+    "skills": [],
+    "work_mode": "unknown"
+  },
+  "job": {
+    "agency_hint": null,
+    "closes_at": null,
+    "company": "Beispiel Austria GmbH",
+    "department_hint": null,
+    "description": "Du betreust die Scheduler-Plattform.",
+    "employment_type_hint": "Full time",
+    "external_id": "beispiel:wd5:BeispielCareers:/job/Vienna/Senior-Infrastructure-Engineer_JR2023962",
+    "language_hint": null,
+    "locations": [
+      {
+        "city": null,
+        "country": null,
+        "raw": "AT, Vienna",
+        "region": null
+      },
+      {
+        "city": null,
+        "country": null,
+        "raw": "DE, Munich",
+        "region": null
+      }
+    ],
+    "posted_at": "2026-09-01T00:00:00Z",
+    "remote_hint": null,
+    "salary": null,
+    "source": "workday",
+    "title": "Senior Infrastructure Engineer",
+    "updated_at": null,
+    "url": "https://beispiel.wd5.myworkdayjobs.com/BeispielCareers/job/Vienna/Senior-Infrastructure-Engineer_JR2023962"
+  },
+  "normalize_version": 1
+}

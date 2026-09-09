@@ -1,0 +1,57 @@
+{
+  "derive_version": 3,
+  "facets": {
+    "cities": [],
+    "countries": [
+      "AT",
+      "DE"
+    ],
+    "employment_type": "unknown",
+    "is_agency": null,
+    "language": null,
+    "regions": [],
+    "salary_annualised": false,
+    "salary_max_eur_year": null,
+    "salary_min_eur_year": null,
+    "seniority": "unknown",
+    "skills": [],
+    "work_mode": "remote"
+  },
+  "job": {
+    "agency_hint": null,
+    "closes_at": "2026-10-28T00:00:00Z",
+    "company": "Beispiel Systems",
+    "department_hint": null,
+    "description": "Remote role Du fuehrst Kampagnen.",
+    "employment_type_hint": "Full Time",
+    "external_id": "https://himalayas.app/companies/beispiel-systems/jobs/pmm",
+    "language_hint": null,
+    "locations": [
+      {
+        "city": null,
+        "country": null,
+        "raw": "Austria",
+        "region": null
+      },
+      {
+        "city": null,
+        "country": null,
+        "raw": "Germany",
+        "region": null
+      }
+    ],
+    "posted_at": "2026-08-29T00:00:00Z",
+    "remote_hint": true,
+    "salary": {
+      "amount_max": "120000",
+      "amount_min": "90000",
+      "currency": "USD",
+      "period": "YEAR"
+    },
+    "source": "himalayas",
+    "title": "Product Marketing Manager",
+    "updated_at": null,
+    "url": "https://himalayas.app/companies/beispiel-systems/jobs/pmm"
+  },
+  "normalize_version": 1
+}

@@ -96,16 +96,29 @@ def _places(locations: list[Location]) -> tuple[list[str], list[str], list[str],
 
 
 def _parse_free_text(raw: str) -> tuple[str | None, str | None, bool]:
-    """Read a free-text location such as 'Remote, Canada' or 'Bangalore, India'."""
+    """Read a free-text location such as 'Remote, Canada', 'Bangalore, India' or 'AT, Vienna'.
+
+    The country is not always last. Sources that write it first are common enough to matter --
+    Workday states 'AT, Vienna' -- and reading positionally put the country code in the city
+    column and left the country empty, which is a wrong facet and a missing one from one mistake.
+
+    Parts are searched from the end so that the previous reading still wins wherever it was
+    already right: 'Georgia, US' resolves to US, not to Georgia the country.
+    """
     parts = [part.strip() for part in raw.split(",") if part.strip()]
     if not parts:
         return None, None, False
 
     remote = any(fold(part) in vocab.REMOTE_TERMS for part in parts)
-    country = vocab.COUNTRIES.get(fold(parts[-1]))
     named = [part for part in parts if fold(part) not in vocab.REMOTE_TERMS]
-    if country and named and fold(named[-1]) == fold(parts[-1]):
-        named = named[:-1]
+
+    country = None
+    for index in range(len(named) - 1, -1, -1):
+        code = vocab.COUNTRIES.get(fold(named[index]))
+        if code:
+            country = code
+            named = named[:index] + named[index + 1 :]
+            break
     return country, (_city(named[0]) if named else None), remote
 
 

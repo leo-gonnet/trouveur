@@ -1,0 +1,27 @@
+{
+  "listing": {
+    "id": "1834171",
+    "subcompany": "Beispiel SE & Co. KG",
+    "office": "Wien",
+    "additionalOffices": "",
+    "department": "Operations",
+    "name": "Wirtschaftsingenieur (m/w/d)",
+    "jobDescriptions": {
+      "jobDescription": [
+        {
+          "name": "Aufgaben",
+          "value": "Prozessoptimierung und Supply Chain."
+        },
+        {
+          "name": "Profil",
+          "value": "Abgeschlossenes Studium."
+        }
+      ]
+    },
+    "employmentType": "permanent",
+    "seniority": "experienced",
+    "schedule": "full-time",
+    "createdAt": "2026-08-30T14:10:41+00:00"
+  },
+  "external_id": "beispiel:1834171"
+}

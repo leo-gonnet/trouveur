@@ -1,0 +1,48 @@
+{
+  "derive_version": 3,
+  "facets": {
+    "cities": [],
+    "countries": [],
+    "employment_type": "unknown",
+    "is_agency": null,
+    "language": null,
+    "regions": [],
+    "salary_annualised": false,
+    "salary_max_eur_year": null,
+    "salary_min_eur_year": null,
+    "seniority": "unknown",
+    "skills": [],
+    "work_mode": "remote"
+  },
+  "job": {
+    "agency_hint": null,
+    "closes_at": null,
+    "company": "Beispiel Labs",
+    "department_hint": "Content & Editorial",
+    "description": "Du schreibst technische Artikel.",
+    "employment_type_hint": "Full-Time",
+    "external_id": "152943",
+    "language_hint": null,
+    "locations": [
+      {
+        "city": null,
+        "country": null,
+        "raw": "Anywhere",
+        "region": null
+      }
+    ],
+    "posted_at": "2026-09-01T17:24:58Z",
+    "remote_hint": true,
+    "salary": {
+      "amount_max": "115000",
+      "amount_min": "105000",
+      "currency": "USD",
+      "period": "YEAR"
+    },
+    "source": "jobicy",
+    "title": "Content Marketing Manager",
+    "updated_at": null,
+    "url": "https://jobicy.com/jobs/152943-content-marketing-manager"
+  },
+  "normalize_version": 1
+}

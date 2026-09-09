@@ -112,7 +112,10 @@ query.** Sources sweep by their own structure; users select over the corpus.
 | `trouveur/sources/<name>/client.py` | Network only. Yields `RawDocument`. No parsing. |
 | `trouveur/sources/<name>/normalize.py` | Pure, versioned: archived payload → `CanonicalJob`. |
 | `trouveur/sources/registry.py` | The **only** place source-specific dispatch happens. |
-| `trouveur/sources/scopes.py` | Validating a tenant slug. One rule, shared by every writer. |
+| `trouveur/sources/board.py` | Shared sweep for sources that return a tenant's complete board. |
+| `trouveur/sources/feed.py` | Shared sweep for global, newest-first, paged corpora. Delta-first. |
+| `trouveur/sources/parse.py` | Pure decoding shared by normalisers: timestamps, HTML to text. |
+| `trouveur/sources/scopes.py` | Tenant-identifier grammars. Each source names the one it uses. |
 | `trouveur/ingest/persist.py` | The single write path from archive to `job`. |
 | `trouveur/ingest/derive.py` | Deterministic interpretation → facets. Pure. |
 | `trouveur/ingest/vocab.py` | **Every** vocabulary, once. |
@@ -211,6 +214,81 @@ so `/v1/boards/` is explicitly permitted. No authentication.
 - Scope external ids by slug (`gitlab:8503792002`). Nothing documents Greenhouse ids as globally
   unique, and a collision would silently merge two unrelated postings onto one row.
 
+### The board family (`sources/board.py`)
+
+Ashby, Lever, Breezy, Rippling, Greenhouse and Personio all publish a tenant's **complete** board
+in one request, and differ only in the URL and the response shape. They share `sweep_boards`; a new
+one of this kind is a URL template, an extractor and a normaliser. What makes them one family is
+exactly what `closable_scopes` depends on — the response *is* the live set. A source that pages,
+filters or windows its results is **not** in this family and must not be forced into it.
+
+Verified live on 2026-09-09. Each of these fails silently:
+
+- **Lever, Breezy and Rippling return a bare top-level array**, not an object with a `jobs` key.
+- **Lever names the title `text`.** There is no `title` key; reading one drops the whole board.
+- **Lever's `createdAt` is epoch milliseconds**, where Arbeitnow's `created_at` is seconds. Read as
+  the wrong unit a posting lands in 1970 or in the year 58 000 — use `sources/parse.py`.
+- **Ashby needs `?includeCompensation=true`**, or salary arrives only as a rendered string
+  (`"$211.4K – $290.6K • Offers Equity"`) that cannot be turned back into numbers.
+- **Ashby titles carry leading whitespace** on live boards, and the title is an identity input.
+- **Breezy's `country` and `state` are objects, not strings.** Read as strings they put a dict repr
+  in the country column, which matches no vocabulary entry at all.
+- **Rippling's listing has no description, company or date** — it is the one board source that
+  genuinely needs a detail fetch. Its `description` is an object keyed by section, not a string.
+
+### Personio (`sources/personio/`)
+
+`robots.txt` (`jobs.personio.de`, checked 2026-09-09): empty, so no restriction is expressed. The
+XML feed is Personio's own syndication endpoint. Boards are per-tenant subdomains.
+
+- **An unknown tenant returns HTTP 429 with a Vercel "Security Checkpoint" HTML page, not 404.** A
+  valid board returns 200 even when polled fast, so 429 here is a bad slug, not throttling.
+  `PoliteClient` retries 429 by design, so without a content-type check a typo'd slug burns four
+  attempts and a backoff every sweep and reports itself as rate limiting for ever.
+- **The feed states no posting URL** — no href, link or url element exists. The canonical URL is
+  built from the tenant and the id, which is why the tenant must survive in the external id.
+- XML is decoded to a dict in the client, exactly as the Greenhouse client calls `response.json()`:
+  that is transport decoding. Reading its *fields* stays in the versioned normaliser.
+
+### Workday (`sources/workday/`)
+
+`robots.txt` is **checked per tenant host, not per platform** — boards are tenant-hosted and their
+rules differ. A representative host on 2026-09-09 disallowed only `/talentcommunity/` and
+`/refreshFacet/`. The sibling SuccessFactors platform serves `Disallow: /` on one tenant host and
+nothing on another, so a platform-wide verdict is not sound for this family.
+
+- **`limit` caps at exactly 20.** `limit=21`, `50` and `100` all return HTTP 400.
+- **`total` is unusable as a count or a terminator.** One query reported `total=2000` at offset 0,
+  `total=0` at offset 1980 and `total=2000` at offset 2000, while still returning rows past its own
+  stated total. The only reliable end of the walk is an empty `jobPostings` array.
+- **`postedOn` is relative prose** (`"Posted Today"`), not a date. Never parse it; the detail's
+  `startDate` is the only absolute date either payload states.
+- **`locationsText` is a count** (`"3 Locations"`), not a place. Used as a location it fills the
+  city column with "3 Locations" on every multi-site posting.
+- Search is a POST, and a board is three facts (`tenant:wdN:SiteName`) in which case is
+  load-bearing — the API 404s on a lowercased site name.
+
+### The global feeds (`sources/feed.py`)
+
+Workable's public board, Arbeitnow, Himalayas and Jobicy each serve one corpus, newest first, with
+no tenant. They are far too large to re-fetch daily — Workable alone is ~170 000 postings at a
+fixed 20 a page — so the ordinary run is a **delta** that stops once postings fall outside the
+window, and therefore **closes nothing**. Only a backfill that pages to the end may close.
+
+- **Workable's page size is fixed at 20 and cannot be raised.** `limit=100` returns HTTP 200 with
+  no `jobs` key and no cursor — an empty result indistinguishable from the end of the corpus. Send
+  no page-size parameter at all. Unknown query parameters are silently ignored, so a filter that
+  looks like it applied may not have.
+- **Workable states the location already structured** (`{city, subregion, countryName}`); do not
+  re-parse the rendered string.
+- **Himalayas has no `id` field** — `guid` is the identity. Its `locationRestrictions` say where a
+  candidate must be, not where an office is.
+- **Jobicy prefixes every field** (`jobTitle`, not `title`) and serves one capped page with no
+  cursor, so it passes `complete_on_backfill=False`: treating that page as the corpus would retire
+  every other Jobicy posting we hold.
+- A source that names its work location in words (`"Anywhere"`, `"Worldwide"`) needs those terms in
+  `vocab.REMOTE_TERMS`, or they are read as a city.
+
 ### All adapters, without exception
 
 - **Failure isolation.** One dead source must never abort a run. `ingest/pipeline.py` wraps each
@@ -222,8 +300,19 @@ so `/v1/boards/` is explicitly permitted. No authentication.
   failing says nothing about another's.
 - **Delta-first.** Use the cheapest incremental mechanism the source offers. Never re-fetch the
   whole corpus on a daily run.
-- **Be polite.** At most ~1 request/second per host, via `sources/http.py`. Identify the project in
-  the `User-Agent`.
+- **Be polite, per _provider_ rather than per hostname.** At most ~1 request/second, via
+  `sources/http.py`. The budget is keyed on the registrable domain because Personio, Breezy,
+  Teamtailor and Workday give every tenant its own subdomain: keyed on the hostname, 1 258 Personio
+  boards would be 1 258 independent budgets — up to 1 258 requests a second at one provider, with
+  every counter still reading as compliant. Over-grouping is the safe direction to be wrong in.
+- **Robots is checked per tenant host, not per platform**, for any source whose boards are
+  tenant-hosted, and the finding is recorded with its date.
+- **A host that serves no `robots.txt` expresses no restriction.** Record that as the finding;
+  silence is neither permission nor refusal, and it is not the same as an `Allow`.
+- **Never reach a source through a reverse-engineered private endpoint or a hardcoded credential**,
+  however freely other projects do it.
+- **Never accept a source whose terms forbid retention.** The raw archive is kept forever, so a
+  source permitting only 14 days of storage is incompatible by construction, not merely awkward.
 - **Parse defensively.** A missing optional field is `None`, not a `KeyError`. A field you cannot
   parse must not discard the whole record.
 
@@ -252,7 +341,9 @@ Rules that follow:
 - **A discovery pass inserts `enabled = false`, `origin = 'discovered'`.** It proposes; a human
   promotes. Discovery must never be able to enlarge the crawl, the bill or the politeness budget on
   its own.
-- **Validate a scope at the write** (`sources/scopes.py`). A malformed slug that reaches the table
+- **Validate a scope at the write** (`registry.clean_scope`, grammars in `sources/scopes.py`). One
+  grammar does not fit every source: a Greenhouse board is a path segment, a Workday board is
+  `tenant:wdN:SiteName` with load-bearing capitals. A malformed slug that reaches the table
   404s on every sweep afterwards and surfaces only as a slowly growing failure count.
 - **A tenant-scoped source with no enabled tenants is dropped from the run**, not swept. Sweeping
   it would make no requests, find nothing, and report a perfectly healthy empty sweep — which is
@@ -268,6 +359,22 @@ with the date.**
 - **Never scrape StepStone search-result pages.** `stepstone.at` disallows `/5/ergebnisliste.html`
   and `/?*`.
 - Do not "temporarily" add a disallowed source to test something.
+
+These four were surveyed on 2026-09-09 and are **refused**. They are listed because widely-copied
+open-source job scrapers use all of them, so without a record someone re-adds one citing those
+projects as precedent:
+
+| Source | Evidence, verbatim |
+|---|---|
+| **AMS Austria** | `jobs.ams.at`: `User-agent: *` gets `Allow: /public/emps/$` then `Disallow: /public/emps/` — the exact path only, nothing beneath it — while `LinkedInBot` gets a blanket exemption above it. `jobroom.ams.or.at` is `Disallow: /`. The AMS HR-API is a write-only channel for employers. Austria's national job service is not crawlable, and is **not** an equivalent of the German Arbeitsagentur. |
+| **SmartRecruiters** | `api.smartrecruiters.com`: `User-agent: LinkedInBot / Allow: /v1/companies/` then `User-agent: * / Disallow: /`. The posting API is functionally public but explicitly reserved to LinkedIn's crawler. |
+| **Recruitee** | `api.recruitee.com`: `User-agent: * / Disallow: /`. |
+| **Remotive** | `remotive.com`: `Disallow: /api/*` — its own documented public API is robots-disallowed. |
+
+Also refused, for reasons other than robots: **Adzuna** (terms bar storage beyond a 14-day
+evaluation, incompatible with a permanent archive), **Jooble** (500 requests *lifetime*),
+**monster.at** (bot-walled in practice), and **LinkedIn, Indeed, ZipRecruiter and Glassdoor**,
+which are reachable only through reverse-engineered private endpoints with hardcoded credentials.
 
 ## DON'T: privacy policy
 
@@ -435,6 +542,16 @@ still holds the old readings and no re-derive has been scheduled.
     Austrian posting no country at all.
   - **A staffing agency is rejected by the source's structured flag**, not by finding "Zeitarbeit"
     in prose.
+  - **The politeness budget is shared across a provider's tenant subdomains**, not one per host.
+  - **An unknown Personio tenant is reported as a bad slug**, not retried as a 429.
+  - **Workday never requests more than 20 a page**, terminates on an empty page rather than on
+    `total`, never parses the relative `postedOn`, and never treats `locationsText` as a place.
+  - **Workable is never sent a page-size parameter**, since an unsupported one returns an empty
+    body that reads as the end of the corpus.
+  - **A delta sweep reports no closable scope**, and a capped single-page feed reports none even on
+    a backfill.
+  - **A bare top-level array board is read as the list itself** (Lever, Breezy, Rippling), and an
+    envelope appearing later shows up as an empty sweep rather than a TypeError.
   - Every source package is registered; `schema.py` and the migration agree; no SQL outside
     `db/queries/`; no source name used as a value downstream.
   - **Every route rejects an anonymous caller** (`tests/unit/test_web_auth.py`, parametrized over

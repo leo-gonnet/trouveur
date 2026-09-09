@@ -1,0 +1,33 @@
+{
+  "listing": {
+    "id": "98323abf2296",
+    "name": "Werkstudent Logistik (m/w/d)",
+    "url": "https://beispiel.breezy.hr/p/98323abf2296",
+    "published_date": "2026-08-15T14:37:22.684Z",
+    "type": {
+      "id": "part_time",
+      "name": "Part Time"
+    },
+    "description": "<p>Du unterst&uuml;tzt unser Team in der Logistik.</p>",
+    "location": {
+      "country": {
+        "id": "at",
+        "name": "Austria"
+      },
+      "state": {
+        "id": "9",
+        "name": "Wien"
+      },
+      "city": "Vienna",
+      "is_remote": false,
+      "name": "Vienna, Wien"
+    },
+    "department": "Operations",
+    "salary": "€0.05 – €0.06 / hour",
+    "company": {
+      "name": "Beispiel GmbH",
+      "friendly_id": "beispiel"
+    }
+  },
+  "external_id": "beispiel:98323abf2296"
+}
