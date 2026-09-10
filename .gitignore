@@ -5,6 +5,11 @@
 /var/
 backups/
 
+# One installation's crawl set. Not secret, but not shared either: committing it would imply the
+# corpus is reproducible from the commit, and would make every installation crawl the same
+# companies. The .example is the template; this is the local copy.
+tenants.local.toml
+
 .venv/
 __pycache__/
 *.py[cod]

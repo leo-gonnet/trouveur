@@ -341,6 +341,13 @@ Rules that follow:
 - **A discovery pass inserts `enabled = false`, `origin = 'discovered'`.** It proposes; a human
   promotes. Discovery must never be able to enlarge the crawl, the bill or the politeness budget on
   its own.
+- **`tenants.local.toml` is a preload, not the crawl set** (`sources/seed.py`,
+  `trouveur tenants import`). A stopgap until discovery exists, because typing a board list one
+  `tenants add` at a time does not survive a database reset. It only ever **inserts**: deleting a
+  line removes nothing, and a board an operator disabled stays disabled across a re-import. It is
+  gitignored — committing one installation's board list would imply the corpus is reproducible
+  from the commit, and would make every installation crawl the same companies. `.example` is the
+  committed template, and a test pins that it parses and names only tenant-scoped sources.
 - **Validate a scope at the write** (`registry.clean_scope`, grammars in `sources/scopes.py`). One
   grammar does not fit every source: a Greenhouse board is a path segment, a Workday board is
   `tenant:wdN:SiteName` with load-bearing capitals. A malformed slug that reaches the table
@@ -632,6 +639,7 @@ uv run trouveur refill --kind derive      # re-queue everything below the curren
 uv run trouveur match --user 1            # retrieve, cut, rerank for one user
 uv run trouveur tenants list             # the crawl set, with per-tenant health
 uv run trouveur tenants add greenhouse n26   # accepts a slug or a full careers URL
+uv run trouveur tenants import --dry-run  # preload from tenants.local.toml (gitignored)
 uv run trouveur create-user               # the ONLY way to create a login
 uv run trouveur serve                     # dev server on 127.0.0.1:8080
 uv run trouveur runner                    # scheduler + queue workers

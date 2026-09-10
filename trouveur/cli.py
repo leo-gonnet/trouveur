@@ -11,6 +11,7 @@ import asyncio
 import getpass
 import logging
 import sys
+from pathlib import Path
 
 import click
 
@@ -243,6 +244,49 @@ def tenants_add(source: str, scopes: tuple[str, ...], disabled: bool, note: str 
 
     added = asyncio.run(_run())
     click.echo(f"added {added} of {len(cleaned)} ({len(cleaned) - added} already registered)")
+
+
+@tenants.command("import")
+@click.argument("path", required=False, type=click.Path(dir_okay=False, path_type=Path))
+@click.option("--disabled", is_flag=True, help="Register without sweeping them yet.")
+@click.option("--dry-run", is_flag=True, help="Show what would be registered and write nothing.")
+def tenants_import(path: Path | None, disabled: bool, dry_run: bool) -> None:
+    """Preload boards from a local, unversioned tenant list.
+
+    A stopgap until discovery exists. The file only ever inserts: it is not the crawl set, so
+    deleting a line does not remove a board -- use `tenants remove` for that.
+    """
+    from trouveur.db.engine import connect
+    from trouveur.db.queries import admin
+    from trouveur.sources.errors import SourceError
+    from trouveur.sources.seed import DEFAULT_FILENAME, load_seed
+
+    target = path or Path(DEFAULT_FILENAME)
+    try:
+        seed = load_seed(target)
+    except SourceError as exc:
+        raise SystemExit(str(exc)) from None
+
+    if not seed:
+        click.echo(f"{target} lists no boards.")
+        return
+    if dry_run:
+        for source, scopes in seed.items():
+            click.echo(f"{source}: {len(scopes)} -> {', '.join(scopes)}")
+        return
+
+    async def _run() -> list[tuple[str, int, int]]:
+        results = []
+        async with connect() as conn:
+            for source, scopes in seed.items():
+                added = await admin.add_tenants(
+                    conn, source, scopes, enabled=not disabled, note=f"seeded from {target.name}"
+                )
+                results.append((source, added, len(scopes)))
+        return results
+
+    for source, added, total in asyncio.run(_run()):
+        click.echo(f"{source}: {added} added, {total - added} already registered")
 
 
 @tenants.command("enable")
