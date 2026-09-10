@@ -231,6 +231,9 @@ Verified live on 2026-09-09. Each of these fails silently:
 - **Ashby needs `?includeCompensation=true`**, or salary arrives only as a rendered string
   (`"$211.4K – $290.6K • Offers Equity"`) that cannot be turned back into numbers.
 - **Ashby titles carry leading whitespace** on live boards, and the title is an identity input.
+- **An Ashby board name may be a domain** -- `mistral.ai` and `roadsurfer.com` are live boards. The
+  default slug grammar rejects a dot, so Ashby uses `scopes.dotted_slug_scope`; the permission is
+  deliberately not global, because for every other source a dotted slug is a pasted homepage.
 - **Breezy's `country` and `state` are objects, not strings.** Read as strings they put a dict repr
   in the country column, which matches no vocabulary entry at all.
 - **Rippling's listing has no description, company or date** — it is the one board source that
@@ -559,6 +562,8 @@ still holds the old readings and no re-derive has been scheduled.
     a backfill.
   - **A bare top-level array board is read as the list itself** (Lever, Breezy, Rippling), and an
     envelope appearing later shows up as an empty sweep rather than a TypeError.
+  - **An Ashby board may be named after a domain** (`mistral.ai`, `roadsurfer.com`), and the same
+    string is still rejected for every other source, where it means a pasted homepage.
   - Every source package is registered; `schema.py` and the migration agree; no SQL outside
     `db/queries/`; no source name used as a value downstream.
   - **Every route rejects an anonymous caller** (`tests/unit/test_web_auth.py`, parametrized over

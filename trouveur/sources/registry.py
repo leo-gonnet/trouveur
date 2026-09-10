@@ -32,7 +32,7 @@ from trouveur.sources import (
 )
 from trouveur.sources.base import Source
 from trouveur.sources.errors import SourceError
-from trouveur.sources.scopes import slug_scope, workday_scope
+from trouveur.sources.scopes import dotted_slug_scope, slug_scope, workday_scope
 
 NormalizeFn = Callable[..., CanonicalJob | None]
 ScopeCleaner = Callable[[str], str]
@@ -74,6 +74,8 @@ SOURCES: dict[str, SourceSpec] = {
         normalize_version=ashby.version,
         build=lambda scopes: ashby.AshbySource(boards=scopes),
         tenant_scoped=True,
+        # Ashby boards may be registered under a domain, e.g. 'mistral.ai'.
+        clean_scope=dotted_slug_scope,
     ),
     lever.SOURCE: SourceSpec(
         normalize=lever.normalize,

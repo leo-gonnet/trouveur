@@ -23,6 +23,12 @@ from trouveur.sources.errors import SourceError
 # A scope is a URL path segment. Anything else is a typo or a pasted full URL.
 _SLUG = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
+# Ashby lets a company register its own domain as the board name, so a dot is part of the slug
+# rather than a sign someone pasted a homepage: `roadsurfer.com` and `mistral.ai` are live boards
+# that the default rule silently refuses to crawl. The permission is deliberately not global --
+# for every other source a dotted "slug" IS a pasted homepage, and rejecting it is the point.
+_DOTTED_SLUG = re.compile(r"^[a-z0-9][a-z0-9-]*(\.[a-z0-9][a-z0-9-]*)*$")
+
 # Workday identifies a board by tenant, numbered instance and site name, all three of which are
 # in the careers URL and none of which is optional. Case is preserved: the site name is
 # camel-cased in the URL and the API 404s on a lowercased one.
@@ -40,13 +46,37 @@ def slug_scope(raw: str) -> str:
     Accepts a bare slug or a full careers URL, since pasting the URL is the obvious mistake and
     the slug is unambiguously its last path segment.
     """
-    candidate = raw.strip().rstrip("/").lower()
-    if "/" in candidate:
-        candidate = candidate.rsplit("/", 1)[-1]
+    candidate = _last_segment(raw)
     if not is_valid_scope(candidate):
         raise SourceError(
             f"{raw!r} is not a valid tenant slug: expected a URL path segment such as 'gitlab'."
         )
+    return candidate
+
+
+def dotted_slug_scope(raw: str) -> str:
+    """A path segment that may itself be a domain.
+
+    Only for sources that genuinely register boards under a domain name. Everywhere else this
+    would accept a pasted company homepage as a board and 404 on it every day afterwards.
+    """
+    candidate = _last_segment(raw)
+    if not _DOTTED_SLUG.match(candidate):
+        raise SourceError(
+            f"{raw!r} is not a valid tenant slug: expected a URL path segment such as 'ramp' or "
+            "'mistral.ai'."
+        )
+    return candidate
+
+
+def _last_segment(raw: str) -> str:
+    """A bare slug, or the last path segment of a pasted careers URL.
+
+    Pasting the URL is the obvious mistake and the slug is unambiguously its last segment.
+    """
+    candidate = raw.strip().rstrip("/").lower()
+    if "/" in candidate:
+        candidate = candidate.rsplit("/", 1)[-1]
     return candidate
 
 

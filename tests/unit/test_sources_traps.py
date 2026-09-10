@@ -371,3 +371,23 @@ def test_each_source_validates_scopes_by_its_own_grammar():
     # A source with no tenants cannot have one registered.
     with pytest.raises(SourceError):
         clean_scope("workable", "anything")
+
+
+def test_ashby_boards_may_be_named_after_a_domain():
+    """`roadsurfer.com` and `mistral.ai` are live Ashby boards.
+
+    A dot-free slug rule refuses them silently -- they are simply never crawled, and nothing
+    reports a board that was never registered. The permission stays Ashby's alone: for every
+    other source a dotted "slug" is a pasted company homepage, and rejecting it is the point.
+    """
+    from trouveur.sources.registry import clean_scope
+
+    assert clean_scope("ashby", "mistral.ai") == "mistral.ai"
+    assert clean_scope("ashby", "https://jobs.ashbyhq.com/roadsurfer.com") == "roadsurfer.com"
+    assert clean_scope("ashby", "ramp") == "ramp"
+
+    with pytest.raises(SourceError):
+        clean_scope("ashby", ".leading-dot")
+    # The same string is still a mistake everywhere else.
+    with pytest.raises(SourceError):
+        clean_scope("greenhouse", "mistral.ai")
