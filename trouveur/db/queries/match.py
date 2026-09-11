@@ -177,6 +177,33 @@ async def pending_rerank(
     )
 
 
+async def scoreable_rows(conn: AsyncConnection, job_ids: Sequence[int]) -> list[sa.Row]:
+    """The columns the reranker's prompt needs, for an explicit set of postings.
+
+    `pending_rerank` answers the same question for one user's outstanding shortlist, by way of
+    `user_job_match`. The evaluation harness needs the same shape for the planted needles, which
+    are deliberately never written to that table: the eval measures retrieval and scoring, not a
+    user's match history.
+    """
+    if not job_ids:
+        return []
+    return list(
+        await conn.execute(
+            sa.text(
+                """
+                SELECT j.id AS job_id, j.content_hash, j.title, j.company, j.description,
+                       j.locations, f.salary_min_eur_year, f.salary_max_eur_year,
+                       f.work_mode::text AS work_mode
+                FROM job j
+                JOIN job_facet f ON f.job_id = j.id
+                WHERE j.id = ANY(CAST(:job_ids AS bigint[]))
+                """
+            ),
+            {"job_ids": list(job_ids)},
+        )
+    )
+
+
 async def count_pending_rerank(
     conn: AsyncConnection, user_id: int, profile_version: int
 ) -> int:

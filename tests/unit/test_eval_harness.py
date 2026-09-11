@@ -73,3 +73,107 @@ def test_haystack_partitions_are_relevant_to_the_personas():
     """A haystack of unrelated work is removed by the hard filters for free and flatters recall."""
     assert harness.HAYSTACK_PARTITIONS
     assert not {"Verkauf", "Lagerwirtschaft", "Altenpflege"} & set(harness.HAYSTACK_PARTITIONS)
+
+
+def test_a_needle_sliding_down_the_ranking_is_reported_though_recall_is_unchanged():
+    """The reason ranks are recorded: recall saturates and then reports nothing but regressions.
+
+    Both runs find the needle inside k, so every recall figure is identical. Falling from rank 3
+    to rank 60 is still a real loss -- the reranker's budget is far smaller than k.
+    """
+    unchanged = {"T1": {"found": 1, "total": 1},
+                 "T2": {"found": 0, "total": 0},
+                 "T3": {"found": 0, "total": 0}}
+    card = harness.Scorecard(limit=200, embedding_version="v", corpus_open=1)
+    card.personas.append(
+        harness.PersonaResult(persona="p1", recall={"fused": unchanged}, ranks={"a": 60})
+    )
+    baseline = {"personas": [{"persona": "p1", "recall": {"fused": unchanged}, "ranks": {"a": 3}}]}
+
+    found = harness.regressions(card, baseline)
+    assert len(found) == 1 and "rank 3 -> 60" in found[0]
+
+
+def test_a_needle_holding_its_rank_is_not_a_regression():
+    unchanged = {"T1": {"found": 1, "total": 1},
+                 "T2": {"found": 0, "total": 0},
+                 "T3": {"found": 0, "total": 0}}
+    card = harness.Scorecard(limit=200, embedding_version="v", corpus_open=1)
+    card.personas.append(
+        harness.PersonaResult(persona="p1", recall={"fused": unchanged}, ranks={"a": 5})
+    )
+    baseline = {"personas": [{"persona": "p1", "recall": {"fused": unchanged}, "ranks": {"a": 3}}]}
+
+    assert harness.regressions(card, baseline) == []
+
+
+def test_a_baseline_over_a_different_sized_corpus_is_not_differenced():
+    """Recall depends on how much the needle had to beat, so sizes must match to subtract.
+
+    The run that found this compared 75,259 postings against a 4,110-posting baseline and
+    reported two regressions that were only a bigger haystack.
+    """
+    card = harness.Scorecard(limit=200, embedding_version="v", corpus_open=75_259)
+    card.personas.append(
+        harness.PersonaResult(
+            persona="p1",
+            recall={"fused": {"T1": {"found": 1, "total": 2},
+                              "T2": {"found": 0, "total": 0},
+                              "T3": {"found": 0, "total": 0}}},
+        )
+    )
+    baseline = {"corpus_open": 4_110, "personas": [{"persona": "p1", "recall": {"fused": {
+        "T1": {"found": 2, "total": 2},
+        "T2": {"found": 0, "total": 0},
+        "T3": {"found": 0, "total": 0},
+    }}}]}
+
+    found = harness.regressions(card, baseline)
+    assert len(found) == 1 and "not compared" in found[0]
+
+
+def test_a_real_drop_at_a_comparable_corpus_size_is_still_reported():
+    card = harness.Scorecard(limit=200, embedding_version="v", corpus_open=4_200)
+    card.personas.append(
+        harness.PersonaResult(
+            persona="p1",
+            recall={"fused": {"T1": {"found": 1, "total": 2},
+                              "T2": {"found": 0, "total": 0},
+                              "T3": {"found": 0, "total": 0}}},
+        )
+    )
+    baseline = {"corpus_open": 4_110, "personas": [{"persona": "p1", "recall": {"fused": {
+        "T1": {"found": 2, "total": 2},
+        "T2": {"found": 0, "total": 0},
+        "T3": {"found": 0, "total": 0},
+    }}}]}
+
+    found = harness.regressions(card, baseline)
+    assert len(found) == 1 and "T1" in found[0]
+
+
+def test_a_positive_scored_below_the_threshold_is_reported_as_lost():
+    """The paid stage's own recall loss: retrieved, rule-passed, and still never shown.
+
+    Every recall figure above this counts the needle as found, because retrieval did find it.
+    """
+    needles = [{"id": "good", "tier": "T1"}, {"id": "bad", "tier": "N"}]
+    graded = harness.grade_scores(needles, {"good": 69, "bad": 10}, threshold=70)
+    assert graded["lost"] == ["good"]
+    assert graded["leaked"] == []
+
+
+def test_a_negative_scored_at_the_threshold_is_reported_as_leaked():
+    """At the threshold, not merely above it -- the digest gates on `>=`."""
+    needles = [{"id": "good", "tier": "T1"}, {"id": "bad", "tier": "N"}]
+    graded = harness.grade_scores(needles, {"good": 95, "bad": 70}, threshold=70)
+    assert graded["leaked"] == ["bad"]
+    assert graded["lost"] == []
+
+
+def test_an_unscored_needle_is_counted_as_unscored_not_as_a_failure():
+    """A batch the model mangled leaves postings unscored; scoring them 0 would cache a lie."""
+    needles = [{"id": "good", "tier": "T1"}, {"id": "bad", "tier": "N"}]
+    graded = harness.grade_scores(needles, {}, threshold=70)
+    assert graded["unscored"] == 2
+    assert graded["lost"] == [] and graded["leaked"] == []

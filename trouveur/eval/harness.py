@@ -29,17 +29,21 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from collections import defaultdict
 from dataclasses import asdict, dataclass, field
+from decimal import Decimal
 from pathlib import Path
 
+from trouveur.config import get_settings
 from trouveur.db.engine import connect
 from trouveur.db.queries import admin as admin_q
 from trouveur.db.queries import ingest as ingest_q
 from trouveur.db.queries import jobs as jobs_q
+from trouveur.db.queries import match as match_q
 from trouveur.db.queries import users as users_q
 from trouveur.ingest.persist import persist
-from trouveur.ingest.workers import drain_dedup, drain_derive, drain_embed
+from trouveur.ingest.workers import drain_dedup, drain_derive, drain_detail, drain_embed
 from trouveur.match import retrieve
 from trouveur.match.expand import deterministic_queries
 from trouveur.match.rules import evaluate
@@ -51,6 +55,15 @@ log = logging.getLogger(__name__)
 DATA = Path(__file__).parent / "data"
 BASELINE = Path(__file__).parent / "baseline.json"
 POSITIVE_TIERS = ("T1", "T2", "T3")
+# How far a needle may slide down the fused list before it is worth reporting. Below this,
+# movement is the noise of a haystack that is re-swept between runs rather than a change.
+RANK_SLIDE = 20
+# How far the corpus may grow or shrink before a baseline delta stops meaning anything.
+CORPUS_TOLERANCE = 1.5
+# The reranker runs on a key supplied for the evaluation only, read from the environment.
+# Deliberately NOT stored as a user credential: those live in the database, are entered
+# through the web UI, and this harness must not become a second way in.
+EVAL_LLM_KEY_VAR = "TROUVEUR_EVAL_LLM_KEY"
 
 
 def load_personas() -> list[dict]:
@@ -73,6 +86,15 @@ class PersonaResult:
     negatives_surviving_rules: int = 0
     inversions: int = 0
     missed: list[str] = field(default_factory=list)
+    # Planted positives that retrieval found and the rules cut then rejected. Retrieved but never
+    # shown, so recall at any depth counts them as a success the user does not receive.
+    cut_by_rules: list[str] = field(default_factory=list)
+    # Fused rank of every planted positive, 1-based, or null if it never appeared. Recorded
+    # because found/total at one depth saturates -- at 29 of 30 needles found, the only movement
+    # recall can report is a regression, while a needle sliding from rank 12 to rank 90 is a real
+    # loss of quality that recall@200 cannot see at all.
+    ranks: dict[str, int | None] = field(default_factory=dict)
+    rerank: dict | None = None
 
 
 @dataclass
@@ -105,6 +127,10 @@ async def plant_needles(needles: list[dict]) -> dict[str, int]:
     never actually have produced.
     """
     by_source: dict[str, list[str]] = defaultdict(list)
+    # Which sources' needles carry a detail payload, read off the needles rather than hardcoded:
+    # a needle written for Workday or Rippling would otherwise have its description silently
+    # dropped, since persist only looks a detail up when told the source has that phase.
+    detailed_sources = {n["source"] for n in needles if n.get("detail")}
     documents: list[RawDocument] = []
     detail_documents: list[RawDocument] = []
 
@@ -131,7 +157,9 @@ async def plant_needles(needles: list[dict]) -> dict[str, int]:
     async with connect() as conn:
         await ingest_q.archive_documents(conn, documents + detail_documents)
         for source, external_ids in by_source.items():
-            await persist(conn, source, external_ids, requires_detail=source == "arbeitsagentur")
+            await persist(
+                conn, source, external_ids, requires_detail=source in detailed_sources
+            )
             # Reuses the ingest lookup rather than adding a query: it already returns the job id
             # keyed by external id, which is exactly the mapping needed here.
             stored = await ingest_q.stored_content_hashes(conn, source, external_ids)
@@ -180,6 +208,124 @@ async def _ensure_persona(persona: dict) -> UserProfile:
         return profile_from_row(await users_q.get_profile(conn, user_id))
 
 
+async def _rule_pass(
+    conn, profile: UserProfile, job_ids: list[int]
+) -> set[int]:
+    """Which of these survive the free deterministic cut.
+
+    Calls the real rules rather than restating them: a second implementation here would grade
+    something production does not run.
+    """
+    if not job_ids:
+        return set()
+    agency = await jobs_q.agency_flags(conn, job_ids)
+    survivors = set()
+    for row in await jobs_q.load_for_derive(conn, job_ids):
+        verdict, _ = evaluate(
+            Candidate(
+                job_id=row.id, content_hash=b"", title=row.title,
+                company=row.company, description=row.description,
+                is_agency=agency.get(row.id),
+            ),
+            profile,
+        )
+        if verdict is RuleVerdict.PASS:
+            survivors.add(row.id)
+    return survivors
+
+
+async def _rerank_needles(
+    conn, settings, profile: UserProfile, mine: list[dict], planted: dict[str, int]
+) -> dict:
+    """Score this persona's own planted needles with the real reranker, and grade the verdict.
+
+    Only the needles, deliberately. They are the only judged items in the corpus, so scoring the
+    whole retrieved shortlist would spend real money to produce numbers nobody can mark: an
+    unplanted posting scoring 80 is unjudged, not wrong -- the same reason precision is not
+    measurable at retrieval. What this does answer is the question the tiers already set up, one
+    stage later:
+
+      - a positive scored below the threshold is retrieved, rule-passed, and still never shown;
+      - a negative scored at or above it reaches the digest, which is what the rules cut exists
+        to prevent and evidently did not.
+
+    Reuses `rerank.score_batch`, so the prompt, the model and the provider pin are the ones
+    production sends. A copy of the prompt here would grade something the user never runs.
+    """
+    from trouveur.match import llm, rerank
+
+    api_key = os.environ.get(EVAL_LLM_KEY_VAR)
+    if not api_key:
+        return {}
+
+    model = os.environ.get("TROUVEUR_EVAL_LLM_MODEL") or settings.default_llm_model
+    graded = {
+        planted[n["id"]]: n
+        for n in mine
+        if n["id"] in planted and n["tier"] in (*POSITIVE_TIERS, "N")
+    }
+    rows = await match_q.scoreable_rows(conn, sorted(graded))
+    if not rows:
+        return {}
+
+    threshold = profile.notify_threshold
+    scores: dict[str, int] = {}
+    cost = Decimal(0)
+    errors: list[str] = []
+
+    for start in range(0, len(rows), rerank.BATCH_SIZE):
+        batch = rows[start : start + rerank.BATCH_SIZE]
+        try:
+            scored, usage = await rerank.score_batch(
+                settings, profile, batch,
+                api_key=api_key, model=model,
+                provider_pin=settings.default_llm_provider,
+            )
+        except llm.LlmError as exc:
+            errors.append(str(exc))
+            log.warning("rerank batch failed for persona %s: %s", profile.user_id, exc)
+            break
+        cost += usage.cost_usd
+        for score in scored:
+            needle = graded.get(score.id)
+            if needle is not None:
+                scores[needle["id"]] = score.score
+
+    return {
+        "model": model,
+        **grade_scores(list(graded.values()), scores, threshold),
+        "cost_usd": f"{cost:.6f}",
+        "errors": errors,
+    }
+
+
+def grade_scores(needles: list[dict], scores: dict[str, int], threshold: int) -> dict:
+    """Mark each scored needle against the threshold the digest actually gates on.
+
+    Pure, and separate from the call that produced the scores, so the direction of the comparison
+    is testable without spending money. Getting it backwards would report a reranker that drops
+    every good job as flawless.
+    """
+    return {
+        "threshold": threshold,
+        "scored": len(scores),
+        "unscored": sum(1 for n in needles if n["id"] not in scores),
+        "scores": dict(sorted(scores.items())),
+        # A positive the paid stage drops below the threshold. Invisible to every recall number
+        # above it, because retrieval did its job and the loss happens afterwards.
+        "lost": sorted(
+            n["id"] for n in needles
+            if n["tier"] in POSITIVE_TIERS and n["id"] in scores
+            and scores[n["id"]] < threshold
+        ),
+        # A negative the paid stage would forward to the digest.
+        "leaked": sorted(
+            n["id"] for n in needles
+            if n["tier"] == "N" and n["id"] in scores and scores[n["id"]] >= threshold
+        ),
+    }
+
+
 def _score_arm(ranked: list[int], planted: dict[str, int], needles: list[dict]) -> dict:
     """Recall per tier for one ranked list of job ids."""
     found = set(ranked)
@@ -194,7 +340,11 @@ def _score_arm(ranked: list[int], planted: dict[str, int], needles: list[dict]) 
 
 
 async def _evaluate_persona(
-    persona: dict, needles: list[dict], planted: dict[str, int], limit: int
+    persona: dict,
+    needles: list[dict],
+    planted: dict[str, int],
+    limit: int,
+    rerank_enabled: bool = False,
 ) -> PersonaResult:
     mine = [n for n in needles if n["persona"] == persona["key"]]
     profile = await _ensure_persona(persona)
@@ -236,6 +386,10 @@ async def _evaluate_persona(
         )
 
         rank_of = {job_id: position for position, job_id in enumerate(fused)}
+        result.ranks = {
+            name: (rank_of[job_id] + 1 if job_id in rank_of else None)
+            for job_id, name in positives.items()
+        }
         retrieved_negatives = [job_id for job_id in negatives if job_id in rank_of]
         result.negatives_retrieved = len(retrieved_negatives)
         result.inversions = sum(
@@ -245,27 +399,26 @@ async def _evaluate_persona(
             if positive in rank_of and rank_of[negative] < rank_of[positive]
         )
 
-        # A negative that survives the rules cut is the one that would reach a paid reranker and
-        # then the user, so it is scored after the cut rather than at retrieval. Uses the real
-        # rules, not a copy: a second implementation here would grade the wrong thing.
-        surviving = 0
-        agency = await jobs_q.agency_flags(conn, retrieved_negatives)
-        for row in await jobs_q.load_for_derive(conn, retrieved_negatives):
-            verdict, _ = evaluate(
-                Candidate(
-                    job_id=row.id, content_hash=b"", title=row.title,
-                    company=row.company, description=row.description,
-                    is_agency=agency.get(row.id),
-                ),
-                profile,
-            )
-            surviving += int(verdict is RuleVerdict.PASS)
-        result.negatives_surviving_rules = surviving
+        # Both sides are scored after the cut, because the cut is what stands between retrieval
+        # and the user. A negative that survives it reaches a paid reranker and then the digest.
+        # A positive that does NOT survive it is retrieved and still never seen -- so counting it
+        # as found, which recall at any depth does, reports a success the user never receives.
+        result.negatives_surviving_rules = len(
+            await _rule_pass(conn, profile, retrieved_negatives)
+        )
+        retrieved_positives = [job_id for job_id in positives if job_id in rank_of]
+        survived = await _rule_pass(conn, profile, retrieved_positives)
+        result.cut_by_rules = sorted(
+            positives[job_id] for job_id in retrieved_positives if job_id not in survived
+        )
+
+        if rerank_enabled:
+            result.rerank = await _rerank_needles(conn, get_settings(), profile, mine, planted)
 
     return result
 
 
-async def run_eval(limit: int = 200) -> Scorecard:
+async def run_eval(limit: int = 200, rerank: bool = False) -> Scorecard:
     """Plant the needles into whatever corpus is present, then score every persona."""
     from trouveur.ingest.embed import embedding_version
 
@@ -286,7 +439,7 @@ async def run_eval(limit: int = 200) -> Scorecard:
         corpus_with_description=int(coverage),
     )
     for persona in load_personas():
-        result = await _evaluate_persona(persona, needles, planted, limit)
+        result = await _evaluate_persona(persona, needles, planted, limit, rerank)
         result.corpus_open = card.corpus_open
         card.personas.append(result)
     return card
@@ -298,7 +451,10 @@ def _bar(found: int, total: int) -> str:
 
 def render(card: Scorecard, baseline: dict | None) -> str:
     """A scorecard a human reads, with the baseline delta beside every number that has one."""
-    previous = {p["persona"]: p for p in (baseline or {}).get("personas", [])}
+    mismatch = incomparable(card, baseline)
+    previous = (
+        {} if mismatch else {p["persona"]: p for p in (baseline or {}).get("personas", [])}
+    )
     described = (
         100 * card.corpus_with_description / card.corpus_open if card.corpus_open else 0
     )
@@ -310,6 +466,8 @@ def render(card: Scorecard, baseline: dict | None) -> str:
         f"{'persona':<24}{'tier':<6}{'lexical':>9}{'dense':>9}{'fused':>9}   {'baseline':>9}",
         "-" * 72,
     ]
+    if mismatch:
+        lines.insert(3, f"baseline: {mismatch}")
     for persona in card.personas:
         was = previous.get(persona.persona, {}).get("recall", {})
         for tier in POSITIVE_TIERS:
@@ -337,6 +495,23 @@ def render(card: Scorecard, baseline: dict | None) -> str:
         )
         if persona.missed:
             lines.append(f"{'':<24}missed: {', '.join(persona.missed)}")
+        if persona.cut_by_rules:
+            lines.append(
+                f"{'':<24}retrieved then cut by rules: {', '.join(persona.cut_by_rules)}"
+            )
+        if persona.rerank:
+            r = persona.rerank
+            lines.append(
+                f"{'':<24}rerank @{r['threshold']}: {r['scored']} scored"
+                f"{'  ' + str(r['unscored']) + ' unscored' if r['unscored'] else ''}"
+                f"   lost {len(r['lost'])}   leaked {len(r['leaked'])}   ${r['cost_usd']}"
+            )
+            if r["lost"]:
+                lines.append(f"{'':<24}  below threshold: {', '.join(r['lost'])}")
+            if r["leaked"]:
+                lines.append(f"{'':<24}  negatives above threshold: {', '.join(r['leaked'])}")
+            for error in r["errors"]:
+                lines.append(f"{'':<24}  ! {error}")
         lines.append("")
 
     totals = {arm: {"found": 0, "total": 0} for arm in ("lexical", "dense", "fused")}
@@ -349,6 +524,34 @@ def render(card: Scorecard, baseline: dict | None) -> str:
         "overall recall   "
         + "   ".join(f"{arm} {_bar(**totals[arm])}" for arm in ("lexical", "dense", "fused"))
     )
+
+    # Recall at one depth saturates, and a saturated number can only ever report a regression.
+    # The shallower depths are where a change still has somewhere to move, and they are also the
+    # depths that matter: the reranker's budget is far smaller than k.
+    ranks = [rank for persona in card.personas for rank in persona.ranks.values()]
+    planted = len(ranks)
+    depths = [k for k in (10, 25, 50, 100, card.limit) if k <= card.limit]
+    lines.append(
+        "recall@k (fused) "
+        + "   ".join(
+            f"k={k} {sum(1 for r in ranks if r is not None and r <= k)}/{planted}" for k in depths
+        )
+    )
+    reciprocal = sum(1 / rank for rank in ranks if rank is not None)
+    lines.append(f"mean reciprocal rank   {reciprocal / planted:.3f}" if planted else "")
+    cut = sum(len(persona.cut_by_rules) for persona in card.personas)
+    lines.append(f"positives cut by rules after retrieval   {cut}/{planted}")
+
+    scored = [p.rerank for p in card.personas if p.rerank]
+    if scored:
+        lost = sum(len(r["lost"]) for r in scored)
+        leaked = sum(len(r["leaked"]) for r in scored)
+        graded = sum(r["scored"] for r in scored)
+        cost = sum(Decimal(r["cost_usd"]) for r in scored)
+        lines.append(
+            f"rerank ({scored[0]['model']})   {graded} needles scored   "
+            f"{lost} positives lost below threshold   {leaked} negatives leaked   ${cost:.4f}"
+        )
     return "\n".join(lines)
 
 
@@ -364,10 +567,32 @@ def write_baseline(card: Scorecard) -> None:
     )
 
 
+def incomparable(card: Scorecard, baseline: dict | None) -> str | None:
+    """Why these two runs may not be differenced, or None if they may.
+
+    Recall is a function of how much the needle had to beat. A run over 75k postings and a
+    baseline over 4k are not the same measurement, and subtracting them manufactures regressions
+    out of nothing but a bigger haystack. The same argument the Scorecard already makes about
+    description coverage applies to size, and more sharply.
+    """
+    was_open = (baseline or {}).get("corpus_open") or 0
+    if not was_open:
+        return None
+    if 1 / CORPUS_TOLERANCE <= card.corpus_open / was_open <= CORPUS_TOLERANCE:
+        return None
+    return (
+        f"not compared: the baseline was measured over {was_open:,} open postings and this run "
+        f"over {card.corpus_open:,}. Recall across corpora of different size is not the same "
+        f"measurement; re-baseline before reading a delta."
+    )
+
+
 def regressions(card: Scorecard, baseline: dict | None) -> list[str]:
     """Tiers where fused recall dropped. Reported, never raised -- this is not a test."""
     if not baseline:
         return []
+    if reason := incomparable(card, baseline):
+        return [reason]
     previous = {p["persona"]: p for p in baseline.get("personas", [])}
     found = []
     for persona in card.personas:
@@ -380,6 +605,13 @@ def regressions(card: Scorecard, baseline: dict | None) -> list[str]:
                     f"{persona.persona}/{tier}: {now['found']}/{now['total']} "
                     f"(was {was['found']}/{was['total']})"
                 )
+        # A needle still inside k but much further down it. Invisible to recall, and the reason
+        # ranks are recorded at all: at 29 of 30 found, this is where quality actually moves.
+        previous_ranks = previous.get(persona.persona, {}).get("ranks", {})
+        for name, rank in persona.ranks.items():
+            was_rank = previous_ranks.get(name)
+            if was_rank and rank and rank - was_rank > RANK_SLIDE:
+                found.append(f"{persona.persona}/{name}: rank {was_rank} -> {rank}")
     return found
 
 
@@ -400,32 +632,79 @@ HAYSTACK_PARTITIONS = [
 ]
 
 
-async def snapshot_haystack(backfill: bool = False) -> int:
-    """Sweep a slice of the live corpus to serve as the haystack.
+# Detail requests one `--sweep` may spend. Only Arbeitsagentur, Workday and Rippling have a
+# separate detail phase, but for those a description costs one polite request per posting, so an
+# unbounded drain is hours. Production absorbs that across a day; an evaluation run cannot, and a
+# command nobody is willing to wait for is a command nobody runs. What the budget does not reach
+# is reported by the scorecard's description coverage rather than hidden.
+DETAIL_BUDGET = 6000
 
-    Real postings, because the needles must be hard to find. Restricted to occupational fields the
-    personas plausibly compete in: filling the haystack with retail vacancies would let the hard
-    filters remove most of it for free and flatter every number.
+
+async def snapshot_haystack(backfill: bool = False) -> int:
+    """Sweep the live corpus to serve as the haystack, then fetch the descriptions.
+
+    Every configured source, because the question this exists to answer is recall over the whole
+    corpus: a haystack drawn from one adapter measures that adapter. Arbeitsagentur is the one
+    exception -- alone it would contribute tens of thousands of postings a day and drown every
+    other source -- so it is narrowed to the occupational fields the personas plausibly compete
+    in. That narrowing is also what keeps the haystack hard: filling it with retail vacancies
+    would let the hard filters remove most of it for free and flatter every number.
     """
+    from trouveur.ingest import pipeline
+    from trouveur.sources import build_sources
     from trouveur.sources.arbeitsagentur import ArbeitsagenturSource
     from trouveur.sources.http import PoliteClient
 
-    source = ArbeitsagenturSource(partition_filter=HAYSTACK_PARTITIONS)
-    collected = 0
-
-    async def sink(documents):
-        nonlocal collected
-        async with connect() as conn:
-            await ingest_q.archive_documents(conn, documents)
-            await persist(
-                conn, source.name, [d.external_id for d in documents], requires_detail=True
-            )
-        collected += len(documents)
+    settings = get_settings()
+    async with connect() as conn:
+        tenants = await admin_q.enabled_tenants(conn)
+    sources = [
+        ArbeitsagenturSource(partition_filter=HAYSTACK_PARTITIONS)
+        if source.name == ArbeitsagenturSource.name
+        else source
+        for source in build_sources(tenants=tenants)
+    ]
 
     async with PoliteClient() as client:
-        outcome = await source.sweep(client, sink, backfill=backfill)
-    log.info(
-        "haystack: %d documents from %d/%d partitions",
-        collected, outcome.partitions_done, outcome.partitions_total,
-    )
+        report = await pipeline.sweep_sources(
+            client, sources, settings=settings, backfill=backfill
+        )
+        # One client across the sweep and the whole detail drain. A fresh PoliteClient per round
+        # would reset the per-provider budget and turn a polite loop into a burst.
+        fetched = await drain_details(client, {source.name: source for source in sources})
+
+    collected = sum(source.documents for source in report.per_source.values())
+    log.info("haystack: %d documents, %d descriptions fetched", collected, fetched)
+    log.info("haystack per source: %s", report.summary())
     return collected
+
+
+async def drain_details(client, sources: dict[str, object], budget: int = DETAIL_BUDGET) -> int:
+    """Fetch descriptions until the queue empties or the budget runs out.
+
+    A haystack of title-only postings is not the corpus production has: every needle carries a
+    hand-written description, so leaving the haystack without one makes the needles distinguishable
+    by length alone and the comparison is between unlike things.
+
+    The sharper reason is that `persist` deliberately does not queue a posting for embedding until
+    its description has arrived, so an undrained detail queue is not merely a thinner haystack --
+    those postings are absent from the ANN index entirely. The dense arm then competes against a
+    fraction of what the lexical arm sees, and its recall is flattered by exactly that gap.
+    """
+    fetched = 0
+    while fetched < budget:
+        async with connect() as conn:
+            done = await drain_detail(conn, client, sources, limit=min(200, budget - fetched))
+        if not done:
+            return fetched
+        fetched += done
+        log.info("details: %d fetched", fetched)
+    async with connect() as conn:
+        left = (await backlog(conn)).get(WorkKind.DETAIL.value, 0)
+    if left:
+        log.warning(
+            "detail budget of %d spent with %d postings still without a description; "
+            "the scorecard's description coverage reports what that left",
+            budget, left,
+        )
+    return fetched

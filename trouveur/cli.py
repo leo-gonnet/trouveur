@@ -131,9 +131,17 @@ def refill(kind: str, chunk: int) -> None:
 
 @main.command("eval")
 @click.option("--limit", "k", default=200, show_default=True, help="Retrieval depth to score at.")
+@click.option(
+    "--rerank",
+    is_flag=True,
+    help=(
+        "Also score the planted needles with the real reranker. Spends real credit on the key "
+        "in TROUVEUR_EVAL_LLM_KEY, so it is opt-in."
+    ),
+)
 @click.option("--save-baseline", is_flag=True, help="Record this run as the new baseline.")
 @click.option("--sweep", is_flag=True, help="Fetch a fresh haystack from live sources first.")
-def evaluate_retrieval(k: int, save_baseline: bool, sweep: bool) -> None:
+def evaluate_retrieval(k: int, save_baseline: bool, sweep: bool, rerank: bool) -> None:
     """Score retrieval against planted needles. Measures recall; never gates anything.
 
     Requires TROUVEUR_EVAL_DATABASE_URL pointing at a scratch database. Refusing to run against
@@ -166,7 +174,14 @@ def evaluate_retrieval(k: int, save_baseline: bool, sweep: bool) -> None:
         click.echo("fetching a haystack from live sources...", err=True)
         click.echo(f"collected {asyncio.run(harness.snapshot_haystack())} postings", err=True)
 
-    card = asyncio.run(harness.run_eval(limit=k))
+    if rerank and not os.environ.get(harness.EVAL_LLM_KEY_VAR):
+        raise SystemExit(
+            f"--rerank needs {harness.EVAL_LLM_KEY_VAR} set to an OpenRouter key. It is read "
+            "from the environment and never stored: users' keys live in the database, entered "
+            "through the web UI, and this must not become a second way in."
+        )
+
+    card = asyncio.run(harness.run_eval(limit=k, rerank=rerank))
     baseline = harness.read_baseline()
     click.echo(harness.render(card, baseline))
 

@@ -121,6 +121,7 @@ def _arguments(ctx: dict) -> dict[str, dict]:
         },
         "match.pending_rerank": {"user_id": user_id, "profile_version": 1, "limit": 5},
         "match.count_pending_rerank": {"user_id": user_id, "profile_version": 1},
+        "match.scoreable_rows": {"job_ids": [job_id]},
         "match.pending_rules": {"user_id": user_id, "limit": 5},
         "match.cached_scores": {
             "user_id": user_id, "profile_version": 1, "hashes": [ctx["content_hash"]],

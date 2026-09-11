@@ -589,6 +589,17 @@ highly is unjudged, not wrong. Reporting a precision number here would be invent
 negatives give the usable substitute: postings the deterministic pipeline must exclude, so "did
 anything that should have been filtered survive" is answerable without judging the haystack.
 
+**Score the rules cut on both sides, not just on negatives.** The cut is what stands between
+retrieval and the user, so a positive that is retrieved and then rejected by it is never seen —
+and recall at any depth still counts it as found. `cut_by_rules` reports those. Grading only the
+negatives measured half the pipeline and called a silent recall loss a success.
+
+**Record each needle's rank, not only whether it was found.** `found/total` at one depth
+saturates: at 29 of 30 needles found there is no headroom left and the number can only ever
+report a regression, while a needle sliding from rank 12 to rank 90 — a real loss, since the
+reranker's budget is far smaller than `k` — is invisible to it. `ranks` is what makes an
+improvement visible at all, and `regressions()` reports a slide past `RANK_SLIDE`.
+
 **Needles are tiered by which retriever should find them**, because one aggregate number cannot
 answer the question worth asking — whether the hybrid earns its cost:
 
@@ -599,6 +610,10 @@ answer the question worth asking — whether the hybrid earns its cost:
 | `T3` | adjacent role, different title, sometimes another language | dense + query expansion |
 | `N` | must be excluded by rules or hard filters | nothing — it should never survive |
 
+The harness scores with the **deterministic** expansion only, so a run costs nothing and does not
+vary with a model. T3 is therefore currently measured without the LLM expansion its row names:
+what expansion adds is not yet a number this produces.
+
 **A T2 or T3 needle that shares a content word with its persona is worthless** — it silently
 becomes a T1 and the tier stops measuring dense recall. Four of twelve leaked a word on the first
 draft (`startup`, `maintenance`, `Auswertung`), so `tests/unit/test_eval_needles.py` enforces it.
@@ -608,20 +623,51 @@ Other rules the harness depends on:
 - **Personas are fictional.** They must never be a real user's profile — this repo is public.
 - **Needles are planted through the real ingest path**, not inserted into `job`. A needle that
   skipped normalisation and derivation would be a row the pipeline could never have produced.
+- **The haystack is every configured source**, because the objective is recall over the whole
+  corpus and a haystack drawn from one adapter measures that adapter. Arbeitsagentur is the single
+  exception: alone it contributes tens of thousands of postings a day and would drown the other
+  eleven, so it is narrowed to `HAYSTACK_PARTITIONS`.
 - **The haystack is real postings from occupational fields the personas plausibly compete in.**
   Filling it with retail vacancies would let the hard filters remove most of it for free and
   flatter every number.
 - **Drain details before scoring.** The needles carry descriptions; a haystack of title-only
   postings is not the corpus production has, and the comparison would be between unlike things.
+  The sharper reason: `persist` does not queue a posting for embedding until its description
+  arrives, so postings with an outstanding detail fetch are **absent from the ANN index**, not
+  merely thin — the dense arm then competes against a fraction of what the lexical arm sees and
+  its recall is flattered by that gap. Only Arbeitsagentur, Workday and Rippling have a detail
+  phase, and for those a description costs one polite request per posting — so the drain is capped
+  at `DETAIL_BUDGET` and what it does not reach is reported as the scorecard's description
+  coverage rather than hidden.
 - **Run it with the real embedding model.** `EMBEDDING_PROVIDER=deterministic` makes every dense
   number noise, so the harness warns rather than letting you read it as a result.
 - **`TROUVEUR_EVAL_DATABASE_URL` is required and must be a scratch database.** The harness plants
   fake postings and overwrites personas' profiles.
 
+### Scoring the reranker
+
+`--rerank` carries the planted-known-item idea one stage further: the needles are the only judged
+items in the corpus, so they -- and **only** they -- are sent to the real reranker. Scoring the
+whole retrieved shortlist would spend real money to produce numbers nobody can mark, for the same
+reason precision is not measurable at retrieval.
+
+- **A positive scored below the threshold is a recall loss no other number can see.** Retrieval
+  found it and the rules cut passed it; the paid stage is where it disappears, and every recall
+  figure above still counts it as found. `lost` reports those.
+- **A negative scored at or above the threshold would reach the digest.** `leaked` reports those.
+- **The key comes from `TROUVEUR_EVAL_LLM_KEY`, and is never stored.** Users' keys live in the
+  database and are entered through the web UI; this harness must not become a second way in.
+- It reuses `rerank.score_batch`, so the prompt, model and provider pin are the ones production
+  sends. A copy of the prompt here would grade something no user ever runs.
+- **Rerank numbers are noisier than retrieval numbers.** Measured 2026-09-11 at `temperature=0`
+  with the provider pinned, one needle scored 45 on one run and above 70 on the next. Treat a
+  single run's `lost` list as a signal, not a result, and re-run before acting on a small change.
+
 ```bash
 export TROUVEUR_EVAL_DATABASE_URL=postgresql+asyncpg://trouveur:x@127.0.0.1:55433/trouveur
 DATABASE_URL=$TROUVEUR_EVAL_DATABASE_URL uv run alembic upgrade head
 uv run trouveur eval --sweep                 # fetch a haystack, then score
+uv run trouveur eval --rerank                # also score the needles with the real reranker
 uv run trouveur eval --save-baseline         # record the result for future comparison
 ```
 
