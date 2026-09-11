@@ -73,15 +73,30 @@ async def run(
     *, only_source: str | None = None, backfill: bool = False, settings: Settings | None = None
 ) -> IngestReport:
     settings = settings or get_settings()
-    report = IngestReport()
-
     async with connect() as conn:
         tenants = await admin_q.enabled_tenants(conn)
     sources = build_sources(tenants=tenants, only=only_source)
 
     async with PoliteClient() as client:
-        for source in sources:
-            report.per_source[source.name] = await _sweep_source(client, source, settings, backfill)
+        return await sweep_sources(client, sources, settings=settings, backfill=backfill)
+
+
+async def sweep_sources(
+    client: PoliteClient,
+    sources: Sequence[Source],
+    *,
+    settings: Settings,
+    backfill: bool = False,
+) -> IngestReport:
+    """Sweep an already-assembled list of sources, one client shared across all of them.
+
+    Takes the sources rather than building them so the evaluation harness can substitute a
+    narrowed Arbeitsagentur without carrying a second copy of this loop -- and so the politeness
+    budget, which lives on the client, is shared by everything the caller sweeps.
+    """
+    report = IngestReport()
+    for source in sources:
+        report.per_source[source.name] = await _sweep_source(client, source, settings, backfill)
     log.info("ingest complete: %s", report.summary())
     return report
 
