@@ -1,14 +1,18 @@
-"""Single-user session auth.
+"""Session auth.
 
-There is deliberately no registration, password-reset or user-listing route: the only way to
-create the login is `trouveur create-user` on the CLI. That omission removes the largest attack
-surface of an internet-facing app (see AGENTS.md).
+There is deliberately no registration route, no password reset and no user-listing endpoint: the
+only way to create a login is `trouveur create-user` on the server. That omission removes the
+largest attack surface of an internet-facing app, and it is the reason this application can be
+exposed without an identity provider in front of it.
+
+Sessions carry the user id, so every query downstream is scoped to one user rather than assuming
+there is only one.
 """
 
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 from argon2 import PasswordHasher
 from argon2.exceptions import VerificationError, VerifyMismatchError
@@ -16,7 +20,7 @@ from fastapi import Request
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
 from trouveur.config import Settings
-from trouveur.db import queries as q
+from trouveur.db.queries import users as users_q
 
 log = logging.getLogger(__name__)
 
@@ -24,15 +28,19 @@ COOKIE_NAME = "trouveur_session"
 _hasher = PasswordHasher()
 
 
+def hash_password(password: str) -> str:
+    return _hasher.hash(password)
+
+
 def _serializer(settings: Settings) -> URLSafeTimedSerializer:
     return URLSafeTimedSerializer(settings.session_secret, salt="trouveur-session")
 
 
-def issue_session(settings: Settings, username: str) -> str:
-    return _serializer(settings).dumps({"u": username})
+def issue_session(settings: Settings, user_id: int, username: str) -> str:
+    return _serializer(settings).dumps({"uid": user_id, "u": username})
 
 
-def read_session(settings: Settings, request: Request) -> str | None:
+def read_session(settings: Settings, request: Request) -> dict | None:
     token = request.cookies.get(COOKIE_NAME)
     if not token:
         return None
@@ -42,12 +50,13 @@ def read_session(settings: Settings, request: Request) -> str | None:
         )
     except (BadSignature, SignatureExpired):
         return None
-    return payload.get("u")
+    return payload if isinstance(payload, dict) and "uid" in payload else None
 
 
 def set_cookie(response, settings: Settings, token: str) -> None:
     response.set_cookie(
-        COOKIE_NAME, token,
+        COOKIE_NAME,
+        token,
         max_age=settings.session_max_age_days * 86400,
         httponly=True,
         secure=settings.cookie_secure,
@@ -60,30 +69,38 @@ def clear_cookie(response) -> None:
     response.delete_cookie(COOKIE_NAME, path="/")
 
 
-async def authenticate(conn, settings: Settings, username: str, password: str) -> tuple[bool, str]:
-    """Verify credentials. Returns (ok, message)."""
-    user = await q.get_user(conn)
+async def authenticate(
+    conn, settings: Settings, username: str, password: str
+) -> tuple[int | None, str]:
+    """Verify credentials. Returns (user_id, message)."""
+    user = await users_q.get_user_by_username(conn, username)
     if user is None:
-        return False, "No user exists yet. Run `trouveur create-user` on the server."
+        # Hash anyway, so a missing username and a wrong password take comparable time and the
+        # response cannot be used to enumerate accounts.
+        _hasher.hash(password)
+        log.warning("failed login attempt for unknown username")
+        return None, "Invalid username or password."
 
-    now = datetime.now(UTC)
-    if user.locked_until and user.locked_until > now:
-        wait = int((user.locked_until - now).total_seconds() // 60) + 1
-        return False, f"Too many failed attempts. Try again in {wait} minute(s)."
+    if user.locked_until is not None:
+        remaining = (user.locked_until - datetime.now(UTC)).total_seconds()
+        if remaining > 0:
+            return None, f"Too many failed attempts. Try again in {int(remaining // 60) + 1} min."
 
-    ok = user.username == username
+    ok = user.is_active
     if ok:
         try:
             _hasher.verify(user.password_hash, password)
         except (VerifyMismatchError, VerificationError):
             ok = False
 
-    locked_until = None
-    if not ok and user.failed_attempts + 1 >= settings.max_login_attempts:
-        locked_until = now + timedelta(minutes=settings.lockout_minutes)
-    await q.record_login_result(conn, ok, locked_until)
-
+    await users_q.record_login_result(
+        conn,
+        user.id,
+        success=ok,
+        lockout_minutes=settings.lockout_minutes,
+        max_attempts=settings.max_login_attempts,
+    )
     if not ok:
         log.warning("failed login attempt for username=%r", username)
-        return False, "Invalid username or password."
-    return True, ""
+        return None, "Invalid username or password."
+    return user.id, ""

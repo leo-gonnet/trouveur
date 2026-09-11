@@ -1,0 +1,16 @@
+{
+  "detail": {
+    "istArbeitnehmerUeberlassung": true,
+    "istPrivateArbeitsvermittlung": false,
+    "referenznummer": "10000-aaaaaaaaaaaaaaaa-S",
+    "stellenangebotsBeschreibung": "Wir vermitteln Sie an einen namhaften Kunden.",
+    "stellenangebotsTitel": "Ingenieur (m/w/d)"
+  },
+  "listing": {
+    "istArbeitnehmerUeberlassung": true,
+    "istPrivateArbeitsvermittlung": false,
+    "referenznummer": "10000-aaaaaaaaaaaaaaaa-S",
+    "stellenangebotsBeschreibung": "Wir vermitteln Sie an einen namhaften Kunden.",
+    "stellenangebotsTitel": "Ingenieur (m/w/d)"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "detail": null,
+  "listing": {
+    "arbeitszeitVollzeit": true,
+    "datumErsteVeroeffentlichung": "2026-09-02",
+    "firma": "Donauwerk Anlagenbau GmbH",
+    "gehaltsspanneBis": 5200,
+    "gehaltsspanneVon": 4200,
+    "referenznummer": "10000-austria-S",
+    "stellenangebotsTitel": "Wirtschaftsingenieur (m/w/d) Nachhaltigkeit",
+    "stellenlokationen": [
+      {
+        "adresse": {
+          "land": "OESTERREICH",
+          "ort": "Wien",
+          "region": "WIEN"
+        }
+      }
+    ],
+    "verguetungsangabe": "MONATSGEHALT"
+  }
+}

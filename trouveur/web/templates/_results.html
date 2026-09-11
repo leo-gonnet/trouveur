@@ -1,9 +1,18 @@
+{% import "_macros.html" as m %}
 {% if jobs %}
-  <p class="hint" style="margin-bottom:var(--space-3)">
-    {{ jobs|length }} result{{ '' if jobs|length == 1 else 's' }}</p>
-  <div class="card">
-    {% for job in jobs %}{% include "_job.html" %}{% endfor %}
+  {% for job in jobs %}{{ m.job_card(job) }}{% endfor %}
+  <div class="pager">
+    {% if page > 1 %}
+      <a class="pill" hx-get="/search?q={{ q|urlencode }}&country={{ country }}&work_mode={{ work_mode }}&include_closed={{ 'true' if include_closed else '' }}&page={{ page-1 }}"
+         hx-target="#results" href="#">← previous</a>
+    {% endif %}
+    <span class="hint">page {{ page }}</span>
+    {% if has_more %}
+      <a class="pill" hx-get="/search?q={{ q|urlencode }}&country={{ country }}&work_mode={{ work_mode }}&include_closed={{ 'true' if include_closed else '' }}&page={{ page+1 }}"
+         hx-target="#results" href="#">next →</a>
+    {% endif %}
   </div>
 {% else %}
-  <div class="empty"><p>No matching jobs.</p></div>
+  <p class="empty">No postings match. Umlauts are folded, so <code>munchen</code> finds München,
+  and <code>ingenieur</code> finds Wirtschaftsingenieur.</p>
 {% endif %}

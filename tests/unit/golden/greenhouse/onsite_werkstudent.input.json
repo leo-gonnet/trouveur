@@ -1,0 +1,32 @@
+{
+  "detail": null,
+  "external_id": "beispiel:4002",
+  "listing": {
+    "absolute_url": "https://job-boards.greenhouse.io/beispiel/jobs/4002",
+    "application_deadline": null,
+    "company_name": "Beispiel Tech",
+    "content": "&lt;p&gt;Wir bieten flexible paid time off und ein tolles Team.&lt;/p&gt;",
+    "departments": [
+      {
+        "id": 8,
+        "name": "Supply Chain"
+      }
+    ],
+    "first_published": "2026-09-01T09:00:00-04:00",
+    "id": 4002,
+    "internal_job_id": 9002,
+    "language": "de",
+    "location": {
+      "name": "Wien, Austria"
+    },
+    "offices": [
+      {
+        "id": 2,
+        "location": null,
+        "name": "Austria"
+      }
+    ],
+    "title": "Werkstudent Logistik",
+    "updated_at": "2026-09-01T09:00:00-04:00"
+  }
+}

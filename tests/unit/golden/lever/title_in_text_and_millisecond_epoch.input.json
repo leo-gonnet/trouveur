@@ -1,0 +1,24 @@
+{
+  "listing": {
+    "id": "681fbc53-1e34-4a46-8677-3a78118674eb",
+    "text": "Data Engineer (m/w/d)",
+    "categories": {
+      "location": "Wien",
+      "team": "Data",
+      "commitment": "Full-time",
+      "allLocations": [
+        "Wien",
+        "Graz"
+      ]
+    },
+    "createdAt": 1787961600000,
+    "country": "AT",
+    "workplaceType": "remote",
+    "descriptionPlain": "Wir suchen eine Person fuer unsere Datenplattform.",
+    "descriptionBodyPlain": "Du baust Pipelines mit dbt und Airflow.",
+    "additionalPlain": "Wir bieten Weiterbildung.",
+    "hostedUrl": "https://jobs.lever.co/beispiel/681fbc53",
+    "applyUrl": "https://jobs.lever.co/beispiel/681fbc53/apply"
+  },
+  "external_id": "beispiel:681fbc53-1e34-4a46-8677-3a78118674eb"
+}

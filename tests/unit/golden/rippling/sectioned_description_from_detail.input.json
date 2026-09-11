@@ -1,0 +1,41 @@
+{
+  "listing": {
+    "uuid": "75ad50c6-778f-42ee-9c63-70d1cd687202",
+    "name": "Account Executive",
+    "department": {
+      "id": "Sales",
+      "label": "Sales"
+    },
+    "url": "https://ats.rippling.com/beispiel/jobs/75ad50c6",
+    "workLocation": {
+      "label": "Vienna, Austria",
+      "id": "Vienna, Austria"
+    }
+  },
+  "external_id": "beispiel:75ad50c6-778f-42ee-9c63-70d1cd687202",
+  "detail": {
+    "uuid": "75ad50c6-778f-42ee-9c63-70d1cd687202",
+    "name": "Account Executive",
+    "description": {
+      "company": "<p>Beispiel verkauft Software.</p>",
+      "role": "<p>Du betreust Bestandskunden.</p>"
+    },
+    "workLocations": [
+      "Vienna, Austria",
+      "Graz, Austria"
+    ],
+    "department": {
+      "name": "Sales",
+      "base_department": "Sales"
+    },
+    "employmentType": {
+      "label": "SALARIED_FT",
+      "id": "Salaried, full-time"
+    },
+    "createdOn": "2026-08-13T08:54:48.317000+00:00",
+    "url": "https://ats.rippling.com/beispiel/jobs/75ad50c6",
+    "payRangeDetails": [],
+    "companyName": "Beispiel GmbH",
+    "unlistedFromSearch": false
+  }
+}

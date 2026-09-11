@@ -1,0 +1,61 @@
+{
+  "derive_version": 3,
+  "facets": {
+    "cities": [
+      "Vienna",
+      "Remote (EU)"
+    ],
+    "countries": [
+      "AT"
+    ],
+    "employment_type": "unknown",
+    "is_agency": null,
+    "language": null,
+    "regions": [],
+    "salary_annualised": false,
+    "salary_max_eur_year": "82000",
+    "salary_min_eur_year": "65000",
+    "seniority": "senior",
+    "skills": [
+      "kubernetes"
+    ],
+    "work_mode": "remote"
+  },
+  "job": {
+    "agency_hint": null,
+    "closes_at": null,
+    "company": null,
+    "department_hint": "Engineering / Platform",
+    "description": "Du baust verteilte Systeme in Go und betreust Kubernetes.",
+    "employment_type_hint": "FullTime",
+    "external_id": "beispiel:aa11bb22-0000-4444-8888-cccccccccccc",
+    "language_hint": null,
+    "locations": [
+      {
+        "city": "Vienna",
+        "country": "Austria",
+        "raw": "Vienna, Austria",
+        "region": "Wien"
+      },
+      {
+        "city": null,
+        "country": null,
+        "raw": "Remote (EU)",
+        "region": null
+      }
+    ],
+    "posted_at": "2026-08-21T09:15:00Z",
+    "remote_hint": false,
+    "salary": {
+      "amount_max": "82000",
+      "amount_min": "65000",
+      "currency": "EUR",
+      "period": "YEAR"
+    },
+    "source": "ashby",
+    "title": "Senior Backend Engineer",
+    "updated_at": null,
+    "url": "https://jobs.ashbyhq.com/beispiel/aa11bb22"
+  },
+  "normalize_version": 1
+}

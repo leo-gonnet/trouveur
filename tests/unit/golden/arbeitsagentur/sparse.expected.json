@@ -1,0 +1,36 @@
+{
+  "derive_version": 3,
+  "facets": {
+    "cities": [],
+    "countries": [],
+    "employment_type": "unknown",
+    "is_agency": null,
+    "language": "de",
+    "regions": [],
+    "salary_annualised": false,
+    "salary_max_eur_year": null,
+    "salary_min_eur_year": null,
+    "seniority": "unknown",
+    "skills": [],
+    "work_mode": "unknown"
+  },
+  "job": {
+    "agency_hint": null,
+    "closes_at": null,
+    "company": null,
+    "department_hint": null,
+    "description": null,
+    "employment_type_hint": null,
+    "external_id": "10000-sparse-S",
+    "language_hint": "de",
+    "locations": [],
+    "posted_at": "2026-09-01T00:00:00Z",
+    "remote_hint": null,
+    "salary": null,
+    "source": "arbeitsagentur",
+    "title": "Mitarbeiter (m/w/d)",
+    "updated_at": null,
+    "url": "https://www.arbeitsagentur.de/jobsuche/jobdetail/10000-sparse-S"
+  },
+  "normalize_version": 1
+}

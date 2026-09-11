@@ -1,61 +1,106 @@
-"""Web UI: login, dashboard, recommendations, search, profile, companies, admin (schedule).
+"""Routes, auth and templates.
 
-Binds loopback only; Caddy terminates TLS in front of it. Reads the database and never fetches
-from sources or runs the pipeline: the admin page only enqueues `pipeline_run` rows for the
-runner service to execute (see AGENTS.md).
+The web layer reads the database and enqueues work. It never fetches from a source, never runs a
+sweep and never calls a model directly: web and runner share nothing but Postgres, so either can
+be down without taking the other with it.
+
+It also never re-derives. Everything shown here comes from stored facets; a template that parses
+a location or infers a work mode would be a second implementation of a question already answered
+in trouveur/ingest/derive.py, and the two would drift.
 """
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
-from decimal import Decimal
+import logging
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from urllib.parse import quote
 
 from fastapi import FastAPI, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from jinja2 import StrictUndefined
 
 from trouveur.config import get_settings
-from trouveur.db import queries as q
+from trouveur.crypto import encrypt, fingerprint
 from trouveur.db.engine import connect
-from trouveur.models import ProfileData, UserState
-from trouveur.sources.personio import parse_tenants
+from trouveur.db.queries import admin as admin_q
+from trouveur.db.queries import match as match_q
+from trouveur.db.queries import users as users_q
+from trouveur.match.pipeline import profile_from_row
+from trouveur.models import RunTrigger, UserState
+from trouveur.sources.registry import NORMALIZERS
 from trouveur.web import auth
 
-_HERE = Path(__file__).parent
+log = logging.getLogger(__name__)
 
+BASE = Path(__file__).parent
 app = FastAPI(title="Trouveur", docs_url=None, redoc_url=None, openapi_url=None)
-app.mount("/static", StaticFiles(directory=str(_HERE / "static")), name="static")
-templates = Jinja2Templates(directory=str(_HERE / "templates"))
+app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")
+# StrictUndefined, not Jinja's default. The default renders an unknown attribute as an empty
+# string, so a template reading a field its query does not select produces a blank cell and a
+# green test suite -- the exact silent-wrong-answer failure this codebase is built to avoid.
+templates = Jinja2Templates(directory=BASE / "templates")
+templates.env.undefined = StrictUndefined
 
 
-def _split_lines(raw: str) -> list[str]:
-    return [line.strip() for line in (raw or "").splitlines() if line.strip()]
+def _lines(raw: str) -> list[str]:
+    return [line.strip() for line in raw.splitlines() if line.strip()]
 
 
-def _split_commas(raw: str) -> list[str]:
-    return [part.strip() for part in (raw or "").split(",") if part.strip()]
+def _commas(raw: str) -> list[str]:
+    return [item.strip() for item in raw.split(",") if item.strip()]
 
 
-async def _current_user(request: Request) -> str | None:
+def _decimal(raw: str, default: Decimal) -> Decimal:
+    try:
+        return Decimal(raw.strip() or "0")
+    except (InvalidOperation, ValueError):
+        return default
+
+
+# Public by opt-in, never by omission. A route absent from this set requires a session, so the
+# failure mode of forgetting to think about auth is "locked", not "open".
+PUBLIC_PATHS = frozenset({"/", "/login", "/logout", "/healthz"})
+PUBLIC_PREFIXES = ("/static/",)
+
+
+def _session(request: Request) -> dict | None:
     return auth.read_session(get_settings(), request)
 
 
-def _login_redirect() -> RedirectResponse:
-    return RedirectResponse("/login", status_code=303)
+def _is_public(path: str) -> bool:
+    return path in PUBLIC_PATHS or path.startswith(PUBLIC_PREFIXES)
+
+
+@app.middleware("http")
+async def require_session(request: Request, call_next):
+    """Enforce authentication before anything else looks at the request.
+
+    Middleware rather than a per-handler check or a dependency, because both of those run after
+    FastAPI has already parsed and validated the request body: an anonymous POST with a malformed
+    form was answering 422, which means attacker-controlled input was being processed before the
+    caller was known. Nothing leaked, but the ordering was safe only by accident.
+
+    Doing it here also removes the two-line check that was repeated in every handler, which is the
+    repetition that guarantees somebody eventually forgets it on a new route.
+    """
+    session = _session(request)
+    request.state.session = session
+    if session is None and not _is_public(request.url.path):
+        return RedirectResponse("/login", status_code=303)
+    return await call_next(request)
 
 
 @app.get("/", response_class=HTMLResponse)
 async def root(request: Request):
-    if await _current_user(request) is None:
-        return _login_redirect()
-    return RedirectResponse("/dashboard", status_code=303)
+    return RedirectResponse("/recommendations" if request.state.session else "/login", 303)
 
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_form(request: Request):
+    if request.state.session:
+        return RedirectResponse("/recommendations", 303)
     return templates.TemplateResponse(request, "login.html", {"error": None})
 
 
@@ -63,13 +108,13 @@ async def login_form(request: Request):
 async def login(request: Request, username: str = Form(...), password: str = Form(...)):
     settings = get_settings()
     async with connect() as conn:
-        ok, message = await auth.authenticate(conn, settings, username, password)
-    if not ok:
+        user_id, message = await auth.authenticate(conn, settings, username, password)
+    if user_id is None:
         return templates.TemplateResponse(
             request, "login.html", {"error": message}, status_code=401
         )
-    response = RedirectResponse("/dashboard", status_code=303)
-    auth.set_cookie(response, settings, auth.issue_session(settings, username))
+    response = RedirectResponse("/recommendations", status_code=303)
+    auth.set_cookie(response, settings, auth.issue_session(settings, user_id, username))
     return response
 
 
@@ -80,137 +125,114 @@ async def logout():
     return response
 
 
-DASHBOARD_DAYS = 21
-
-
-@app.get("/dashboard", response_class=HTMLResponse)
-async def dashboard(request: Request):
-    if await _current_user(request) is None:
-        return _login_redirect()
+@app.get("/recommendations", response_class=HTMLResponse)
+async def recommendations(request: Request):
+    session = request.state.session
     async with connect() as conn:
-        await q.ensure_profile(conn)
-        profile_row = await q.get_profile(conn)
-        threshold = profile_row.notify_threshold if profile_row else 70
-
-        overview = await q.overview(conn, threshold)
-        sources = await q.source_quality(conn, threshold)
-        health = {row.source: row for row in await q.source_health(conn)}
-        daily = await q.daily_intake(conn, DASHBOARD_DAYS)
-        countries = await q.country_breakdown(conn)
-        companies = await q.top_companies(conn, limit=8)
-
-    chart = _build_chart(daily, DASHBOARD_DAYS)
-    best_sources = _rank_by_match_rate(sources)
+        profile_row = await users_q.get_profile(conn, session["uid"])
+        # Everything that was reranked is shown, so the page is exactly as long as the user's
+        # rerank budget -- the one number they already set, rather than a second one to tune.
+        limit = profile_row.rerank_limit if profile_row else 150
+        jobs = await match_q.recommendations(conn, session["uid"], limit)
+        stats = await match_q.match_stats(conn, session["uid"])
+        credential = await users_q.get_credential(conn, session["uid"])
     return templates.TemplateResponse(
-        request, "dashboard.html", {
-            "overview": overview, "sources": sources, "health": health,
-            "chart": chart, "countries": countries, "companies": companies,
-            "best_sources": best_sources, "threshold": threshold,
+        request,
+        "recommendations.html",
+        {
+            "active": "recommendations",
+            "jobs": jobs,
+            "stats": stats,
+            "has_key": credential is not None,
+            "username": session["u"],
         },
     )
 
 
-def _rank_by_match_rate(sources) -> list[dict]:
-    """Rank sources by recommended/scraped -- the number that says whether a source is worth
-    its request budget, as opposed to raw volume (which `sources` is already sorted by)."""
-    ranked = [
-        {
-            "source": s.source, "scraped": s.scraped, "recommended": s.recommended,
-            "rate": (s.recommended / s.scraped) if s.scraped else 0.0,
-        }
-        for s in sources
-        if s.scraped >= 5  # too few samples to call a rate meaningful
-    ]
-    ranked.sort(key=lambda r: r["rate"], reverse=True)
-    return ranked
-
-
-_PALETTE = ["#2f6fed", "#17855c", "#b45309", "#8957e5", "#c2352c", "#0891b2", "#be185d"]
-
-
-def _build_chart(daily_rows, days: int) -> dict:
-    """Reshape daily_intake() rows into a day x source matrix a template can render as bars."""
-    today = datetime.now(UTC).date()
-    order = [today - timedelta(days=i) for i in range(days - 1, -1, -1)]
-
-    sources = sorted({row.source for row in daily_rows})
-    by_day: dict = {day: dict.fromkeys(sources, 0) for day in order}
-    for row in daily_rows:
-        if row.day in by_day:
-            by_day[row.day][row.source] = row.n
-
-    max_total = max((sum(counts.values()) for counts in by_day.values()), default=0)
-    columns = [
-        {"day": day, "label": day.strftime("%d.%m"), "counts": by_day[day],
-         "total": sum(by_day[day].values())}
-        for day in order
-    ]
-    colors = dict(zip(sources, _PALETTE * (len(sources) // len(_PALETTE) + 1), strict=False))
-    return {
-        "sources": sources, "columns": columns, "max_total": max_total or 1,
-        "colors": colors,
-    }
-
-
-@app.get("/recommendations", response_class=HTMLResponse)
-async def recommendations(request: Request):
-    if await _current_user(request) is None:
-        return _login_redirect()
-    async with connect() as conn:
-        await q.ensure_profile(conn)
-        profile_row = await q.get_profile(conn)
-        threshold = profile_row.notify_threshold if profile_row else 70
-        rows = await q.recommendations(conn, threshold=threshold, limit=50)
-        overview = await q.overview(conn, threshold)
-    return templates.TemplateResponse(
-        request, "recommendations.html",
-        {"jobs": rows, "threshold": threshold, "overview": overview},
-    )
-
-
-@app.post("/jobs/{job_id}/state", response_class=HTMLResponse)
-async def set_state(request: Request, job_id: int, state: str = Form(...)):
-    if await _current_user(request) is None:
-        return Response(status_code=401)
-    try:
-        new_state = UserState(state)
-    except ValueError:
-        return Response("unknown state", status_code=400)
-    async with connect() as conn:
-        await q.set_user_state(conn, job_id, new_state)
-    # HTMX swaps this fragment in place of the row's action buttons.
-    _tone = {"interested": "ok", "applied": "ok", "rejected": "bad"}.get(new_state.value, "")
-    return HTMLResponse(f'<span class="pill {_tone}">marked {new_state.value}</span>')
-
-
 @app.get("/search", response_class=HTMLResponse)
-async def search(request: Request, q_: str = "", country: str = "", remote: str = ""):
-    if await _current_user(request) is None:
-        return _login_redirect()
-    query = request.query_params.get("q", q_)
-    remote_filter = {"yes": True, "no": False}.get(remote)
+async def search(
+    request: Request,
+    q: str = "",
+    country: str = "",
+    work_mode: str = "",
+    include_closed: bool = False,
+    page: int = 1,
+):
+    session = request.state.session
+    page = max(page, 1)
+    limit = 50
     async with connect() as conn:
-        rows = await q.search_jobs(
-            conn, query, country=country or None, remote=remote_filter, limit=100
+        jobs = await match_q.search_jobs(
+            conn,
+            session["uid"],
+            query=q,
+            country=country,
+            work_mode=work_mode,
+            include_closed=include_closed,
+            limit=limit,
+            offset=(page - 1) * limit,
         )
-    context = {"jobs": rows, "query": query, "country": country, "remote": remote}
-    # HTMX active-search asks for just the results table.
+    context = {
+        "active": "search",
+        "jobs": jobs,
+        "q": q,
+        "country": country,
+        "work_mode": work_mode,
+        "include_closed": include_closed,
+        "page": page,
+        "has_more": len(jobs) == limit,
+        "username": session["u"],
+    }
+    # HTMX swaps only the results table; a full navigation renders the whole page.
     if request.headers.get("HX-Request"):
         return templates.TemplateResponse(request, "_results.html", context)
     return templates.TemplateResponse(request, "search.html", context)
 
 
+@app.get("/job/{public_id}", response_class=HTMLResponse)
+async def job_detail(request: Request, public_id: str):
+    session = request.state.session
+    async with connect() as conn:
+        job = await match_q.get_job(conn, session["uid"], public_id)
+    if job is None:
+        return HTMLResponse("Not found", status_code=404)
+    return templates.TemplateResponse(
+        request, "job.html", {"active": "search", "job": job, "username": session["u"]}
+    )
+
+
+@app.post("/job/{job_id}/state", response_class=HTMLResponse)
+async def set_state(request: Request, job_id: int, state: str = Form(...)):
+    session = request.state.session
+    try:
+        parsed = UserState(state)
+    except ValueError:
+        return HTMLResponse("Unknown state", status_code=400)
+    async with connect() as conn:
+        await match_q.set_state(conn, session["uid"], job_id, parsed.value)
+    return HTMLResponse(f'<span class="state state-{parsed.value}">{parsed.value}</span>')
+
+
 @app.get("/profile", response_class=HTMLResponse)
 async def profile_form(request: Request):
-    if await _current_user(request) is None:
-        return _login_redirect()
+    session = request.state.session
     async with connect() as conn:
-        await q.ensure_profile(conn)
-        row = await q.get_profile(conn)
-    data = ProfileData.model_validate(
-        {k: v for k, v in row._mapping.items() if k != "id"}
-    ) if row else ProfileData()
-    return templates.TemplateResponse(request, "profile.html", {"p": data, "saved": False})
+        row = await users_q.get_profile(conn, session["uid"])
+        profile = profile_from_row(row)
+        # Priced before the edit, not billed after it: changing a scoring field invalidates this
+        # user's cached scores, and they should see what that costs before committing to it.
+        pending = await match_q.count_pending_rerank(conn, session["uid"], profile.version + 1)
+    return templates.TemplateResponse(
+        request,
+        "profile.html",
+        {
+            "active": "profile",
+            "profile": profile,
+            "rescore_estimate": pending,
+            "scoring_fields": sorted(users_q.SCORING_FIELDS),
+            "username": session["u"],
+        },
+    )
 
 
 @app.post("/profile", response_class=HTMLResponse)
@@ -218,159 +240,207 @@ async def profile_save(
     request: Request,
     title: str = Form(""),
     years_experience: int = Form(0),
-    languages: str = Form(""),
     objectives: str = Form(""),
+    languages: str = Form(""),
     must_have: str = Form(""),
     deal_breakers: str = Form(""),
     keywords: str = Form(""),
-    cities: str = Form(""),
     countries: str = Form(""),
-    remote_only: bool = Form(False),
+    cities: str = Form(""),
+    work_modes: str = Form(""),
+    seniorities: str = Form(""),
+    employment_types: str = Form(""),
     min_salary_eur_year: str = Form("0"),
-    notify_threshold: int = Form(70),
+    retrieval_limit: int = Form(400),
+    rerank_limit: int = Form(150),
 ):
-    if await _current_user(request) is None:
-        return _login_redirect()
-
+    session = request.state.session
     values = {
         "title": title.strip(),
         "years_experience": max(0, years_experience),
-        "languages": _split_commas(languages),
         "objectives": objectives.strip(),
-        "must_have": _split_lines(must_have),
-        "deal_breakers": _split_lines(deal_breakers),
-        "keywords": _split_commas(keywords),
-        "cities": _split_commas(cities),
-        "countries": [c.upper() for c in _split_commas(countries)] or ["AT", "DE", "CH"],
-        "remote_only": bool(remote_only),
-        "min_salary_eur_year": Decimal(min_salary_eur_year or 0),
-        "notify_threshold": max(0, min(100, notify_threshold)),
+        "languages": _commas(languages),
+        "must_have": _lines(must_have),
+        "deal_breakers": _lines(deal_breakers),
+        "keywords": _lines(keywords),
+        "countries": [item.upper() for item in _commas(countries)],
+        "cities": _commas(cities),
+        "work_modes": _commas(work_modes),
+        "seniorities": _commas(seniorities),
+        "employment_types": _commas(employment_types),
+        "min_salary_eur_year": _decimal(min_salary_eur_year, Decimal(0)),
+        "retrieval_limit": min(max(retrieval_limit, 25), 2000),
+        "rerank_limit": min(max(rerank_limit, 0), 1000),
     }
-    # save_profile also bumps the profile version, which invalidates cached LLM scores: they were
-    # judged against the old objectives and are no longer valid answers.
     async with connect() as conn:
-        await q.save_profile(conn, values)
-        row = await q.get_profile(conn)
-
-    data = ProfileData.model_validate({k: v for k, v in row._mapping.items() if k != "id"})
-    return templates.TemplateResponse(request, "profile.html", {"p": data, "saved": True})
-
-
-RECENT_RUNS = 15
+        version, rescore = await users_q.save_profile(conn, session["uid"], values)
+    log.info(
+        "profile saved for user %s (version %d, rescore=%s)", session["uid"], version, rescore
+    )
+    return RedirectResponse(f"/profile?saved=1&rescore={int(rescore)}", status_code=303)
 
 
-async def _admin_context(request: Request) -> dict:
+@app.get("/settings", response_class=HTMLResponse)
+async def settings_form(request: Request):
+    session = request.state.session
     async with connect() as conn:
-        schedule = await q.get_schedule(conn)
-        runs = await q.recent_runs(conn, limit=RECENT_RUNS)
-        active = await q.active_run(conn)
-    return {"schedule": schedule, "runs": runs, "active": active}
+        credential = await users_q.get_credential(conn, session["uid"])
+        spend = await users_q.month_spend(conn, session["uid"])
+        history = await users_q.spend_history(conn, session["uid"])
+    settings = get_settings()
+    return templates.TemplateResponse(
+        request,
+        "settings.html",
+        {
+            "active": "settings",
+            "default_model": settings.default_llm_model,
+            "default_provider": settings.default_llm_provider or "",
+            # Never the key itself. The form shows a fingerprint so the user can tell which key is
+            # stored without this page being able to disclose it to anyone who reaches it.
+            "credential": credential,
+            "spend": spend,
+            "history": history,
+            "username": session["u"],
+        },
+    )
+
+
+@app.post("/settings", response_class=HTMLResponse)
+async def settings_save(
+    request: Request,
+    api_key: str = Form(""),
+    model: str = Form(""),
+    provider_pin: str = Form(""),
+    monthly_budget_usd: str = Form("5"),
+):
+    session = request.state.session
+    async with connect() as conn:
+        budget = _decimal(monthly_budget_usd, Decimal(5))
+        chosen_model = model.strip() or get_settings().default_llm_model
+        key = api_key.strip()
+        if key:
+            await users_q.save_credential(
+                conn,
+                session["uid"],
+                api_key_encrypted=encrypt(key),
+                api_key_fingerprint=fingerprint(key),
+                model=chosen_model,
+                provider_pin=provider_pin.strip() or None,
+                monthly_budget_usd=budget,
+            )
+        else:
+            # An empty key field means "leave the stored key alone", not "delete it": re-typing a
+            # secret to change an unrelated budget is how secrets end up in shell history.
+            existing = await users_q.get_credential(conn, session["uid"])
+            if existing is not None:
+                await users_q.update_budget(conn, session["uid"], budget)
+    return RedirectResponse("/settings?saved=1", status_code=303)
+
+
+@app.post("/settings/delete-key")
+async def settings_delete_key(request: Request):
+    session = request.state.session
+    async with connect() as conn:
+        await users_q.delete_credential(conn, session["uid"])
+    return RedirectResponse("/settings?deleted=1", status_code=303)
+
+
+@app.get("/dashboard", response_class=HTMLResponse)
+async def dashboard(request: Request):
+    session = request.state.session
+    async with connect() as conn:
+        overview = await admin_q.corpus_overview(conn)
+        coverage = await admin_q.derived_coverage(conn)
+        health = await admin_q.source_health(conn)
+        queues = await admin_q.queue_depth(conn)
+        countries = await admin_q.facet_breakdown(conn)
+        scopes = await admin_q.list_tenants(conn)
+        stats = await match_q.match_stats(conn, session["uid"])
+        spend = await users_q.month_spend(conn, session["uid"])
+    return templates.TemplateResponse(
+        request,
+        "dashboard.html",
+        {
+            "active": "dashboard",
+            "overview": overview,
+            "coverage": coverage,
+            "health": health,
+            "queues": queues,
+            "countries": countries,
+            "scopes": scopes,
+            "stats": stats,
+            "spend": spend,
+            "sources": sorted(NORMALIZERS),
+            "username": session["u"],
+        },
+    )
 
 
 @app.get("/admin", response_class=HTMLResponse)
 async def admin(request: Request):
-    if await _current_user(request) is None:
-        return _login_redirect()
-    return templates.TemplateResponse(request, "admin.html", await _admin_context(request))
+    session = request.state.session
+    async with connect() as conn:
+        schedule = await admin_q.get_schedule(conn)
+        runs = await admin_q.recent_runs(conn)
+        sweeps = await admin_q.recent_sweeps(conn)
+        active = await admin_q.active_run(conn)
+    return templates.TemplateResponse(
+        request,
+        "admin.html",
+        {
+            "active": "admin",
+            "schedule": schedule,
+            "runs": runs,
+            "sweeps": sweeps,
+            "active_run": active,
+            "sources": sorted(NORMALIZERS),
+            "username": session["u"],
+        },
+    )
 
 
-@app.get("/admin/runs", response_class=HTMLResponse)
-async def admin_runs(request: Request):
-    """HTMX polls this fragment while a run is active."""
-    if await _current_user(request) is None:
-        return Response(status_code=401)
-    return templates.TemplateResponse(request, "_admin_runs.html", await _admin_context(request))
-
-
-@app.post("/admin/schedule", response_class=HTMLResponse)
+@app.post("/admin/schedule")
 async def admin_schedule(
     request: Request,
     enabled: bool = Form(False),
     run_hour: int = Form(7),
     run_minute: int = Form(0),
-    lookback_days: int = Form(1),
 ):
-    if await _current_user(request) is None:
-        return _login_redirect()
-    values = {
-        "enabled": bool(enabled),
-        "run_hour": max(0, min(23, run_hour)),
-        "run_minute": max(0, min(59, run_minute)),
-        "lookback_days": max(1, min(90, lookback_days)),
-    }
     async with connect() as conn:
-        await q.update_schedule(conn, values)
+        await admin_q.update_schedule(
+            conn,
+            {
+                "enabled": enabled,
+                "run_hour": min(max(run_hour, 0), 23),
+                "run_minute": min(max(run_minute, 0), 59),
+            },
+        )
     return RedirectResponse("/admin", status_code=303)
 
 
-@app.post("/admin/run", response_class=HTMLResponse)
-async def admin_run(
-    request: Request,
-    days: int = Form(1),
-    use_llm: bool = Form(False),
-    send_email: bool = Form(False),
-):
-    if await _current_user(request) is None:
-        return _login_redirect()
-    # Enqueue only; the runner service picks it up. A run already pending makes this a no-op.
+@app.post("/admin/run")
+async def admin_run(request: Request, only_source: str = Form(""), backfill: bool = Form(False)):
+    """Enqueue a run. The web app never executes one; the runner owns that entirely."""
     async with connect() as conn:
-        if await q.active_run(conn) is None:
-            await q.enqueue_run(
-                conn, trigger="manual", lookback_days=max(1, min(90, days)),
-                use_llm=bool(use_llm), send_email=bool(send_email),
-            )
+        await admin_q.enqueue_run(
+            conn,
+            trigger=RunTrigger.MANUAL,
+            only_source=only_source or None,
+            backfill=backfill,
+        )
     return RedirectResponse("/admin", status_code=303)
 
 
-@app.get("/companies", response_class=HTMLResponse)
-async def companies_page(request: Request, added: int = 0, rejected: str = ""):
-    if await _current_user(request) is None:
-        return _login_redirect()
+@app.get("/admin/runs", response_class=HTMLResponse)
+async def admin_runs_fragment(request: Request):
     async with connect() as conn:
-        tenants = await q.list_personio_tenants(conn)
+        runs = await admin_q.recent_runs(conn)
+        active = await admin_q.active_run(conn)
     return templates.TemplateResponse(
-        request,
-        "companies.html",
-        {
-            "tenants": tenants,
-            "added": added,
-            "rejected": _split_lines(rejected),
-        },
+        request, "_admin_runs.html", {"runs": runs, "active_run": active}
     )
-
-
-@app.post("/companies", response_class=HTMLResponse)
-async def companies_add(request: Request, tenants: str = Form("")):
-    if await _current_user(request) is None:
-        return _login_redirect()
-    # Anything unrecognised is reported back rather than dropped, so a bad paste is visible.
-    slugs, rejected = parse_tenants(tenants)
-    async with connect() as conn:
-        added = await q.add_personio_tenants(conn, slugs)
-    query = f"?added={added}"
-    if rejected:
-        query += "&rejected=" + quote("\n".join(rejected))
-    return RedirectResponse(f"/companies{query}", status_code=303)
-
-
-@app.post("/companies/{slug}/toggle", response_class=HTMLResponse)
-async def companies_toggle(request: Request, slug: str, enabled: bool = Form(False)):
-    if await _current_user(request) is None:
-        return _login_redirect()
-    async with connect() as conn:
-        await q.set_personio_tenant_enabled(conn, slug, bool(enabled))
-    return RedirectResponse("/companies", status_code=303)
-
-
-@app.post("/companies/{slug}/delete", response_class=HTMLResponse)
-async def companies_delete(request: Request, slug: str):
-    if await _current_user(request) is None:
-        return _login_redirect()
-    async with connect() as conn:
-        await q.delete_personio_tenant(conn, slug)
-    return RedirectResponse("/companies", status_code=303)
 
 
 @app.get("/healthz")
 async def healthz():
-    return {"ok": True}
+    return {"status": "ok"}

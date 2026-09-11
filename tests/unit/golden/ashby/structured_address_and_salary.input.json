@@ -1,0 +1,49 @@
+{
+  "listing": {
+    "id": "aa11bb22-0000-4444-8888-cccccccccccc",
+    "title": "  Senior Backend Engineer ",
+    "department": "Engineering",
+    "team": "Platform",
+    "employmentType": "FullTime",
+    "location": "Vienna, Austria",
+    "secondaryLocations": [
+      {
+        "location": "Remote (EU)",
+        "address": null
+      }
+    ],
+    "publishedAt": "2026-08-21T09:15:00.000+00:00",
+    "isListed": true,
+    "isRemote": false,
+    "workplaceType": "Hybrid",
+    "address": {
+      "postalAddress": {
+        "addressLocality": "Vienna",
+        "addressRegion": "Wien",
+        "addressCountry": "Austria"
+      }
+    },
+    "jobUrl": "https://jobs.ashbyhq.com/beispiel/aa11bb22",
+    "applyUrl": "https://jobs.ashbyhq.com/beispiel/aa11bb22/application",
+    "descriptionPlain": "Du baust verteilte Systeme in Go und betreust Kubernetes.",
+    "compensation": {
+      "summaryComponents": [
+        {
+          "compensationType": "Salary",
+          "currencyCode": "EUR",
+          "interval": "YEAR",
+          "minValue": 65000,
+          "maxValue": 82000
+        },
+        {
+          "compensationType": "Equity",
+          "currencyCode": "EUR",
+          "interval": "YEAR",
+          "minValue": 1000,
+          "maxValue": 2000
+        }
+      ]
+    }
+  },
+  "external_id": "beispiel:aa11bb22-0000-4444-8888-cccccccccccc"
+}

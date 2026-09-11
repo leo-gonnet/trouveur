@@ -1,0 +1,45 @@
+{
+  "derive_version": 3,
+  "facets": {
+    "cities": [
+      "Wien"
+    ],
+    "countries": [],
+    "employment_type": "internship",
+    "is_agency": null,
+    "language": null,
+    "regions": [],
+    "salary_annualised": false,
+    "salary_max_eur_year": null,
+    "salary_min_eur_year": null,
+    "seniority": "intern",
+    "skills": [],
+    "work_mode": "onsite"
+  },
+  "job": {
+    "agency_hint": null,
+    "closes_at": null,
+    "company": "Beispiel UNIPLAN",
+    "department_hint": null,
+    "description": "DEINE AUFGABEN Recherche",
+    "employment_type_hint": "Student",
+    "external_id": "werkstudent-projektentwicklung-wien-80156",
+    "language_hint": null,
+    "locations": [
+      {
+        "city": null,
+        "country": null,
+        "raw": "Wien",
+        "region": null
+      }
+    ],
+    "posted_at": "2026-08-29T00:00:00Z",
+    "remote_hint": false,
+    "salary": null,
+    "source": "arbeitnow",
+    "title": "Werkstudent Projektentwicklung (m/w/d)",
+    "updated_at": null,
+    "url": "https://www.arbeitnow.com/jobs/companies/beispiel/werkstudent"
+  },
+  "normalize_version": 1
+}

@@ -1,0 +1,50 @@
+{
+  "derive_version": 3,
+  "facets": {
+    "cities": [
+      "Atlantis"
+    ],
+    "countries": [],
+    "employment_type": "unknown",
+    "is_agency": null,
+    "language": "de",
+    "regions": [],
+    "salary_annualised": false,
+    "salary_max_eur_year": null,
+    "salary_min_eur_year": null,
+    "seniority": "unknown",
+    "skills": [],
+    "work_mode": "unknown"
+  },
+  "job": {
+    "agency_hint": null,
+    "closes_at": null,
+    "company": "Beispiel",
+    "department_hint": null,
+    "description": null,
+    "employment_type_hint": null,
+    "external_id": "10000-unknown-S",
+    "language_hint": "de",
+    "locations": [
+      {
+        "city": "Atlantis",
+        "country": "ATLANTIS",
+        "raw": "Atlantis, ATLANTIS",
+        "region": null
+      }
+    ],
+    "posted_at": null,
+    "remote_hint": null,
+    "salary": {
+      "amount_max": null,
+      "amount_min": "5000",
+      "currency": "EUR",
+      "period": "UNKNOWN"
+    },
+    "source": "arbeitsagentur",
+    "title": "Ingenieur (m/w/d)",
+    "updated_at": null,
+    "url": "https://www.arbeitsagentur.de/jobsuche/jobdetail/10000-unknown-S"
+  },
+  "normalize_version": 1
+}

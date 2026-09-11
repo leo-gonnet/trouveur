@@ -1,0 +1,832 @@
+[
+  {
+    "id": "wing_t1_kreislauf",
+    "persona": "wing_nachhaltigkeit",
+    "tier": "T1",
+    "source": "arbeitsagentur",
+    "note": "Shares Wirtschaftsingenieur, Nachhaltigkeit and Kreislaufwirtschaft. Lexical retrieval alone must find this.",
+    "listing": {
+      "referenznummer": "EVAL-wing-t1a",
+      "stellenangebotsTitel": "Wirtschaftsingenieur (m/w/d) Nachhaltigkeit und Kreislaufwirtschaft",
+      "firma": "Nordwerk Systeme GmbH",
+      "arbeitszeitVollzeit": true,
+      "homeofficemoeglich": true,
+      "verguetungsangabe": "JAHRESGEHALT",
+      "gehaltsspanneVon": 62000,
+      "gehaltsspanneBis": 78000,
+      "datumErsteVeroeffentlichung": "2026-09-01",
+      "stellenlokationen": [
+        {
+          "adresse": {
+            "ort": "Stuttgart",
+            "region": "BADEN_WUERTTEMBERG",
+            "land": "DEUTSCHLAND"
+          }
+        }
+      ]
+    },
+    "detail": {
+      "referenznummer": "EVAL-wing-t1a",
+      "istArbeitnehmerUeberlassung": false,
+      "stellenangebotsBeschreibung": "Sie verantworten den Aufbau unserer Kreislaufwirtschaft für langlebige Maschinen: Rücknahmekonzepte, Aufarbeitung und die Bewertung der Nachhaltigkeit über den gesamten Lebenszyklus. Sie arbeiten eng mit der Produktentwicklung zusammen."
+    }
+  },
+  {
+    "id": "wing_t1_referent",
+    "persona": "wing_nachhaltigkeit",
+    "tier": "T1",
+    "source": "arbeitsagentur",
+    "note": "No description at all. Tests whether a title-only posting can still be retrieved, which is the normal state of an Arbeitsagentur listing before its detail arrives.",
+    "listing": {
+      "referenznummer": "EVAL-wing-t1b",
+      "stellenangebotsTitel": "Referent Nachhaltigkeit und Produktentwicklung (m/w/d)",
+      "firma": "Blauhaus Industrie AG",
+      "arbeitszeitVollzeit": true,
+      "datumErsteVeroeffentlichung": "2026-09-02",
+      "stellenlokationen": [
+        {
+          "adresse": {
+            "ort": "Linz",
+            "land": "OESTERREICH"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "wing_t2_ressourcen",
+    "persona": "wing_nachhaltigkeit",
+    "tier": "T2",
+    "source": "arbeitsagentur",
+    "note": "Same work, deliberately sharing no content word with the persona's title, keywords or objectives. Only dense retrieval should reach it.",
+    "listing": {
+      "referenznummer": "EVAL-wing-t2a",
+      "stellenangebotsTitel": "Spezialist:in Ressourceneffizienz und Materialstrategie (m/w/d)",
+      "firma": "Vogtland Maschinen GmbH",
+      "arbeitszeitVollzeit": true,
+      "homeofficemoeglich": true,
+      "verguetungsangabe": "JAHRESGEHALT",
+      "gehaltsspanneVon": 65000,
+      "gehaltsspanneBis": 80000,
+      "datumErsteVeroeffentlichung": "2026-09-01",
+      "stellenlokationen": [
+        {
+          "adresse": {
+            "ort": "Dresden",
+            "region": "SACHSEN",
+            "land": "DEUTSCHLAND"
+          }
+        }
+      ]
+    },
+    "detail": {
+      "referenznummer": "EVAL-wing-t2a",
+      "istArbeitnehmerUeberlassung": false,
+      "stellenangebotsBeschreibung": "Sie analysieren Materialströme unserer Anlagen und entwickeln Strategien, um Bauteile länger im Umlauf zu halten. Dazu gehören Umweltbilanzen einzelner Baugruppen, Rücknahme- und Aufbereitungskonzepte sowie die Zusammenarbeit mit Konstruktion und Einkauf."
+    }
+  },
+  {
+    "id": "wing_t2_umweltstrategie",
+    "persona": "wing_nachhaltigkeit",
+    "tier": "T2",
+    "source": "arbeitsagentur",
+    "note": "Paraphrase again, and quoted with an hourly wage so annualisation is exercised on a needle.",
+    "listing": {
+      "referenznummer": "EVAL-wing-t2b",
+      "stellenangebotsTitel": "Referent:in Umweltstrategie und Lebenszyklusbewertung (m/w/d)",
+      "firma": "Alpenwerk Bau AG",
+      "arbeitszeitVollzeit": true,
+      "verguetungsangabe": "STUNDENLOHN",
+      "gehaltsspanneVon": 34,
+      "gehaltsspanneBis": 41,
+      "datumErsteVeroeffentlichung": "2026-08-30",
+      "stellenlokationen": [
+        {
+          "adresse": {
+            "ort": "Wien",
+            "land": "OESTERREICH"
+          }
+        }
+      ]
+    },
+    "detail": {
+      "referenznummer": "EVAL-wing-t2b",
+      "istArbeitnehmerUeberlassung": false,
+      "stellenangebotsBeschreibung": "Für unsere Bauprojekte bewerten Sie Umweltwirkungen über den gesamten Lebenszyklus, von der Materialauswahl bis zum Rückbau. Sie führen Bilanzierungen durch und begleiten die Umsetzung im Projektgeschäft."
+    }
+  },
+  {
+    "id": "wing_t3_circular_en",
+    "persona": "wing_nachhaltigkeit",
+    "tier": "T3",
+    "source": "greenhouse",
+    "note": "English advert for a German-speaking persona, different title, escaped HTML, two locations. The cross-lingual case: only a multilingual vector can bridge it.",
+    "external_id": "evalco:9101",
+    "listing": {
+      "id": 9101,
+      "title": "Sustainability Manager - Circular Product Design (m/f/d)",
+      "company_name": "Evalco Industrial",
+      "absolute_url": "https://job-boards.greenhouse.io/evalco/jobs/9101",
+      "location": {
+        "name": "Munich, Germany; Vienna, Austria"
+      },
+      "departments": [
+        {
+          "id": 1,
+          "name": "Operations"
+        }
+      ],
+      "language": "en",
+      "first_published": "2026-08-28T09:00:00-04:00",
+      "updated_at": "2026-09-01T09:00:00-04:00",
+      "content": "&lt;p&gt;You will design our machines to be repaired, reused and recovered rather than replaced.&lt;/p&gt;&lt;p&gt;Working between engineering and strategy, you will quantify the environmental footprint of product families and turn the findings into design requirements.&lt;/p&gt;"
+    }
+  },
+  {
+    "id": "wing_t3_green_transformation",
+    "persona": "wing_nachhaltigkeit",
+    "tier": "T3",
+    "source": "arbeitsagentur",
+    "note": "Adjacent title with no company stated, so the record is sparse where most are not.",
+    "listing": {
+      "referenznummer": "EVAL-wing-t3b",
+      "stellenangebotsTitel": "Projektingenieur:in Green Transformation (m/w/d)",
+      "arbeitszeitVollzeit": true,
+      "datumErsteVeroeffentlichung": "2026-09-03",
+      "stellenlokationen": [
+        {
+          "adresse": {
+            "ort": "Hannover",
+            "region": "NIEDERSACHSEN",
+            "land": "DEUTSCHLAND"
+          }
+        }
+      ]
+    },
+    "detail": {
+      "referenznummer": "EVAL-wing-t3b",
+      "istArbeitnehmerUeberlassung": false,
+      "stellenangebotsBeschreibung": "Sie begleiten die ökologische Umstellung unserer Fertigung: Energie- und Materialeinsatz bewerten, Maßnahmen priorisieren und mit Technik und Einkauf umsetzen."
+    }
+  },
+  {
+    "id": "wing_n_werkstudent",
+    "persona": "wing_nachhaltigkeit",
+    "tier": "N",
+    "source": "arbeitsagentur",
+    "note": "Heavy lexical overlap on purpose. Retrieval will surface it; the rules cut must reject it.",
+    "listing": {
+      "referenznummer": "EVAL-wing-n1",
+      "stellenangebotsTitel": "Werkstudent (m/w/d) Nachhaltigkeit und Kreislaufwirtschaft",
+      "firma": "Nordwerk Systeme GmbH",
+      "datumErsteVeroeffentlichung": "2026-09-01",
+      "stellenlokationen": [
+        {
+          "adresse": {
+            "ort": "Stuttgart",
+            "land": "DEUTSCHLAND"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "wing_n_ueberlassung",
+    "persona": "wing_nachhaltigkeit",
+    "tier": "N",
+    "source": "arbeitsagentur",
+    "note": "A staffing agency posting the persona's exact role. Caught by the structured agency flag, not by prose matching.",
+    "listing": {
+      "referenznummer": "EVAL-wing-n2",
+      "stellenangebotsTitel": "Wirtschaftsingenieur (m/w/d) Nachhaltigkeit",
+      "firma": "Personalkontor Süd GmbH",
+      "arbeitszeitVollzeit": true,
+      "datumErsteVeroeffentlichung": "2026-09-01",
+      "stellenlokationen": [
+        {
+          "adresse": {
+            "ort": "Nürnberg",
+            "land": "DEUTSCHLAND"
+          }
+        }
+      ]
+    },
+    "detail": {
+      "referenznummer": "EVAL-wing-n2",
+      "istArbeitnehmerUeberlassung": true,
+      "stellenangebotsBeschreibung": "Im Rahmen der Arbeitnehmerüberlassung vermitteln wir Sie an einen namhaften Kunden im Bereich Nachhaltigkeit und Kreislaufwirtschaft."
+    }
+  },
+  {
+    "id": "wing_n_wrong_country",
+    "persona": "wing_nachhaltigkeit",
+    "tier": "N",
+    "source": "arbeitsagentur",
+    "note": "The right role in a country the persona excluded. The hard filter must remove it before ranking.",
+    "listing": {
+      "referenznummer": "EVAL-wing-n3",
+      "stellenangebotsTitel": "Wirtschaftsingenieur Nachhaltigkeit und Kreislaufwirtschaft (m/w/d)",
+      "firma": "Helvetia Werke AG",
+      "arbeitszeitVollzeit": true,
+      "datumErsteVeroeffentlichung": "2026-09-01",
+      "stellenlokationen": [
+        {
+          "adresse": {
+            "ort": "Zürich",
+            "land": "SCHWEIZ"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "java_t1a",
+    "persona": "backend_java",
+    "tier": "T1",
+    "source": "arbeitsagentur",
+    "note": "Names Java, Spring Boot and MongoDB outright. Lexical retrieval must find it.",
+    "listing": {
+      "referenznummer": "EVAL-java-t1a",
+      "stellenangebotsTitel": "Backend Engineer (m/w/d) Java / Spring Boot",
+      "arbeitszeitVollzeit": true,
+      "datumErsteVeroeffentlichung": "2026-09-01",
+      "firma": "Kieselstein Software GmbH",
+      "homeofficemoeglich": true,
+      "gehaltsspanneVon": 70000,
+      "gehaltsspanneBis": 88000,
+      "verguetungsangabe": "JAHRESGEHALT",
+      "stellenlokationen": [
+        {
+          "adresse": {
+            "ort": "Berlin",
+            "land": "DEUTSCHLAND",
+            "region": "BERLIN"
+          }
+        }
+      ]
+    },
+    "detail": {
+      "referenznummer": "EVAL-java-t1a",
+      "istArbeitnehmerUeberlassung": false,
+      "stellenangebotsBeschreibung": "Du entwickelst unsere Backend-Dienste in Java mit Spring Boot und MongoDB. Kleines Produktteam, du betreust deine Services von der Idee bis in den Betrieb."
+    }
+  },
+  {
+    "id": "java_t1b",
+    "persona": "backend_java",
+    "tier": "T1",
+    "source": "arbeitsagentur",
+    "note": "Second lexical hit, quoted monthly so annualisation runs on a needle.",
+    "listing": {
+      "referenznummer": "EVAL-java-t1b",
+      "stellenangebotsTitel": "Senior Java Entwickler (m/w/d) MongoDB",
+      "arbeitszeitVollzeit": true,
+      "datumErsteVeroeffentlichung": "2026-09-01",
+      "firma": "Talwerk Digital GmbH",
+      "gehaltsspanneVon": 6200,
+      "gehaltsspanneBis": 7400,
+      "verguetungsangabe": "MONATSGEHALT",
+      "stellenlokationen": [
+        {
+          "adresse": {
+            "ort": "Hamburg",
+            "land": "DEUTSCHLAND",
+            "region": "HAMBURG"
+          }
+        }
+      ]
+    },
+    "detail": {
+      "referenznummer": "EVAL-java-t1b",
+      "istArbeitnehmerUeberlassung": false,
+      "stellenangebotsBeschreibung": "Für unser Produktteam suchen wir eine erfahrene Java-Entwicklerin. Unsere Dienste laufen auf Spring Boot gegen MongoDB, deployed über Kubernetes."
+    }
+  },
+  {
+    "id": "java_t2a",
+    "persona": "backend_java",
+    "tier": "T2",
+    "source": "arbeitsagentur",
+    "note": "Same role, no shared content word with the persona: no Java, Spring, MongoDB, Backend, Docker or Kubernetes anywhere.",
+    "listing": {
+      "referenznummer": "EVAL-java-t2a",
+      "stellenangebotsTitel": "Softwareentwickler:in serverseitige Dienste (m/w/d)",
+      "arbeitszeitVollzeit": true,
+      "datumErsteVeroeffentlichung": "2026-09-01",
+      "firma": "Ostfeld Technologie GmbH",
+      "homeofficemoeglich": true,
+      "gehaltsspanneVon": 68000,
+      "gehaltsspanneBis": 85000,
+      "verguetungsangabe": "JAHRESGEHALT",
+      "stellenlokationen": [
+        {
+          "adresse": {
+            "ort": "Leipzig",
+            "land": "DEUTSCHLAND",
+            "region": "SACHSEN"
+          }
+        }
+      ]
+    },
+    "detail": {
+      "referenznummer": "EVAL-java-t2a",
+      "istArbeitnehmerUeberlassung": false,
+      "stellenangebotsBeschreibung": "Du baust im JVM-Ökosystem zustandslose Dienste, die über Nachrichtenwarteschlangen kommunizieren und ihre Daten in einer dokumentenorientierten Datenbank halten. Wir sind zwanzig Leute und jede Entwicklerin verantwortet ihre Dienste selbst."
+    }
+  },
+  {
+    "id": "java_t2b",
+    "persona": "backend_java",
+    "tier": "T2",
+    "source": "arbeitsagentur",
+    "note": "Paraphrase describing event-driven services without naming any of the persona's tools.",
+    "listing": {
+      "referenznummer": "EVAL-java-t2b",
+      "stellenangebotsTitel": "Entwickler:in verteilte Systeme (m/w/d)",
+      "arbeitszeitVollzeit": true,
+      "datumErsteVeroeffentlichung": "2026-09-01",
+      "firma": "Rheinpfad Systeme GmbH",
+      "homeofficemoeglich": true,
+      "stellenlokationen": [
+        {
+          "adresse": {
+            "ort": "Köln",
+            "land": "DEUTSCHLAND",
+            "region": "NORDRHEIN_WESTFALEN"
+          }
+        }
+      ]
+    },
+    "detail": {
+      "referenznummer": "EVAL-java-t2b",
+      "istArbeitnehmerUeberlassung": false,
+      "stellenangebotsBeschreibung": "Unsere Plattform besteht aus lose gekoppelten Diensten, die Ereignisse über einen Nachrichtenbus austauschen. Du entwirfst Schnittstellen, achtest auf Ausfallsicherheit und arbeitest in einem kleinen Team ohne Konzernprozesse."
+    }
+  },
+  {
+    "id": "java_t3b",
+    "persona": "backend_java",
+    "tier": "T3",
+    "source": "arbeitsagentur",
+    "note": "Adjacent title. A fullstack advert whose weight is clearly on the server side.",
+    "listing": {
+      "referenznummer": "EVAL-java-t3b",
+      "stellenangebotsTitel": "Fullstack-Entwickler:in mit Schwerpunkt Server (m/w/d)",
+      "arbeitszeitVollzeit": true,
+      "datumErsteVeroeffentlichung": "2026-09-01",
+      "firma": "Seeblick Apps GmbH",
+      "homeofficemoeglich": true,
+      "stellenlokationen": [
+        {
+          "adresse": {
+            "ort": "Wien",
+            "land": "OESTERREICH"
+          }
+        }
+      ]
+    },
+    "detail": {
+      "referenznummer": "EVAL-java-t3b",
+      "istArbeitnehmerUeberlassung": false,
+      "stellenangebotsBeschreibung": "In unserem elfköpfigen Team baust du überwiegend die Serverseite: Datenmodelle, Schnittstellen und Hintergrundverarbeitung. Wir arbeiten ohne feste Rollenschnitte und ohne Konzernprozesse."
+    }
+  },
+  {
+    "id": "java_n1",
+    "persona": "backend_java",
+    "tier": "N",
+    "source": "arbeitsagentur",
+    "note": "Strong lexical overlap and an excluded role type. The rules cut must reject it.",
+    "listing": {
+      "referenznummer": "EVAL-java-n1",
+      "stellenangebotsTitel": "Praktikum Softwareentwicklung Java (m/w/d)",
+      "arbeitszeitVollzeit": true,
+      "datumErsteVeroeffentlichung": "2026-09-01",
+      "firma": "Kieselstein Software GmbH",
+      "stellenlokationen": [
+        {
+          "adresse": {
+            "ort": "Berlin",
+            "land": "DEUTSCHLAND"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "java_n2",
+    "persona": "backend_java",
+    "tier": "N",
+    "source": "arbeitsagentur",
+    "note": "The persona's exact stack, posted by a staffing agency.",
+    "listing": {
+      "referenznummer": "EVAL-java-n2",
+      "stellenangebotsTitel": "Java Entwickler (m/w/d) Spring Boot",
+      "arbeitszeitVollzeit": true,
+      "datumErsteVeroeffentlichung": "2026-09-01",
+      "firma": "Personalkontor Nord GmbH",
+      "stellenlokationen": [
+        {
+          "adresse": {
+            "ort": "Bremen",
+            "land": "DEUTSCHLAND"
+          }
+        }
+      ]
+    },
+    "detail": {
+      "referenznummer": "EVAL-java-n2",
+      "istArbeitnehmerUeberlassung": true,
+      "stellenangebotsBeschreibung": "Wir überlassen Sie im Rahmen der Arbeitnehmerüberlassung an einen Kunden mit Java- und Spring-Boot-Umfeld."
+    }
+  },
+  {
+    "id": "java_n3",
+    "persona": "backend_java",
+    "tier": "N",
+    "source": "arbeitsagentur",
+    "note": "Right role, excluded country. The hard filter must remove it before ranking.",
+    "listing": {
+      "referenznummer": "EVAL-java-n3",
+      "stellenangebotsTitel": "Java Backend Developer (m/w/d) MongoDB",
+      "arbeitszeitVollzeit": true,
+      "datumErsteVeroeffentlichung": "2026-09-01",
+      "firma": "Limmat Software AG",
+      "gehaltsspanneVon": 120000,
+      "gehaltsspanneBis": 140000,
+      "verguetungsangabe": "JAHRESGEHALT",
+      "stellenlokationen": [
+        {
+          "adresse": {
+            "ort": "Zürich",
+            "land": "SCHWEIZ"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "data_t1a",
+    "persona": "maschinenbau_zu_daten",
+    "tier": "T1",
+    "source": "arbeitsagentur",
+    "note": "Names Predictive Maintenance, which the persona lists as a keyword.",
+    "listing": {
+      "referenznummer": "EVAL-data-t1a",
+      "stellenangebotsTitel": "Data Analyst (m/w/d) Predictive Maintenance",
+      "arbeitszeitVollzeit": true,
+      "datumErsteVeroeffentlichung": "2026-09-01",
+      "firma": "Werkfeld Analytics GmbH",
+      "homeofficemoeglich": true,
+      "gehaltsspanneVon": 65000,
+      "gehaltsspanneBis": 80000,
+      "verguetungsangabe": "JAHRESGEHALT",
+      "stellenlokationen": [
+        {
+          "adresse": {
+            "ort": "Augsburg",
+            "land": "DEUTSCHLAND",
+            "region": "BAYERN"
+          }
+        }
+      ]
+    },
+    "detail": {
+      "referenznummer": "EVAL-data-t1a",
+      "istArbeitnehmerUeberlassung": false,
+      "stellenangebotsBeschreibung": "Sie werten Maschinendaten aus, entwickeln Modelle zur vorausschauenden Wartung und arbeiten eng mit der Instandhaltung zusammen. Python und SQL setzen wir täglich ein."
+    }
+  },
+  {
+    "id": "data_t1b",
+    "persona": "maschinenbau_zu_daten",
+    "tier": "T1",
+    "source": "arbeitsagentur",
+    "note": "Names Python and SQL in the title.",
+    "listing": {
+      "referenznummer": "EVAL-data-t1b",
+      "stellenangebotsTitel": "Ingenieur:in Datenanalyse (m/w/d) Python SQL",
+      "arbeitszeitVollzeit": true,
+      "datumErsteVeroeffentlichung": "2026-09-01",
+      "firma": "Donautal Technik GmbH",
+      "gehaltsspanneVon": 62000,
+      "gehaltsspanneBis": 74000,
+      "verguetungsangabe": "JAHRESGEHALT",
+      "stellenlokationen": [
+        {
+          "adresse": {
+            "ort": "Regensburg",
+            "land": "DEUTSCHLAND",
+            "region": "BAYERN"
+          }
+        }
+      ]
+    },
+    "detail": {
+      "referenznummer": "EVAL-data-t1b",
+      "istArbeitnehmerUeberlassung": false,
+      "stellenangebotsBeschreibung": "Sie bereiten Betriebsdaten auf, bauen Auswertungen und unterstützen die Produktion mit belastbaren Zahlen."
+    }
+  },
+  {
+    "id": "data_t2a",
+    "persona": "maschinenbau_zu_daten",
+    "tier": "T2",
+    "source": "arbeitsagentur",
+    "note": "Condition monitoring is predictive maintenance by another name, and shares no word with the persona.",
+    "listing": {
+      "referenznummer": "EVAL-data-t2a",
+      "stellenangebotsTitel": "Spezialist:in Zustandsüberwachung von Anlagen (m/w/d)",
+      "arbeitszeitVollzeit": true,
+      "datumErsteVeroeffentlichung": "2026-09-01",
+      "firma": "Nordharz Anlagenbau GmbH",
+      "gehaltsspanneVon": 64000,
+      "gehaltsspanneBis": 78000,
+      "verguetungsangabe": "JAHRESGEHALT",
+      "stellenlokationen": [
+        {
+          "adresse": {
+            "ort": "Braunschweig",
+            "land": "DEUTSCHLAND",
+            "region": "NIEDERSACHSEN"
+          }
+        }
+      ]
+    },
+    "detail": {
+      "referenznummer": "EVAL-data-t2a",
+      "istArbeitnehmerUeberlassung": false,
+      "stellenangebotsBeschreibung": "Sie überwachen den Zustand unserer Anlagen anhand von Schwingungs- und Temperaturmesswerten, erkennen Auffälligkeiten früh und leiten Wartungsentscheidungen ab. Erfahrung mit Auswertewerkzeugen ist erwünscht."
+    }
+  },
+  {
+    "id": "data_t2b",
+    "persona": "maschinenbau_zu_daten",
+    "tier": "T2",
+    "source": "arbeitsagentur",
+    "note": "Paraphrase of operating-data analysis, no shared vocabulary.",
+    "listing": {
+      "referenznummer": "EVAL-data-t2b",
+      "stellenangebotsTitel": "Ingenieur:in Betriebsdaten und Kennzahlen (m/w/d)",
+      "arbeitszeitVollzeit": true,
+      "datumErsteVeroeffentlichung": "2026-09-01",
+      "firma": "Saarbogen Industrie AG",
+      "homeofficemoeglich": true,
+      "stellenlokationen": [
+        {
+          "adresse": {
+            "ort": "Saarbrücken",
+            "land": "DEUTSCHLAND",
+            "region": "SAARLAND"
+          }
+        }
+      ]
+    },
+    "detail": {
+      "referenznummer": "EVAL-data-t2b",
+      "istArbeitnehmerUeberlassung": false,
+      "stellenangebotsBeschreibung": "Sie verbinden Messwerte aus der Fertigung zu belastbaren Kennzahlen, automatisieren wiederkehrende Berichte und beraten die Werksleitung."
+    }
+  },
+  {
+    "id": "data_t3b",
+    "persona": "maschinenbau_zu_daten",
+    "tier": "T3",
+    "source": "arbeitsagentur",
+    "note": "Adjacent title in an industrial setting; nothing in the title matches the persona.",
+    "listing": {
+      "referenznummer": "EVAL-data-t3b",
+      "stellenangebotsTitel": "Data Engineer (m/w/d) Produktionsumfeld",
+      "arbeitszeitVollzeit": true,
+      "datumErsteVeroeffentlichung": "2026-09-01",
+      "firma": "Elbtal Fertigung GmbH",
+      "homeofficemoeglich": true,
+      "gehaltsspanneVon": 70000,
+      "gehaltsspanneBis": 85000,
+      "verguetungsangabe": "JAHRESGEHALT",
+      "stellenlokationen": [
+        {
+          "adresse": {
+            "ort": "Magdeburg",
+            "land": "DEUTSCHLAND",
+            "region": "SACHSEN_ANHALT"
+          }
+        }
+      ]
+    },
+    "detail": {
+      "referenznummer": "EVAL-data-t3b",
+      "istArbeitnehmerUeberlassung": false,
+      "stellenangebotsBeschreibung": "Sie bauen die Datenstrecken, über die Maschinen- und Qualitätsdaten in unsere Auswerteplattform gelangen, und sorgen dafür, dass sie verlässlich und nachvollziehbar bleiben."
+    }
+  },
+  {
+    "id": "data_n1",
+    "persona": "maschinenbau_zu_daten",
+    "tier": "N",
+    "source": "arbeitsagentur",
+    "note": "Lexically close and an excluded role type.",
+    "listing": {
+      "referenznummer": "EVAL-data-n1",
+      "stellenangebotsTitel": "Werkstudent Data Analytics (m/w/d)",
+      "arbeitszeitVollzeit": true,
+      "datumErsteVeroeffentlichung": "2026-09-01",
+      "firma": "Werkfeld Analytics GmbH",
+      "stellenlokationen": [
+        {
+          "adresse": {
+            "ort": "Augsburg",
+            "land": "DEUTSCHLAND"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "data_n2",
+    "persona": "maschinenbau_zu_daten",
+    "tier": "N",
+    "source": "arbeitsagentur",
+    "note": "The persona's target role via a staffing agency.",
+    "listing": {
+      "referenznummer": "EVAL-data-n2",
+      "stellenangebotsTitel": "Data Analyst (m/w/d) Predictive Maintenance",
+      "arbeitszeitVollzeit": true,
+      "datumErsteVeroeffentlichung": "2026-09-01",
+      "firma": "Personalkontor West GmbH",
+      "stellenlokationen": [
+        {
+          "adresse": {
+            "ort": "Essen",
+            "land": "DEUTSCHLAND"
+          }
+        }
+      ]
+    },
+    "detail": {
+      "referenznummer": "EVAL-data-n2",
+      "istArbeitnehmerUeberlassung": true,
+      "stellenangebotsBeschreibung": "Im Rahmen der Arbeitnehmerüberlassung suchen wir für einen Kunden eine Datenanalystin im Bereich vorausschauende Wartung."
+    }
+  },
+  {
+    "id": "data_n3",
+    "persona": "maschinenbau_zu_daten",
+    "tier": "N",
+    "source": "arbeitsagentur",
+    "note": "Right role, excluded country.",
+    "listing": {
+      "referenznummer": "EVAL-data-n3",
+      "stellenangebotsTitel": "Industrial Data Scientist (m/w/d)",
+      "arbeitszeitVollzeit": true,
+      "datumErsteVeroeffentlichung": "2026-09-01",
+      "firma": "Rhone Analytics SA",
+      "stellenlokationen": [
+        {
+          "adresse": {
+            "ort": "Genf",
+            "land": "SCHWEIZ"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "id": "java_t3_platform_en",
+    "persona": "backend_java",
+    "tier": "T3",
+    "source": "greenhouse",
+    "note": "English advert, adjacent title, escaped HTML. Cross-lingual bridging for a persona whose profile is written in English but whose corpus is mostly German.",
+    "external_id": "evalco:9201",
+    "listing": {
+      "id": 9201,
+      "title": "Infrastructure Developer (m/f/d) - Early Stage Team",
+      "company_name": "Evalco Labs",
+      "absolute_url": "https://job-boards.greenhouse.io/evalco/jobs/9201",
+      "location": {
+        "name": "Berlin, Germany"
+      },
+      "departments": [
+        {
+          "id": 2,
+          "name": "Engineering"
+        }
+      ],
+      "language": "en",
+      "first_published": "2026-08-29T09:00:00-04:00",
+      "updated_at": "2026-09-01T09:00:00-04:00",
+      "content": "&lt;p&gt;We are fourteen people and you would own what you ship, from design to production.&lt;/p&gt;&lt;p&gt;Our stack runs on the JVM against a document store, deployed as containers. No release committees, no ticket queues.&lt;/p&gt;"
+    }
+  },
+  {
+    "id": "data_t3_industrial_ds_en",
+    "persona": "maschinenbau_zu_daten",
+    "tier": "T3",
+    "source": "greenhouse",
+    "note": "English title for a German-writing persona whose current job title shares nothing with it. The sharpest test of query expansion plus cross-lingual dense retrieval.",
+    "external_id": "evalco:9301",
+    "listing": {
+      "id": 9301,
+      "title": "Industrial Data Scientist (m/f/d)",
+      "company_name": "Evalco Industrial",
+      "absolute_url": "https://job-boards.greenhouse.io/evalco/jobs/9301",
+      "location": {
+        "name": "Stuttgart, Germany"
+      },
+      "departments": [
+        {
+          "id": 3,
+          "name": "Data"
+        }
+      ],
+      "language": "en",
+      "first_published": "2026-08-27T09:00:00-04:00",
+      "updated_at": "2026-09-01T09:00:00-04:00",
+      "content": "&lt;p&gt;You will work on the shop floor data of heavy machinery: understanding failure modes, building models that anticipate them, and helping repair teams act on the result.&lt;/p&gt;&lt;p&gt;An engineering background around machines matters more to us than a statistics degree.&lt;/p&gt;"
+    }
+  },
+  {
+    "id": "wing_t1_rare_iso",
+    "persona": "wing_nachhaltigkeit",
+    "tier": "T1",
+    "source": "arbeitsagentur",
+    "note": "Semantically distant title carrying a rare exact token from the persona. Dense should smear ISO 14001 into generic quality management; lexical should match it exactly. This is the shape that decides whether fusion earns its cost.",
+    "listing": {
+      "referenznummer": "EVAL-wing-t1c",
+      "stellenangebotsTitel": "Fachkraft für Managementsysteme (m/w/d)",
+      "firma": "Westmark Verbundstoffe GmbH",
+      "arbeitszeitVollzeit": true,
+      "datumErsteVeroeffentlichung": "2026-09-02",
+      "stellenlokationen": [
+        {
+          "adresse": {
+            "ort": "Bielefeld",
+            "region": "NORDRHEIN_WESTFALEN",
+            "land": "DEUTSCHLAND"
+          }
+        }
+      ]
+    },
+    "detail": {
+      "referenznummer": "EVAL-wing-t1c",
+      "istArbeitnehmerUeberlassung": false,
+      "stellenangebotsBeschreibung": "Sie pflegen und auditieren unsere Managementsysteme nach ISO 14001 und begleiten interne wie externe Auditoren. Erfahrung mit Umweltkennzahlen ist von Vorteil."
+    }
+  },
+  {
+    "id": "java_t1_rare_mongo",
+    "persona": "backend_java",
+    "tier": "T1",
+    "source": "arbeitsagentur",
+    "note": "Title a vector would not associate with backend engineering, but it names MongoDB exactly once. Lexical should find it; dense probably should not.",
+    "listing": {
+      "referenznummer": "EVAL-java-t1c",
+      "stellenangebotsTitel": "Mitarbeiter:in Datenplattform (m/w/d)",
+      "firma": "Uferlicht Medien GmbH",
+      "arbeitszeitVollzeit": true,
+      "datumErsteVeroeffentlichung": "2026-09-02",
+      "stellenlokationen": [
+        {
+          "adresse": {
+            "ort": "Potsdam",
+            "region": "BRANDENBURG",
+            "land": "DEUTSCHLAND"
+          }
+        }
+      ]
+    },
+    "detail": {
+      "referenznummer": "EVAL-java-t1c",
+      "istArbeitnehmerUeberlassung": false,
+      "stellenangebotsBeschreibung": "Sie betreuen unsere Speicherschicht, überwiegend MongoDB, und sorgen für Verfügbarkeit und Sicherungen. Enge Abstimmung mit den Produktteams."
+    }
+  },
+  {
+    "id": "data_t1_rare_pdm",
+    "persona": "maschinenbau_zu_daten",
+    "tier": "T1",
+    "source": "arbeitsagentur",
+    "note": "An unremarkable maintenance title that names Predictive Maintenance once in the body.",
+    "listing": {
+      "referenznummer": "EVAL-data-t1c",
+      "stellenangebotsTitel": "Fachreferent:in Anlagenverfügbarkeit (m/w/d)",
+      "firma": "Kranzberg Werke AG",
+      "arbeitszeitVollzeit": true,
+      "datumErsteVeroeffentlichung": "2026-09-02",
+      "stellenlokationen": [
+        {
+          "adresse": {
+            "ort": "Ingolstadt",
+            "region": "BAYERN",
+            "land": "DEUTSCHLAND"
+          }
+        }
+      ]
+    },
+    "detail": {
+      "referenznummer": "EVAL-data-t1c",
+      "istArbeitnehmerUeberlassung": false,
+      "stellenangebotsBeschreibung": "Sie verantworten die Verfügbarkeit unserer Fertigungslinien und führen Predictive Maintenance als festen Bestandteil der Wartungsplanung ein."
+    }
+  }
+]

@@ -1,0 +1,26 @@
+{
+  "listing": {
+    "title": "Product Marketing Manager",
+    "excerpt": "This is a remote position.",
+    "companyName": "Beispiel Systems",
+    "companySlug": "beispiel-systems",
+    "employmentType": "Full Time",
+    "minSalary": 90000,
+    "maxSalary": 120000,
+    "salaryPeriod": "annual",
+    "currency": "USD",
+    "locationRestrictions": [
+      "Austria",
+      "Germany"
+    ],
+    "seniority": [
+      "Manager"
+    ],
+    "description": "<h3>Remote role</h3><div>Du fuehrst Kampagnen.</div>",
+    "pubDate": 1787961600,
+    "expiryDate": 1793145600,
+    "applicationLink": "https://himalayas.app/companies/beispiel-systems/jobs/pmm",
+    "guid": "https://himalayas.app/companies/beispiel-systems/jobs/pmm"
+  },
+  "external_id": "https://himalayas.app/companies/beispiel-systems/jobs/pmm"
+}

@@ -1,0 +1,48 @@
+{
+  "derive_version": 3,
+  "facets": {
+    "cities": [
+      "Graz"
+    ],
+    "countries": [],
+    "employment_type": "unknown",
+    "is_agency": null,
+    "language": "de",
+    "regions": [],
+    "salary_annualised": false,
+    "salary_max_eur_year": null,
+    "salary_min_eur_year": null,
+    "seniority": "unknown",
+    "skills": [
+      "sap",
+      "six sigma"
+    ],
+    "work_mode": "unknown"
+  },
+  "job": {
+    "agency_hint": null,
+    "closes_at": null,
+    "company": "Beispiel Tech",
+    "department_hint": null,
+    "description": "Sie arbeiten mit SAP und Six Sigma.",
+    "employment_type_hint": null,
+    "external_id": "beispiel:4099",
+    "language_hint": "de",
+    "locations": [
+      {
+        "city": null,
+        "country": null,
+        "raw": "Graz",
+        "region": null
+      }
+    ],
+    "posted_at": "2026-09-01T09:00:00-04:00",
+    "remote_hint": null,
+    "salary": null,
+    "source": "greenhouse",
+    "title": "Prozessingenieur",
+    "updated_at": "2026-09-02T09:00:00-04:00",
+    "url": "https://job-boards.greenhouse.io/beispiel/jobs/4099"
+  },
+  "normalize_version": 1
+}

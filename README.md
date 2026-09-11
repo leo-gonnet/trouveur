@@ -1,10 +1,33 @@
-# Trouveur - A simple job radar
+# Trouveur — a self-hosted job radar
 
-A platform to find your next job. It collects postings from a set of job sources, filters
-them against a profile you control, and surfaces what is worth reading in a web UI and a
-daily digest.
+A platform to find your next job. It sweeps job sources into a shared corpus, then ranks that
+corpus against each user's profile and surfaces what is worth reading in a web UI and a digest.
 
 Engineering rules and the source-by-source API traps live in [AGENTS.md](./AGENTS.md).
+
+## How it works
+
+Ingestion does not know about users, and selection does not fetch. That split is the whole design:
+searching sources with a user's keywords caps recall at whatever they thought to type.
+
+```
+INGEST  (shared corpus, runs once for everyone)
+  sweep ──> raw archive ──> job ──> facets ──> vector ──> lifecycle
+
+MATCH   (per user, cheap, re-runnable)
+  profile ──> expanded queries ──> hard filters
+          ──> dense ANN ─┐
+          ──> BM25/FTS  ─┴─ RRF fusion ──> rules cut ──> LLM rerank ──> digest
+```
+
+Raw payloads are archived verbatim and kept, and everything derived from them carries a version.
+Fixing a parser is therefore a re-derive, not a re-crawl: bump the version, refill the queue, and
+the ordinary worker brings the whole corpus up to date.
+
+**Reranking runs on each user's own OpenRouter key**, entered in Settings, encrypted at rest and
+capped by a monthly ceiling that is checked before each batch. The deployment itself has no LLM
+spend. Everything except reranking — sweeping, retrieval, hybrid search, the web UI — works with
+no API key at all.
 
 ## Quick start (local)
 
@@ -15,33 +38,56 @@ docker run -d --name trouveur-db -p 5432:5432 \
   pgvector/pgvector:pg16
 export DATABASE_URL=postgresql+asyncpg://trouveur:dev@127.0.0.1:5432/trouveur
 export SESSION_SECRET=dev-only-insecure-secret
+export ENCRYPTION_KEY=dev-only-change-me
 uv run alembic upgrade head
 uv run trouveur create-user
-uv run trouveur run --dry-run
+uv run trouveur tenants list                # 11 verified boards are seeded by the migration
+uv run trouveur sweep --source greenhouse
+uv run trouveur drain                       # derive, embed, fetch details
+uv run trouveur match --user 1
 ```
+
+The test suite is offline and runs in well under a second. A second, opt-in suite exercises every
+SQL path against a real Postgres and is skipped unless `TROUVEUR_TEST_DATABASE_URL` is set — worth
+running before any change to the queries or the migration, because SQL that compiles is not SQL
+that runs.
 
 `uv` is required: this project's target host has no working `venv` module, and CI uses `uv` too.
 `create-user` is the only way to make a login — there is no sign-up route. Then
-`uv run trouveur serve` for the UI and `uv run trouveur runner` if you want scans to actually
-fire on a schedule.
+`uv run trouveur serve` for the UI and `uv run trouveur runner` if you want scans to fire on a
+schedule and the queues to drain continuously.
 
-The profile and the list of companies to watch live in the database and are edited in the UI.
-There is no config file for either.
+Semantic retrieval needs the local embedding model: `uv sync --extra embeddings`. Without it, set
+`EMBEDDING_PROVIDER=deterministic` to exercise the pipeline (its vectors carry no meaning, and rows
+it writes are stamped so its use is visible in the data).
 
-If a run collects nothing, the reason is recorded per source in the `source_state` table rather
-than raised.
+Profiles and API keys live in the database and are edited in the UI. So does the crawl set — which
+companies each per-tenant source sweeps — but it is managed from the server with
+`trouveur tenants add|enable|disable|remove`, not in the web UI: it is shared by every user, so one
+person cannot enlarge the crawl everyone pays for. The dashboard shows it read-only alongside
+per-tenant health, so a board that starts 404ing is visible as one to remove.
+
+The crawl set is a table rather than a file so that a discovery pass can populate it later. Such a
+pass registers candidates **disabled**, for a human to promote; it can never enlarge the crawl on
+its own.
+
+If a sweep collects nothing, the reason is recorded per source in `source_sweep` rather than
+raised — including partition overflow, which is coverage lost with no error anywhere.
 
 ## Sources
 
-Each source is a self-contained adapter. Which ones run is a setting, not a code change, and the
-list is meant to grow over time as new adapters are added as modules.
+Each source is two modules: `client.py` does network and nothing else, `normalize.py` is a pure
+versioned function from an archived payload to a canonical job. Adding a source is a package plus
+one registry entry — if it needs edits anywhere else, the abstraction has leaked.
 
-| Source | Coverage | Mechanism |
-|---|---|---|
-| Arbeitsagentur | Germany | Public JSON API, no signup |
-| karriere.at | Austria | Sitemap diff + schema.org JSON-LD |
-| Personio | DACH Mittelstand | Public per-tenant XML feed |
-| JobSpy | LinkedIn/Indeed/Glassdoor/Google | Library (optional extra) |
+| Source | Coverage | Mechanism | Can retire postings? |
+|---|---|---|---|
+| Arbeitsagentur | Germany (~1.0M live, ~36k/day) | Public JSON API, no signup. Swept by occupational field, not keywords. | No — delta only |
+| Greenhouse | EU-wide, per company | Public board API, no auth. One request returns a tenant's complete board. | Yes, per board |
+
+The pair is deliberately mismatched: one is a partitioned delta search with a separate detail
+phase, the other a complete per-tenant dump with descriptions inline. An abstraction that survives
+both will survive the next ten.
 
 ## Deploy
 
@@ -58,9 +104,11 @@ docker compose up -d
 docker compose run --rm web trouveur create-user
 ```
 
-Four things that are not guessable:
+Five things that are not guessable:
 
 - **Point DNS at the host before the first start.** Caddy cannot obtain a certificate otherwise.
+- **`ENCRYPTION_KEY` must be set and must never change.** It encrypts users' stored API keys;
+  losing it means every user has to re-enter theirs.
 - **`TROUVEUR_IMAGE` must match the image CI pushes**, which is `ghcr.io/<owner>/<repo>`. Make
   that package public, or `docker login ghcr.io` on the host with a `read:packages` token.
 - **`docker compose run --rm migrate` on every deploy**, before the new containers start.

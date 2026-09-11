@@ -1,0 +1,32 @@
+{
+  "detail": null,
+  "external_id": "beispiel:4001",
+  "listing": {
+    "absolute_url": "https://job-boards.greenhouse.io/beispiel/jobs/4001",
+    "application_deadline": null,
+    "company_name": "Beispiel Tech",
+    "content": "&lt;div class=&quot;content-intro&quot;&gt;&lt;p&gt;We are an all-remote company.&lt;/p&gt;&lt;/div&gt;&lt;p&gt;You will own process improvement using Lean Management and Kubernetes.&lt;/p&gt;",
+    "departments": [
+      {
+        "id": 7,
+        "name": "Operations"
+      }
+    ],
+    "first_published": "2026-08-20T10:00:00-04:00",
+    "id": 4001,
+    "internal_job_id": 9001,
+    "language": "en",
+    "location": {
+      "name": "Remote, Germany; Remote, Austria"
+    },
+    "offices": [
+      {
+        "id": 1,
+        "location": null,
+        "name": "Germany"
+      }
+    ],
+    "title": "Senior Process Engineer",
+    "updated_at": "2026-09-02T11:30:00-04:00"
+  }
+}

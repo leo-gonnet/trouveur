@@ -13,11 +13,18 @@ WORKDIR /app
 # Dependencies first: they change far less often than the source.
 COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-install-project --no-dev
+    uv sync --frozen --no-install-project --no-dev --extra embeddings
 
 COPY . .
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev
+    uv sync --frozen --no-dev --extra embeddings
+
+# Bake the embedding model into the image rather than fetching it on first use. A runtime download
+# would repeat on every container recreate, needs egress from the runner, and would make the first
+# scan after a deploy fail in a way that looks like a pipeline bug.
+ENV FASTEMBED_CACHE_PATH=/app/.fastembed
+RUN uv run --no-dev python -c \
+    "from fastembed import TextEmbedding; TextEmbedding(model_name='intfloat/multilingual-e5-small')"
 
 
 FROM python:3.12-slim-bookworm
@@ -32,7 +39,8 @@ RUN apt-get update \
 WORKDIR /app
 COPY --from=build --chown=app:app /app /app
 
-ENV PATH="/app/.venv/bin:$PATH"
+ENV PATH="/app/.venv/bin:$PATH" \
+    FASTEMBED_CACHE_PATH=/app/.fastembed
 USER app
 EXPOSE 8080
 

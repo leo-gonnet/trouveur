@@ -1,0 +1,54 @@
+{
+  "derive_version": 3,
+  "facets": {
+    "cities": [
+      "München"
+    ],
+    "countries": [
+      "DE"
+    ],
+    "employment_type": "full_time",
+    "is_agency": null,
+    "language": "de",
+    "regions": [
+      "Bayern"
+    ],
+    "salary_annualised": false,
+    "salary_max_eur_year": "78000.0",
+    "salary_min_eur_year": "62000.0",
+    "seniority": "unknown",
+    "skills": [],
+    "work_mode": "onsite"
+  },
+  "job": {
+    "agency_hint": null,
+    "closes_at": null,
+    "company": "Beispiel Industrie GmbH",
+    "department_hint": "Wirtschaftsingenieur",
+    "description": null,
+    "employment_type_hint": "vollzeit",
+    "external_id": "10000-1234567890abcdef-S",
+    "language_hint": "de",
+    "locations": [
+      {
+        "city": "München, Oberbayern",
+        "country": "DEUTSCHLAND",
+        "raw": "München, Oberbayern, BAYERN, DEUTSCHLAND",
+        "region": "BAYERN"
+      }
+    ],
+    "posted_at": "2026-09-01T00:00:00Z",
+    "remote_hint": false,
+    "salary": {
+      "amount_max": "78000.0",
+      "amount_min": "62000.0",
+      "currency": "EUR",
+      "period": "YEAR"
+    },
+    "source": "arbeitsagentur",
+    "title": "Wirtschaftsingenieur (m/w/d) Prozessoptimierung",
+    "updated_at": "2026-09-05T09:12:33.100000Z",
+    "url": "https://beispiel.example/karriere/wing-42"
+  },
+  "normalize_version": 1
+}

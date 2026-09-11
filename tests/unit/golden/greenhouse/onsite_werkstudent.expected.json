@@ -1,0 +1,47 @@
+{
+  "derive_version": 3,
+  "facets": {
+    "cities": [
+      "Wien"
+    ],
+    "countries": [
+      "AT"
+    ],
+    "employment_type": "internship",
+    "is_agency": null,
+    "language": "de",
+    "regions": [],
+    "salary_annualised": false,
+    "salary_max_eur_year": null,
+    "salary_min_eur_year": null,
+    "seniority": "intern",
+    "skills": [],
+    "work_mode": "unknown"
+  },
+  "job": {
+    "agency_hint": null,
+    "closes_at": null,
+    "company": "Beispiel Tech",
+    "department_hint": "Supply Chain",
+    "description": "Wir bieten flexible paid time off und ein tolles Team.",
+    "employment_type_hint": null,
+    "external_id": "beispiel:4002",
+    "language_hint": "de",
+    "locations": [
+      {
+        "city": null,
+        "country": null,
+        "raw": "Wien, Austria",
+        "region": null
+      }
+    ],
+    "posted_at": "2026-09-01T09:00:00-04:00",
+    "remote_hint": null,
+    "salary": null,
+    "source": "greenhouse",
+    "title": "Werkstudent Logistik",
+    "updated_at": "2026-09-01T09:00:00-04:00",
+    "url": "https://job-boards.greenhouse.io/beispiel/jobs/4002"
+  },
+  "normalize_version": 1
+}

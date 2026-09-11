@@ -5,6 +5,16 @@
 /var/
 backups/
 
+# One installation's crawl set. Not secret, but not shared either: committing it would imply the
+# corpus is reproducible from the commit, and would make every installation crawl the same
+# companies. The .example is the template; this is the local copy.
+tenants.local.toml
+
+# Local development helpers: throwaway databases and scratch tooling. Useful, but they describe
+# one machine's setup rather than the project, and a dev container definition next to the
+# production compose file invites running the wrong one.
+scripts/
+
 .venv/
 __pycache__/
 *.py[cod]

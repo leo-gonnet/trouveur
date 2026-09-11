@@ -1,0 +1,91 @@
+# Local tenant seed — copy to `tenants.local.toml`, edit, then:
+#
+#     uv run trouveur tenants import --dry-run     # check it parses
+#     uv run trouveur tenants import               # write it
+#
+# `tenants.local.toml` is gitignored on purpose. The corpus a commit produces is already not
+# reproducible from that commit alone (AGENTS.md > The crawl set), and committing one
+# installation's board list would imply otherwise while making everyone crawl the same companies.
+#
+# This file is NOT the crawl set — the database is. Importing only ever inserts, and never
+# re-enables a board an operator has switched off. Deleting a line here removes nothing; use
+# `trouveur tenants remove <source> <scope>`.
+#
+# One line per source, listing its boards. A full careers URL is accepted anywhere a slug is.
+# Every entry is validated against the source's own grammar at import, so a typo fails loudly
+# instead of 404-ing on every sweep for ever.
+#
+# Only tenant-scoped sources belong here. arbeitsagentur, workable, arbeitnow, himalayas and
+# jobicy each sweep one global corpus and take no tenants.
+#
+# Every slug below was verified live on 2026-09-10 (job counts at that moment in brackets).
+# Verify before adding your own: an unknown board fails silently, every day, until somebody reads
+# the failure count.
+
+# https://boards-api.greenhouse.io/v1/boards/<slug>/jobs
+greenhouse = [
+  "databricks",   # [869]
+  "stripe",       # [618]
+  "cloudflare",   # [352]
+  "elastic",      # [345]
+  "gitlab",       # [230]
+  "flexport",     # [174]
+  "airbnb",       # [169]
+  "figma",        # [158]
+  "reddit",       # [145]
+  "doctolib",     # [125]
+  "robinhood",    # [123]
+  "asana",        # [108]
+  "discord",      # [45]
+  "dropbox",      # [43]
+]
+
+# https://api.ashbyhq.com/posting-api/job-board/<slug>
+ashby = [
+  "openai",       # [787]
+  "ramp",         # [146]
+  "notion",       # [130]
+  "cursor",       # [126]
+  "replit",       # [78]
+  "supabase",     # [60]
+  "linear",       # [29]
+  "posthog",      # [10]
+]
+
+# https://api.lever.co/v0/postings/<slug>?mode=json
+lever = [
+  "spotify",      # [76]
+  "tala",         # [6]
+]
+
+# https://<slug>.jobs.personio.de/xml — the DACH SME workhorse.
+# An unknown tenant answers 429 (sometimes 404) with an HTML page rather than an empty feed, so
+# a wrong slug here looks like rate limiting in the logs. Verify before adding.
+personio = [
+  "prewave",      # [9]  Vienna
+  "adverity",     # [2]  Vienna
+  "personio",     # [1]
+]
+
+# https://<slug>.breezy.hr/json
+breezy = [
+  "breezy",       # [3]
+]
+
+# https://api.rippling.com/platform/api/ats/v1/board/<slug>/jobs
+rippling = [
+  "rippling",     # [663]
+]
+
+# tenant:wdN:SiteName — all three parts are in the careers URL and none can be inferred from the
+# others. Capitals are load-bearing: the API 404s on a lowercased site name. A full careers URL
+# such as https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite is accepted here too.
+#
+# Workday boards are tenant-hosted, so robots.txt differs per tenant — check the tenant's own
+# robots.txt before adding it, not the platform's.
+workday = [
+  "nvidia:wd5:NVIDIAExternalCareerSite",
+  "redhat:wd5:Jobs",
+  "salesforce:wd12:External_Career_Site",
+  "adobe:wd5:external_experienced",
+]

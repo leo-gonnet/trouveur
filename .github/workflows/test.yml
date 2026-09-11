@@ -4,7 +4,7 @@ on:
   workflow_call:
 
 jobs:
-  test:
+  offline:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -18,5 +18,36 @@ jobs:
 
       - run: uv run ruff check .
 
-      # Fully offline (stubbed httpx, SQL compiled not executed), so no database service.
-      - run: uv run pytest -q
+      # No network, no database. Under a second, so it is the gate that runs first.
+      - run: uv run pytest tests/unit -q
+
+  database:
+    runs-on: ubuntu-latest
+    # SQL that compiles is not SQL that runs, and the only way to tell them apart is a server.
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: trouveur
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: trouveur
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U trouveur -d trouveur"
+          --health-interval 10s --health-timeout 5s --health-retries 5
+    env:
+      TROUVEUR_TEST_DATABASE_URL: postgresql+asyncpg://trouveur:ci@127.0.0.1:5432/trouveur
+      DATABASE_URL: postgresql+asyncpg://trouveur:ci@127.0.0.1:5432/trouveur
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - run: uv sync --frozen
+
+      - run: uv run alembic upgrade head
+
+      - run: uv run pytest tests/integration -q

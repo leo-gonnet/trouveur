@@ -1,0 +1,55 @@
+{
+  "derive_version": 3,
+  "facets": {
+    "cities": [],
+    "countries": [
+      "DE",
+      "AT"
+    ],
+    "employment_type": "unknown",
+    "is_agency": null,
+    "language": "en",
+    "regions": [],
+    "salary_annualised": false,
+    "salary_max_eur_year": null,
+    "salary_min_eur_year": null,
+    "seniority": "senior",
+    "skills": [
+      "kubernetes",
+      "lean management"
+    ],
+    "work_mode": "remote"
+  },
+  "job": {
+    "agency_hint": null,
+    "closes_at": null,
+    "company": "Beispiel Tech",
+    "department_hint": "Operations",
+    "description": "We are an all-remote company. You will own process improvement using Lean Management and Kubernetes.",
+    "employment_type_hint": null,
+    "external_id": "beispiel:4001",
+    "language_hint": "en",
+    "locations": [
+      {
+        "city": null,
+        "country": null,
+        "raw": "Remote, Germany",
+        "region": null
+      },
+      {
+        "city": null,
+        "country": null,
+        "raw": "Remote, Austria",
+        "region": null
+      }
+    ],
+    "posted_at": "2026-08-20T10:00:00-04:00",
+    "remote_hint": null,
+    "salary": null,
+    "source": "greenhouse",
+    "title": "Senior Process Engineer",
+    "updated_at": "2026-09-02T11:30:00-04:00",
+    "url": "https://job-boards.greenhouse.io/beispiel/jobs/4001"
+  },
+  "normalize_version": 1
+}

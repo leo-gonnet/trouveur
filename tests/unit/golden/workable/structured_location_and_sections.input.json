@@ -1,0 +1,31 @@
+{
+  "listing": {
+    "id": "468720ca-d877-47a3-b2b7-e588e169c7d1",
+    "title": "Software Engineer (all genders)",
+    "state": "published",
+    "department": "R&D",
+    "description": "<p>Golang | .NET | Azure</p>",
+    "requirementsSection": "<p>Drei Jahre Erfahrung.</p>",
+    "benefitsSection": "<ul><li>Jahreskarte</li></ul>",
+    "employmentType": "",
+    "url": "https://jobs.workable.com/view/abc123/software-engineer",
+    "language": "en",
+    "locations": [
+      "Vienna, Vienna, Austria",
+      "Remote, Austria"
+    ],
+    "location": {
+      "city": "Vienna",
+      "subregion": "Vienna",
+      "countryName": "Austria"
+    },
+    "created": "2026-09-01T17:59:13.172Z",
+    "updated": "2026-09-02T08:00:00.000Z",
+    "company": {
+      "id": "a10415bc",
+      "title": "Beispiel Technologies"
+    },
+    "workplace": "hybrid"
+  },
+  "external_id": "468720ca-d877-47a3-b2b7-e588e169c7d1"
+}

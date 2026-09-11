@@ -1,11 +1,16 @@
-"""SMTP digest.
+"""SMTP digest, one per user per run.
 
-One email per run, containing only jobs above the threshold that have not been notified before.
-`notified_at` is set by the pipeline in the same transaction, so a rerun sends nothing.
+Contains the best-scoring postings that have not been sent before. notified_at is
+written in the same transaction that sends, so a re-run sends nothing rather than repeating a
+digest the user already read.
+
+A user with no address simply gets no digest: the web UI is the primary surface and email is a
+convenience, so a missing address is a configuration state, not an error.
 """
 
 from __future__ import annotations
 
+import html
 import logging
 import smtplib
 from email.message import EmailMessage
@@ -16,82 +21,79 @@ from trouveur.config import Settings
 log = logging.getLogger(__name__)
 
 
-def render(rows: list[Any], threshold: int) -> tuple[str, str, str]:
+def _places(row: Any) -> str:
+    return ", ".join(
+        item.get("raw", "") for item in (row.locations or []) if item.get("raw")
+    ) or "location not stated"
+
+
+def _salary(row: Any) -> str:
+    low, high = row.salary_min_eur_year, row.salary_max_eur_year
+    if not low and not high:
+        return "salary not stated"
+    if low and high:
+        return f"{int(low):,}-{int(high):,} EUR/yr"
+    return f"{int(low or high):,} EUR/yr"
+
+
+def render(rows: list[Any]) -> tuple[str, str, str]:
     """Return (subject, plaintext, html)."""
     subject = f"Trouveur: {len(rows)} new match{'es' if len(rows) != 1 else ''}"
-
-    lines = [f"{len(rows)} job(s) scored at or above {threshold}.", ""]
+    lines = [f"{len(rows)} newly scored posting(s), best first.", ""]
     cards = []
+
     for row in rows:
         score = row.llm_score if row.llm_score is not None else "-"
-        where = ", ".join(filter(None, [row.location_city, row.location_country])) or "n/a"
-        salary = _salary(row)
-        remote = "remote" if row.remote else ("on-site" if row.remote is False else "remote n/a")
-
         lines += [
             f"[{score}] {row.title}",
-            f"    {row.company or 'unknown company'} — {where} — {remote}{salary}",
+            f"    {row.company or 'unknown company'} - {_places(row)} - {_salary(row)}",
             f"    {row.llm_reason or ''}".rstrip(),
             f"    {row.url}",
             "",
         ]
         cards.append(
             f"""
-            <div style="border-left:4px solid #2b6cb0;padding:8px 12px;margin:0 0 16px">
+            <div style="border-left:4px solid #2f6fed;padding:8px 12px;margin:0 0 16px">
               <div style="font-size:15px;font-weight:600">
-                <span style="background:#2b6cb0;color:#fff;border-radius:3px;
+                <span style="background:#2f6fed;color:#fff;border-radius:3px;
                              padding:1px 6px;font-size:12px">{score}</span>
-                <a href="{_esc(row.url)}" style="color:#1a202c;text-decoration:none">
-                  {_esc(row.title)}</a>
+                <a href="{html.escape(row.url)}" style="color:#16202c;text-decoration:none">
+                  {html.escape(row.title)}</a>
               </div>
-              <div style="color:#4a5568;font-size:13px;margin-top:2px">
-                {_esc(row.company or "unknown company")} &middot; {_esc(where)}
-                &middot; {remote}{_esc(salary)}
+              <div style="color:#64748b;font-size:13px;margin-top:2px">
+                {html.escape(row.company or "unknown company")} &middot;
+                {html.escape(_places(row))} &middot; {html.escape(_salary(row))}
               </div>
-              <div style="color:#2d3748;font-size:13px;margin-top:6px">
-                {_esc(row.llm_reason or "")}</div>
+              <div style="color:#16202c;font-size:13px;margin-top:6px">
+                {html.escape(row.llm_reason or "")}</div>
             </div>"""
         )
 
-    html = f"""<html><body style="font-family:-apple-system,Segoe UI,Roboto,sans-serif">
-      <p style="color:#4a5568;font-size:13px">
-        {len(rows)} job(s) scored at or above {threshold}.</p>
-      {"".join(cards)}
-    </body></html>"""
-    return subject, "\n".join(lines), html
-
-
-def _salary(row: Any) -> str:
-    if row.salary_min is None and row.salary_max is None:
-        return ""
-    lo = f"{int(row.salary_min):,}" if row.salary_min is not None else "?"
-    hi = f"{int(row.salary_max):,}" if row.salary_max is not None else "?"
-    period = (row.salary_period or "").lower()
-    return f" — {lo}–{hi} EUR/{period}"
-
-
-def _esc(text: str) -> str:
-    return (
-        text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+    body = (
+        '<div style="font-family:system-ui,sans-serif;max-width:640px;margin:0 auto">'
+        f"<p style='color:#64748b'>{len(rows)} newly scored posting(s), best first.</p>"
+        + "".join(cards)
+        + "</div>"
     )
+    return subject, "\n".join(lines), body
 
 
-def send(settings: Settings, subject: str, text: str, html: str) -> None:
-    if not (settings.smtp_host and settings.smtp_from and settings.smtp_to):
+def send(settings: Settings, to: str, subject: str, text: str, body: str) -> None:
+    if not settings.smtp_host or not settings.smtp_from:
         raise RuntimeError(
-            "SMTP is not configured. Set SMTP_HOST, SMTP_FROM and SMTP_TO in the environment."
+            "SMTP is not configured. Set SMTP_HOST and SMTP_FROM, or run without notifications."
         )
 
     message = EmailMessage()
     message["Subject"] = subject
     message["From"] = settings.smtp_from
-    message["To"] = settings.smtp_to
+    message["To"] = to
     message.set_content(text)
-    message.add_alternative(html, subtype="html")
+    message.add_alternative(body, subtype="html")
 
-    with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=30) as smtp:
-        smtp.starttls()
+    with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=30) as server:
+        server.starttls()
         if settings.smtp_user and settings.smtp_password:
-            smtp.login(settings.smtp_user, settings.smtp_password)
-        smtp.send_message(message)
-    log.info("digest sent to %s", settings.smtp_to)
+            server.login(settings.smtp_user, settings.smtp_password)
+        server.send_message(message)
+    log.info("digest sent to %s", to)

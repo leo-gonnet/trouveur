@@ -21,11 +21,13 @@ dependencies = [
     "argon2-cffi>=23.1",
     "itsdangerous>=2.2",
     "click>=8.1",
+    "cryptography>=43.0",
 ]
 
 [project.optional-dependencies]
-# Heavy (pulls pandas). The source degrades to a no-op when absent.
-jobspy = ["python-jobspy>=1.1.82"]
+# Local ONNX embeddings. Pulls onnxruntime (~200MB) but not torch. Without it, set
+# TROUVEUR_EMBEDDING_PROVIDER to another provider or the embed worker refuses to start.
+embeddings = ["fastembed>=0.4"]
 
 [project.scripts]
 trouveur = "trouveur.cli:main"

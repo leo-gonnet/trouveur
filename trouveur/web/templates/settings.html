@@ -1,0 +1,63 @@
+{% extends "base.html" %}{% block title %}Settings · Trouveur{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Settings</h1>
+  <p class="hint">Reranking runs on your own OpenRouter key, so what it costs is yours to see and yours to cap.</p>
+</div>
+
+{% if request.query_params.get('saved') %}<p class="notice good">Saved.</p>{% endif %}
+{% if request.query_params.get('deleted') %}<p class="notice">Key deleted. Retrieval still works; nothing will be scored.</p>{% endif %}
+
+<div class="grid">
+  <section class="card">
+    <div class="card-head"><h2>Model access</h2></div>
+    <form method="post" action="/settings">
+      <label>OpenRouter API key
+        <input name="api_key" type="password" autocomplete="off"
+               placeholder="{% if credential %}stored — leave blank to keep it{% else %}sk-or-v1-…{% endif %}">
+      </label>
+      {% if credential %}
+        <p class="hint">Stored key fingerprint <code>{{ credential.api_key_fingerprint }}</code>.
+          The key itself is encrypted and is never shown again, including here.</p>
+      {% endif %}
+      <label>Model<input name="model" value="{{ credential.model if credential else default_model }}"></label>
+      <label>Pinned provider <span class="hint">unpinned, one model spreads across backends at a wide price spread and differing quantisation, so neither cost nor scores are reproducible</span>
+        <input name="provider_pin" value="{{ credential.provider_pin or '' if credential else '' }}" placeholder="{{ default_provider }}"></label>
+      <label>Monthly ceiling <span class="hint">US dollars, the currency OpenRouter bills in. Checked before every batch, not after.</span>
+        <input name="monthly_budget_usd" value="{{ credential.monthly_budget_usd if credential else '5' }}"></label>
+      <button class="primary" type="submit">Save</button>
+    </form>
+    {% if credential %}
+      <form method="post" action="/settings/delete-key" class="inline">
+        <button class="danger" type="submit">Delete stored key</button>
+      </form>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <div class="card-head"><h2>Spend</h2></div>
+    {% if spend %}
+      <div class="kpis">
+        <div class="kpi"><span class="num">${{ '%.4f' % spend.cost_usd }}</span><span>this month</span></div>
+        <div class="kpi"><span class="num">{{ spend.calls }}</span><span>calls</span></div>
+        <div class="kpi"><span class="num">{{ '{:,}'.format(spend.tokens_in) }}</span><span>tokens in</span></div>
+      </div>
+      {% if credential %}
+        {% set used = (spend.cost_usd / credential.monthly_budget_usd * 100) if credential.monthly_budget_usd > 0 else 100 %}
+        <div class="bar-track"><div class="bar-fill" style="width: {{ [used, 100] | min }}%"></div></div>
+        <p class="hint">{{ '%.0f' % used }}% of your ${{ credential.monthly_budget_usd }} ceiling.</p>
+      {% endif %}
+    {% else %}
+      <p class="empty">Nothing spent this month.</p>
+    {% endif %}
+    {% if history %}
+      <table>
+        <tr><th>Month</th><th class="num">Cost</th><th class="num">Calls</th></tr>
+        {% for row in history %}
+          <tr><td>{{ row.period_month }}</td><td class="num">${{ '%.4f' % row.cost_usd }}</td><td class="num">{{ row.calls }}</td></tr>
+        {% endfor %}
+      </table>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

@@ -1,0 +1,47 @@
+{
+  "derive_version": 3,
+  "facets": {
+    "cities": [
+      "Vienna"
+    ],
+    "countries": [
+      "AT"
+    ],
+    "employment_type": "internship",
+    "is_agency": null,
+    "language": null,
+    "regions": [],
+    "salary_annualised": false,
+    "salary_max_eur_year": null,
+    "salary_min_eur_year": null,
+    "seniority": "intern",
+    "skills": [],
+    "work_mode": "onsite"
+  },
+  "job": {
+    "agency_hint": null,
+    "closes_at": null,
+    "company": "Beispiel GmbH",
+    "department_hint": "Operations",
+    "description": "Du unterstützt unser Team in der Logistik.",
+    "employment_type_hint": "Part Time",
+    "external_id": "beispiel:98323abf2296",
+    "language_hint": null,
+    "locations": [
+      {
+        "city": "Vienna",
+        "country": "Austria",
+        "raw": "Vienna, Wien",
+        "region": "Wien"
+      }
+    ],
+    "posted_at": "2026-08-15T14:37:22.684000Z",
+    "remote_hint": false,
+    "salary": null,
+    "source": "breezy",
+    "title": "Werkstudent Logistik (m/w/d)",
+    "updated_at": null,
+    "url": "https://beispiel.breezy.hr/p/98323abf2296"
+  },
+  "normalize_version": 1
+}

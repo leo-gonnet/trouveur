@@ -1,9 +1,17 @@
 {
-  "referenznummer": "00000-aaaaaaaaaaaaaaaa-S",
-  "stellenangebotsTitel": "Wirtschaftsingenieur (m/w/d)",
-  "stellenangebotsBeschreibung": "Wir suchen eine Führungskraft für Prozessoptimierung und Supply Chain in München. Remote möglich.",
+  "referenznummer": "10000-1234567890abcdef-S",
+  "stellenangebotsTitel": "Wirtschaftsingenieur (m/w/d) Prozessoptimierung",
+  "firma": "Beispiel Industrie GmbH",
+  "stellenangebotsBeschreibung": "Sie verantworten die Prozessoptimierung in der Fertigung. Kenntnisse in Lean Management und Six Sigma sind erwünscht. Erfahrung mit SAP und Python von Vorteil.",
   "istArbeitnehmerUeberlassung": false,
   "istPrivateArbeitsvermittlung": false,
-  "istGeringfuegigeBeschaeftigung": false,
-  "arbeitszeitVollzeit": true
+  "homeofficemoeglich": false,
+  "arbeitszeitVollzeit": true,
+  "verguetungsangabe": "JAHRESGEHALT",
+  "gehaltsspanneVon": 62000.0,
+  "gehaltsspanneBis": 78000.0,
+  "datumErsteVeroeffentlichung": "2026-09-01",
+  "stellenlokationen": [
+    {"adresse": {"ort": "München, Oberbayern", "region": "BAYERN", "land": "DEUTSCHLAND"}}
+  ]
 }

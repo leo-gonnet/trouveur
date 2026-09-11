@@ -1,0 +1,37 @@
+{
+  "listing": {
+    "title": "Senior Infrastructure Engineer",
+    "externalPath": "/job/Vienna/Senior-Infrastructure-Engineer_JR2023962",
+    "locationsText": "3 Locations",
+    "postedOn": "Posted Today",
+    "bulletFields": [
+      "JR2023962"
+    ]
+  },
+  "external_id": "beispiel:wd5:BeispielCareers:/job/Vienna/Senior-Infrastructure-Engineer_JR2023962",
+  "detail": {
+    "jobPostingInfo": {
+      "id": "be21dd777426103557f96186174a0000",
+      "title": "Senior Infrastructure Engineer",
+      "jobDescription": "<p>Du betreust die Scheduler-Plattform.</p>",
+      "location": "AT, Vienna",
+      "additionalLocations": [
+        "DE, Munich"
+      ],
+      "postedOn": "Posted Today",
+      "startDate": "2026-09-01",
+      "timeType": "Full time",
+      "jobReqId": "JR2023962",
+      "country": {
+        "descriptor": "Austria",
+        "id": "bc33aa31"
+      },
+      "posted": true,
+      "externalUrl": "https://beispiel.wd5.myworkdayjobs.com/BeispielCareers/job/Vienna/Senior-Infrastructure-Engineer_JR2023962"
+    },
+    "hiringOrganization": {
+      "name": "Beispiel Austria GmbH",
+      "url": ""
+    }
+  }
+}

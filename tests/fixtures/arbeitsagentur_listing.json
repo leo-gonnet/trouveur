@@ -1,0 +1,30 @@
+{
+  "referenznummer": "10000-1234567890abcdef-S",
+  "stellenangebotsTitel": "Wirtschaftsingenieur (m/w/d) Prozessoptimierung",
+  "hauptberuf": "Wirtschaftsingenieur",
+  "firma": "Beispiel Industrie GmbH",
+  "stellenangebotsart": "ARBEIT",
+  "arbeitszeitVollzeit": true,
+  "istGeringfuegigeBeschaeftigung": false,
+  "homeofficemoeglich": false,
+  "verguetungsangabe": "JAHRESGEHALT",
+  "artDerVerguetung": "GEHALTSSPANNE",
+  "gehaltsspanneVon": 62000.0,
+  "gehaltsspanneBis": 78000.0,
+  "vertragsdauer": "KEINE_ANGABE",
+  "datumErsteVeroeffentlichung": "2026-09-01",
+  "aenderungsdatum": "2026-09-05T09:12:33.100",
+  "externeURL": "https://beispiel.example/karriere/wing-42",
+  "stellenlokationen": [
+    {
+      "adresse": {
+        "strasse": "Musterweg",
+        "hausnummer": "1",
+        "plz": "80331",
+        "ort": "München, Oberbayern",
+        "region": "BAYERN",
+        "land": "DEUTSCHLAND"
+      }
+    }
+  ]
+}

@@ -1,0 +1,55 @@
+{% macro places(job) %}
+  {%- set names = (job.cities or []) | list -%}
+  {%- if names -%}{{ names | join(', ') }}{%- endif -%}
+  {%- if job.countries -%}{% if names %} · {% endif %}{{ job.countries | join('/') }}{%- endif -%}
+  {%- if not names and not job.countries -%}location not stated{%- endif -%}
+{% endmacro %}
+
+{% macro salary(job) %}
+  {%- if job.salary_min_eur_year or job.salary_max_eur_year -%}
+    {{ '{:,.0f}'.format(job.salary_min_eur_year or job.salary_max_eur_year) }}
+    {%- if job.salary_max_eur_year and job.salary_min_eur_year %}–{{ '{:,.0f}'.format(job.salary_max_eur_year) }}{% endif %}
+    &euro;/yr
+  {%- else -%}salary not stated{%- endif -%}
+{% endmacro %}
+
+{# Band names must match app.css. They did not: this emitted `good`/`ok` against a stylesheet
+   that styles `high`/`mid`/`low`, so every score of 65 and over rendered uncoloured. #}
+{% macro score_pill(score) %}
+  {%- if score is none -%}
+    <span class="score none" title="not scored yet">&ndash;</span>
+  {%- else -%}
+    <span class="score {% if score >= 85 %}high{% elif score >= 65 %}mid{% else %}low{% endif %}"
+          title="fit score {{ score }}/100">{{ score }}</span>
+  {%- endif -%}
+{% endmacro %}
+
+{% macro job_card(job) %}
+<article class="job">
+  <div class="job-head">
+    {{ score_pill(job.llm_score) }}
+    <div>
+      <a class="job-title" href="/job/{{ job.public_id }}">{{ job.title }}</a>
+      <p class="meta">
+        {{ job.company or 'company not stated' }} ·
+        {{ places(job) }} ·
+        {% if job.work_mode and job.work_mode != 'unknown' %}{{ job.work_mode }} · {% endif %}
+        {{ salary(job) }}
+        {% if job.closed_at %} · <span class="pill bad">closed</span>{% endif %}
+      </p>
+      {% if job.llm_reason %}<p class="reason">{{ job.llm_reason }}</p>{% endif %}
+      {% if job.llm_red_flags %}
+        <p class="flags">{% for flag in job.llm_red_flags %}<span class="pill warn">{{ flag }}</span>{% endfor %}</p>
+      {% endif %}
+    </div>
+  </div>
+  <div class="actions">
+    <a class="pill" href="{{ job.url }}" target="_blank" rel="noopener noreferrer">Open advert ↗</a>
+    <span class="pill">{{ job.source }}</span>
+    {% for state in ['saved', 'applied', 'dismissed'] %}
+      <button hx-post="/job/{{ job.id }}/state" hx-vals='{"state": "{{ state }}"}'
+              hx-swap="outerHTML" class="pill{% if job.state == state %} primary{% endif %}">{{ state }}</button>
+    {% endfor %}
+  </div>
+</article>
+{% endmacro %}

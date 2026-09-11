@@ -1,0 +1,36 @@
+{
+  "derive_version": 3,
+  "facets": {
+    "cities": [],
+    "countries": [],
+    "employment_type": "unknown",
+    "is_agency": true,
+    "language": "de",
+    "regions": [],
+    "salary_annualised": false,
+    "salary_max_eur_year": null,
+    "salary_min_eur_year": null,
+    "seniority": "unknown",
+    "skills": [],
+    "work_mode": "unknown"
+  },
+  "job": {
+    "agency_hint": true,
+    "closes_at": null,
+    "company": null,
+    "department_hint": null,
+    "description": "Wir vermitteln Sie an einen namhaften Kunden.",
+    "employment_type_hint": null,
+    "external_id": "10000-aaaaaaaaaaaaaaaa-S",
+    "language_hint": "de",
+    "locations": [],
+    "posted_at": null,
+    "remote_hint": null,
+    "salary": null,
+    "source": "arbeitsagentur",
+    "title": "Ingenieur (m/w/d)",
+    "updated_at": null,
+    "url": "https://www.arbeitsagentur.de/jobsuche/jobdetail/10000-aaaaaaaaaaaaaaaa-S"
+  },
+  "normalize_version": 1
+}
