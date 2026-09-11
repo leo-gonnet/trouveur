@@ -278,6 +278,22 @@ async def start_sweep(conn: AsyncConnection, source: str) -> tuple[int, datetime
     return row.id, row.started_at
 
 
+async def record_sweep_progress(
+    conn: AsyncConnection, sweep_id: int, *, documents_seen: int
+) -> None:
+    """Publish how far a sweep has got, while it is still going.
+
+    Everything else about a sweep is written when it ends, which is exactly when it stops being
+    interesting: until then the row says only that the source started. A source that has been
+    running for twenty minutes and one that is wedged look identical without this.
+    """
+    await conn.execute(
+        source_sweep.update()
+        .where(source_sweep.c.id == sweep_id)
+        .values(documents_seen=documents_seen)
+    )
+
+
 async def finish_sweep(
     conn: AsyncConnection,
     sweep_id: int,

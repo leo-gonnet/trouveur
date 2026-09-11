@@ -11,7 +11,7 @@ sources that did work still land their postings, and the dashboard shows the one
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import timedelta
 
@@ -55,8 +55,32 @@ class SourceReport:
 
 
 @dataclass
+class RunControl:
+    """How a caller watches a sweep and asks it to stop.
+
+    Callbacks rather than a run id, so this module keeps knowing nothing about the run queue: the
+    runner owns what a "run" is, and ingest owns what a sweep is. It also makes cancellation
+    testable without a database.
+    """
+
+    starting: Callable[[int], Awaitable[None]] | None = None
+    source_done: Callable[[int, str | None], Awaitable[None]] | None = None
+    cancelled: Callable[[], Awaitable[bool]] | None = None
+
+    async def should_stop(self) -> bool:
+        return bool(self.cancelled and await self.cancelled())
+
+
+@dataclass
 class IngestReport:
     per_source: dict[str, SourceReport] = field(default_factory=dict)
+    # Sources never reached because the run was cancelled. Named rather than counted so the
+    # difference between "found nothing" and "never asked" survives into the report.
+    skipped: list[str] = field(default_factory=list)
+
+    @property
+    def cancelled(self) -> bool:
+        return bool(self.skipped)
 
     def summary(self) -> str:
         parts = []
@@ -66,11 +90,17 @@ class IngestReport:
                 f"{name}[{state}] docs={report.documents} new/changed={report.changed} "
                 f"closed={report.closed}"
             )
+        if self.skipped:
+            parts.append(f"cancelled before {', '.join(self.skipped)}")
         return " | ".join(parts) or "nothing ran"
 
 
 async def run(
-    *, only_source: str | None = None, backfill: bool = False, settings: Settings | None = None
+    *,
+    only_source: str | None = None,
+    backfill: bool = False,
+    settings: Settings | None = None,
+    control: RunControl | None = None,
 ) -> IngestReport:
     settings = settings or get_settings()
     async with connect() as conn:
@@ -78,7 +108,9 @@ async def run(
     sources = build_sources(tenants=tenants, only=only_source)
 
     async with PoliteClient() as client:
-        return await sweep_sources(client, sources, settings=settings, backfill=backfill)
+        return await sweep_sources(
+            client, sources, settings=settings, backfill=backfill, control=control
+        )
 
 
 async def sweep_sources(
@@ -87,6 +119,7 @@ async def sweep_sources(
     *,
     settings: Settings,
     backfill: bool = False,
+    control: RunControl | None = None,
 ) -> IngestReport:
     """Sweep an already-assembled list of sources, one client shared across all of them.
 
@@ -95,8 +128,22 @@ async def sweep_sources(
     budget, which lives on the client, is shared by everything the caller sweeps.
     """
     report = IngestReport()
-    for source in sources:
+    if control and control.starting:
+        await control.starting(len(sources))
+
+    for index, source in enumerate(sources):
+        # Checked between sources, never inside one. A source stopped mid-flight has seen only
+        # part of its live set, and the machinery that decides what to retire reads exactly that
+        # -- so an interrupted sweep must not be able to reach the closing step at all.
+        if control and await control.should_stop():
+            report.skipped = [later.name for later in sources[index:]]
+            log.info("run cancelled before %s", report.skipped[0])
+            break
         report.per_source[source.name] = await _sweep_source(client, source, settings, backfill)
+        if control and control.source_done:
+            remaining = sources[index + 1 :]
+            await control.source_done(index + 1, remaining[0].name if remaining else None)
+
     log.info("ingest complete: %s", report.summary())
     return report
 
@@ -123,6 +170,12 @@ async def _sweep_source(
         report.documents += len(documents)
         report.upserted += result.upserted
         report.changed += len(result.changed)
+        # Published per batch, not at the end. The row already exists -- start_sweep inserted it
+        # before the first request -- so this is what makes a long source visibly moving rather
+        # than indistinguishable from a wedged one. One UPDATE per batch, and batches are
+        # hundreds of documents, so it does not show up next to the fetch it follows.
+        async with connect() as conn:
+            await q.record_sweep_progress(conn, sweep_id, documents_seen=report.documents)
 
     outcome = SweepOutcome()
     error: str | None = None

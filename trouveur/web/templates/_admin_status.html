@@ -1,0 +1,71 @@
+{% macro duration(seconds) %}
+  {%- set s = seconds | int -%}
+  {%- if s >= 3600 %}{{ s // 3600 }}h {{ (s % 3600) // 60 }}m
+  {%- elif s >= 60 %}{{ s // 60 }}m {{ s % 60 }}s
+  {%- else %}{{ s }}s{%- endif -%}
+{% endmacro %}
+
+{% if active_run %}
+  {% set total = active_run.sources_total or 0 %}
+  {% set done = active_run.sources_done or 0 %}
+  <div class="run-live">
+    <div class="run-line">
+      <span class="pill {% if active_run.status == 'running' %}live{% endif %}">{{ active_run.status }}</span>
+      {% if active_run.started_at %}
+        <span class="hint">running for {{ duration(elapsed_seconds) }}</span>
+      {% else %}
+        <span class="hint">waiting for the runner to pick it up</span>
+      {% endif %}
+      <span class="hint">{{ active_run.only_source or 'all sources' }}{% if active_run.backfill %} · backfill{% endif %}</span>
+      <form method="post" action="/admin/run/{{ active_run.id }}/cancel" class="inline">
+        <button type="submit" {% if active_run.cancel_requested %}disabled{% endif %}>
+          {% if active_run.cancel_requested %}stopping after this source…{% else %}Cancel{% endif %}
+        </button>
+      </form>
+    </div>
+
+    {% if total %}
+      <div class="bar" role="progressbar" aria-valuenow="{{ done }}" aria-valuemin="0" aria-valuemax="{{ total }}">
+        <span style="width: {{ (100 * done / total) | round(1) }}%"></span>
+      </div>
+      <p class="hint">
+        {{ done }} of {{ total }} sources done.
+        {% if eta_seconds %}
+          about {{ duration(eta_seconds) }} left{% if eta_partial %} for the sources we have timings for{% endif %},
+          based on how long each took before.
+        {% else %}
+          No estimate yet — that needs at least one finished sweep per source to measure against.
+        {% endif %}
+      </p>
+    {% endif %}
+
+    {% if running_sweeps %}
+      <table class="compact">
+        <tr><th>Fetching now</th><th class="num">Documents</th><th class="num">For</th></tr>
+        {% for s in running_sweeps %}
+          <tr>
+            <td>{{ s.source }}</td>
+            <td class="num">{{ '{:,}'.format(s.documents_seen or 0) }}</td>
+            <td class="num">{{ duration(sweep_elapsed.get(s.source, 0)) }}</td>
+          </tr>
+        {% endfor %}
+      </table>
+    {% endif %}
+  </div>
+{% else %}
+  <p class="hint">Nothing running. A queued run is picked up by the runner within a few seconds.</p>
+{% endif %}
+
+{% if queues %}
+  <div class="queues">
+    {% for kind, depth in queues.items() %}
+      <span class="pill{% if depth.parked %} bad{% endif %}">
+        {{ kind }} {{ '{:,}'.format(depth.total) }}{% if depth.parked %} · {{ depth.parked }} stuck{% endif %}
+      </span>
+    {% endfor %}
+  </div>
+  <p class="hint">
+    Work left over after fetching: descriptions to fetch, facets to derive, vectors to build.
+    These drain continuously and are not part of the run above.
+  </p>
+{% endif %}

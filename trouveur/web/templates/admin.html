@@ -8,6 +8,13 @@
   </p>
 </div>
 
+<section class="card">
+  <div class="card-head"><h2>Now</h2></div>
+  <div hx-get="/admin/status" hx-trigger="every 3s" hx-swap="innerHTML">
+    {% include "_admin_status.html" %}
+  </div>
+</section>
+
 <div class="grid">
   <section class="card">
     <div class="card-head"><h2>Schedule</h2></div>

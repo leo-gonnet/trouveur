@@ -29,7 +29,7 @@ work_kind = _enum("work_kind", "detail", "derive", "embed", "dedup")
 tenant_origin = _enum("tenant_origin", "manual", "discovered")
 rule_verdict = _enum("rule_verdict", "pass", "reject", "unknown")
 user_state = _enum("user_state", "new", "saved", "applied", "dismissed")
-run_status = _enum("run_status", "queued", "running", "success", "failed")
+run_status = _enum("run_status", "queued", "running", "success", "failed", "cancelled")
 run_trigger = _enum("run_trigger", "scheduled", "manual")
 
 # The raw archive. Append-only and never pruned: it is the only input that cannot be recomputed.
@@ -371,4 +371,10 @@ pipeline_run = sa.Table(
     sa.Column("finished_at", sa.DateTime(timezone=True)),
     sa.Column("report", JSONB),
     sa.Column("error", sa.Text),
+    # Progress, written while the run is in flight rather than at the end. A run that only
+    # reports itself once it is over cannot be watched, and cannot be told apart from a stuck one.
+    sa.Column("cancel_requested", sa.Boolean, nullable=False, server_default="false"),
+    sa.Column("sources_total", sa.SmallInteger),
+    sa.Column("sources_done", sa.SmallInteger, nullable=False, server_default="0"),
+    sa.Column("current_source", sa.Text),
 )

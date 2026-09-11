@@ -88,10 +88,43 @@ async def drain_queues(settings: Settings) -> dict[str, int]:
     return done
 
 
+def _progress_control(run_id: int) -> ingest.RunControl:
+    """Bridge the run queue to the sweep, in the direction that keeps ingest ignorant of runs."""
+
+    async def starting(total: int) -> None:
+        async with connect() as conn:
+            await admin_q.start_run_progress(conn, run_id, total)
+
+    async def source_done(done: int, next_source: str | None) -> None:
+        async with connect() as conn:
+            await admin_q.advance_run_progress(conn, run_id, done=done, current_source=next_source)
+
+    async def cancelled() -> bool:
+        async with connect() as conn:
+            return await admin_q.cancel_requested(conn, run_id)
+
+    return ingest.RunControl(starting=starting, source_done=source_done, cancelled=cancelled)
+
+
 async def _execute(settings: Settings, run) -> None:
     report = await ingest.run(
-        only_source=run.only_source, backfill=run.backfill, settings=settings
+        only_source=run.only_source,
+        backfill=run.backfill,
+        settings=settings,
+        control=_progress_control(run.id),
     )
+    if report.cancelled:
+        # Stop before matching and before digests. Cancelling a scan should not still spend the
+        # user's LLM credit on whatever the interrupted sweep happened to collect.
+        async with connect() as conn:
+            await admin_q.finish_run(
+                conn,
+                run.id,
+                status=RunStatus.CANCELLED,
+                report={"summary": report.summary(), "skipped": report.skipped},
+            )
+        log.info("run %s cancelled after %d source(s)", run.id, len(report.per_source))
+        return
 
     # Matching runs after ingest, but deliberately not gated on the queues being empty: a user
     # should see today's postings ranked as soon as they are usable, not only once the last

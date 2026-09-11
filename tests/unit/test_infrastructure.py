@@ -154,3 +154,96 @@ def test_the_image_prewarms_the_model_the_code_actually_loads():
     assert "model_name=MODEL" in prewarm
     assert MODEL not in instructions
     assert "intfloat/" not in instructions
+
+
+class _FakeSource:
+    requires_detail = False
+
+    def __init__(self, name: str, swept: list[str]) -> None:
+        self.name = name
+        self._swept = swept
+
+    async def sweep(self, client, sink, *, backfill=False):
+        from trouveur.sources.base import SweepOutcome
+
+        self._swept.append(self.name)
+        # A complete sweep: the thing a cancelled run must never be able to report.
+        return SweepOutcome(closable_scopes=[self.name], documents=1)
+
+    async def fetch_detail(self, client, external_id):
+        return None
+
+
+async def test_a_cancelled_run_stops_before_the_next_source(monkeypatch):
+    """Cancellation is checked between sources, so the one in flight still finishes cleanly."""
+    from trouveur.ingest import pipeline
+
+    swept: list[str] = []
+    sources = [_FakeSource(name, swept) for name in ("first", "second", "third")]
+
+    async def fake_sweep_one(client, source, settings, backfill):
+        await source.sweep(client, None, backfill=backfill)
+        return pipeline.SourceReport(documents=1, complete=True)
+
+    monkeypatch.setattr(pipeline, "_sweep_source", fake_sweep_one)
+
+    async def cancelled() -> bool:
+        # Not cancelled until the first source has been swept.
+        return bool(swept)
+
+    report = await pipeline.sweep_sources(
+        None, sources, settings=None, control=pipeline.RunControl(cancelled=cancelled)
+    )
+
+    assert swept == ["first"]
+    assert report.cancelled
+    assert report.skipped == ["second", "third"]
+    assert "cancelled before second, third" in report.summary()
+
+
+async def test_an_uncancelled_run_sweeps_every_source(monkeypatch):
+    """The guard above must not be able to pass by simply never sweeping anything."""
+    from trouveur.ingest import pipeline
+
+    swept: list[str] = []
+    sources = [_FakeSource(name, swept) for name in ("first", "second", "third")]
+
+    async def fake_sweep_one(client, source, settings, backfill):
+        await source.sweep(client, None, backfill=backfill)
+        return pipeline.SourceReport(documents=1, complete=True)
+
+    monkeypatch.setattr(pipeline, "_sweep_source", fake_sweep_one)
+
+    report = await pipeline.sweep_sources(None, sources, settings=None)
+    assert swept == ["first", "second", "third"]
+    assert not report.cancelled and report.skipped == []
+
+
+async def test_progress_is_reported_per_source_with_the_one_coming_next(monkeypatch):
+    """The panel names the source being fetched, so the callback must hand over the next one."""
+    from trouveur.ingest import pipeline
+
+    sources = [_FakeSource(name, []) for name in ("first", "second")]
+    seen: list[tuple[int, str | None]] = []
+    totals: list[int] = []
+
+    async def fake_sweep_one(client, source, settings, backfill):
+        return pipeline.SourceReport(documents=1)
+
+    monkeypatch.setattr(pipeline, "_sweep_source", fake_sweep_one)
+
+    await pipeline.sweep_sources(
+        None,
+        sources,
+        settings=None,
+        control=pipeline.RunControl(
+            starting=lambda total: totals.append(total) or _noop(),
+            source_done=lambda done, nxt: seen.append((done, nxt)) or _noop(),
+        ),
+    )
+    assert totals == [2]
+    assert seen == [(1, "second"), (2, None)]
+
+
+async def _noop() -> None:
+    return None

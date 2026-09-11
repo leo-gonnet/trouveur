@@ -170,3 +170,62 @@ async def test_logout_clears_the_session(client):
     response = await client.get("/recommendations")
     assert response.status_code == 303
     assert response.headers["location"].startswith("/login")
+
+
+async def test_the_live_panel_renders_a_run_in_flight(client):
+    """An empty panel exercises none of it.
+
+    The progress bar, the cancel button and the per-source table only render when a run is
+    actually in flight, so without a run in the fixture the whole feature is untested and
+    StrictUndefined never sees the variables the fragment reads.
+    """
+    from trouveur.db.queries import admin as admin_q
+    from trouveur.db.queries import ingest as ingest_q
+    from trouveur.models import RunTrigger
+
+    async with connect() as conn:
+        run_id = await admin_q.enqueue_run(conn, trigger=RunTrigger.MANUAL)
+        claimed = await admin_q.claim_next_run(conn)
+        await admin_q.start_run_progress(conn, claimed.id, 4)
+        await admin_q.advance_run_progress(conn, claimed.id, done=1, current_source="greenhouse")
+        sweep_id, _ = await ingest_q.start_sweep(conn, "greenhouse")
+        await ingest_q.record_sweep_progress(conn, sweep_id, documents_seen=1234)
+
+    body = (await client.get("/admin/status")).text
+    assert 'role="progressbar"' in body
+    assert "1 of 4 sources done" in body
+    assert "greenhouse" in body and "1,234" in body
+    assert f"/admin/run/{run_id}/cancel" in body
+
+
+async def test_cancelling_a_running_run_asks_rather_than_kills(client):
+    """A running sweep must not be torn down mid-source: it would look complete when it is not."""
+    from trouveur.db.queries import admin as admin_q
+    from trouveur.models import RunStatus, RunTrigger
+
+    async with connect() as conn:
+        await admin_q.enqueue_run(conn, trigger=RunTrigger.MANUAL)
+        claimed = await admin_q.claim_next_run(conn)
+
+    response = await client.post(f"/admin/run/{claimed.id}/cancel", follow_redirects=False)
+    assert response.status_code == 303
+
+    async with connect() as conn:
+        assert await admin_q.cancel_requested(conn, claimed.id)
+        row = next(r for r in await admin_q.recent_runs(conn) if r.id == claimed.id)
+    assert row.status == RunStatus.RUNNING.value, "a running sweep must finish its source first"
+
+
+async def test_cancelling_a_queued_run_ends_it_immediately(client):
+    """Nothing has started, so there is no partial sweep to protect."""
+    from trouveur.db.queries import admin as admin_q
+    from trouveur.models import RunStatus, RunTrigger
+
+    async with connect() as conn:
+        run_id = await admin_q.enqueue_run(conn, trigger=RunTrigger.MANUAL)
+
+    await client.post(f"/admin/run/{run_id}/cancel", follow_redirects=False)
+
+    async with connect() as conn:
+        row = next(r for r in await admin_q.recent_runs(conn) if r.id == run_id)
+    assert row.status == RunStatus.CANCELLED.value

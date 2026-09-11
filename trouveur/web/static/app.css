@@ -186,6 +186,28 @@ td.num, th.num { text-align: right; }
 .pill.warn { background: var(--warn-soft); color: var(--warn); }
 .pill.bad  { background: var(--bad-soft);  color: var(--bad); }
 
+/* ---------- Run progress ---------- */
+.run-live { display: flex; flex-direction: column; gap: var(--space-3); }
+.run-line { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
+.run-line .inline { margin-left: auto; }
+
+.bar { height: 8px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
+.bar > span { display: block; height: 100%; border-radius: 999px; background: var(--accent);
+              transition: width .4s ease; }
+
+/* A run that is moving should look different from one that is merely recorded. */
+.pill.live { background: var(--accent-soft); color: var(--accent); }
+.pill.live::before { content: ""; width: 6px; height: 6px; border-radius: 999px;
+                     background: currentColor; animation: pulse 1.6s ease-in-out infinite; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
+@media (prefers-reduced-motion: reduce) {
+  .pill.live::before { animation: none; }
+  .bar > span { transition: none; }
+}
+
+.queues { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-3); }
+table.compact td, table.compact th { padding: var(--space-1) var(--space-2); font-size: .85rem; }
+
 /* ---------- Forms & buttons ---------- */
 button, .btn, input[type=submit] {
   font: inherit; font-size: .88rem; font-weight: 500;
