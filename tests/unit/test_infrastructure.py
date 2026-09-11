@@ -129,3 +129,28 @@ def test_disabled_schedule_never_fires():
     schedule = _Schedule(enabled=False)
     now = datetime.now(UTC) + timedelta(hours=1)
     assert is_scheduled_run_due(schedule, now, None) is False
+
+
+def test_the_image_prewarms_the_model_the_code_actually_loads():
+    """The Dockerfile must import the model name, never spell it out again.
+
+    It did spell it out, and the two drifted: the image cached
+    intfloat/multilingual-e5-small while the app loads
+    paraphrase-multilingual-MiniLM-L12-v2. The layer exists precisely to stop the runner
+    downloading a model on first scan, so a mismatch defeats it silently -- and stayed silent
+    until a fastembed release dropped the stale name and failed the build instead.
+    """
+    from pathlib import Path
+
+    from trouveur.ingest.embed.local import MODEL
+
+    dockerfile = (Path(__file__).resolve().parents[2] / "Dockerfile").read_text("utf-8")
+    # Comments may name the old model to explain the trap; only the instructions must not.
+    instructions = "\n".join(
+        line for line in dockerfile.splitlines() if not line.lstrip().startswith("#")
+    )
+    prewarm = instructions.split("FASTEMBED_CACHE_PATH", 1)[1]
+    assert "from trouveur.ingest.embed.local import MODEL" in prewarm
+    assert "model_name=MODEL" in prewarm
+    assert MODEL not in instructions
+    assert "intfloat/" not in instructions

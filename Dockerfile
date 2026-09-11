@@ -22,9 +22,16 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # Bake the embedding model into the image rather than fetching it on first use. A runtime download
 # would repeat on every container recreate, needs egress from the runner, and would make the first
 # scan after a deploy fail in a way that looks like a pipeline bug.
+#
+# The name is imported, never written here. Spelling it out again made this layer bake a model the
+# code does not load: the app asks for paraphrase-multilingual-MiniLM-L12-v2 while the image
+# cached intfloat/multilingual-e5-small, so the download this layer exists to prevent happened on
+# the first scan anyway -- silently, until a fastembed release dropped the stale name and turned
+# a wrong-but-quiet image into a failed build.
 ENV FASTEMBED_CACHE_PATH=/app/.fastembed
 RUN uv run --no-dev python -c \
-    "from fastembed import TextEmbedding; TextEmbedding(model_name='intfloat/multilingual-e5-small')"
+    "from fastembed import TextEmbedding; from trouveur.ingest.embed.local import MODEL; \
+     TextEmbedding(model_name=MODEL)"
 
 
 FROM python:3.12-slim-bookworm
