@@ -14,7 +14,7 @@ from trouveur.db.schema import app_user, user_llm_credential, user_llm_spend, us
 
 # Changing one of these changes what a good match *is*, so it invalidates that user's cached LLM
 # scores and forces a re-score they will be billed for. Everything else about a profile -- the
-# notification threshold, how many results to retrieve -- changes presentation only and must not
+# how many results to retrieve or rerank -- changes presentation or volume only and must not
 # bump the version. Getting this wrong is not a crash, it is a surprise invoice.
 SCORING_FIELDS = frozenset(
     {

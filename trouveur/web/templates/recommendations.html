@@ -4,8 +4,8 @@
 <div class="page-head">
   <h1>Recommendations</h1>
   <p class="hint">
-    Retrieved, passed the rules, scored at or above {{ threshold }}.
-    This page is meant to be short — <a href="/search">Search</a> shows everything collected.
+    Everything that passed the rules and was scored, best first. How many there are is your
+    <a href="/profile">rerank budget</a>; <a href="/search">Search</a> shows everything collected.
   </p>
 </div>
 
@@ -26,12 +26,14 @@
 {% endif %}
 
 {% if jobs %}
-  {% for job in jobs %}{{ m.job_card(job) }}{% endfor %}
+  <div class="results-scroll">
+    {% for job in jobs %}{{ m.job_card(job) }}{% endfor %}
+  </div>
 {% else %}
 <p class="empty">
-  Nothing above the threshold yet. That is a normal state for this page — it only shows what the
-  whole pipeline is prepared to defend. Try lowering the threshold in
-  <a href="/profile">Profile</a>, or browse <a href="/search">Search</a>.
+  Nothing scored yet. Retrieval and the rules cut are free and run without a key; scoring needs an
+  OpenRouter key in <a href="/settings">Settings</a>. Meanwhile <a href="/search">Search</a> shows
+  everything collected.
 </p>
 {% endif %}
 {% endblock %}

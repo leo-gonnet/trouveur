@@ -1,6 +1,6 @@
 """SMTP digest, one per user per run.
 
-Contains only postings above that user's threshold that have not been sent before. notified_at is
+Contains the best-scoring postings that have not been sent before. notified_at is
 written in the same transaction that sends, so a re-run sends nothing rather than repeating a
 digest the user already read.
 
@@ -36,10 +36,10 @@ def _salary(row: Any) -> str:
     return f"{int(low or high):,} EUR/yr"
 
 
-def render(rows: list[Any], threshold: int) -> tuple[str, str, str]:
+def render(rows: list[Any]) -> tuple[str, str, str]:
     """Return (subject, plaintext, html)."""
     subject = f"Trouveur: {len(rows)} new match{'es' if len(rows) != 1 else ''}"
-    lines = [f"{len(rows)} posting(s) scored at or above {threshold}.", ""]
+    lines = [f"{len(rows)} newly scored posting(s), best first.", ""]
     cards = []
 
     for row in rows:
@@ -71,7 +71,7 @@ def render(rows: list[Any], threshold: int) -> tuple[str, str, str]:
 
     body = (
         '<div style="font-family:system-ui,sans-serif;max-width:640px;margin:0 auto">'
-        f"<p style='color:#64748b'>{len(rows)} posting(s) scored at or above {threshold}.</p>"
+        f"<p style='color:#64748b'>{len(rows)} newly scored posting(s), best first.</p>"
         + "".join(cards)
         + "</div>"
     )

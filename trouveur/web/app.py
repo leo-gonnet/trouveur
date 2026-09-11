@@ -130,8 +130,10 @@ async def recommendations(request: Request):
     session = request.state.session
     async with connect() as conn:
         profile_row = await users_q.get_profile(conn, session["uid"])
-        threshold = profile_row.notify_threshold if profile_row else 70
-        jobs = await match_q.recommendations(conn, session["uid"], threshold)
+        # Everything that was reranked is shown, so the page is exactly as long as the user's
+        # rerank budget -- the one number they already set, rather than a second one to tune.
+        limit = profile_row.rerank_limit if profile_row else 150
+        jobs = await match_q.recommendations(conn, session["uid"], limit)
         stats = await match_q.match_stats(conn, session["uid"])
         credential = await users_q.get_credential(conn, session["uid"])
     return templates.TemplateResponse(
@@ -140,7 +142,6 @@ async def recommendations(request: Request):
         {
             "active": "recommendations",
             "jobs": jobs,
-            "threshold": threshold,
             "stats": stats,
             "has_key": credential is not None,
             "username": session["u"],
@@ -252,7 +253,6 @@ async def profile_save(
     min_salary_eur_year: str = Form("0"),
     retrieval_limit: int = Form(400),
     rerank_limit: int = Form(150),
-    notify_threshold: int = Form(70),
 ):
     session = request.state.session
     values = {
@@ -271,7 +271,6 @@ async def profile_save(
         "min_salary_eur_year": _decimal(min_salary_eur_year, Decimal(0)),
         "retrieval_limit": min(max(retrieval_limit, 25), 2000),
         "rerank_limit": min(max(rerank_limit, 0), 1000),
-        "notify_threshold": min(max(notify_threshold, 0), 100),
     }
     async with connect() as conn:
         version, rescore = await users_q.save_profile(conn, session["uid"], values)

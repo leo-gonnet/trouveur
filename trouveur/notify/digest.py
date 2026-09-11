@@ -23,12 +23,10 @@ async def send_digests(settings: Settings) -> int:
         if not user.is_active or not user.email:
             continue
         async with connect() as conn:
-            profile = await users_q.get_profile(conn, user.id)
-            threshold = profile.notify_threshold if profile else 70
-            rows = await match_q.pending_digest(conn, user.id, threshold)
+            rows = await match_q.pending_digest(conn, user.id)
             if not rows:
                 continue
-            subject, text, body = email.render(rows, threshold)
+            subject, text, body = email.render(rows)
             try:
                 email.send(settings, user.email, subject, text, body)
             except Exception as exc:  # noqa: BLE001 - one user's mail must not block another's

@@ -151,14 +151,14 @@ async def test_saving_a_scoring_field_bumps_the_profile_version(client, seeded):
         "languages": "de", "must_have": "", "deal_breakers": "", "keywords": "lean",
         "countries": "DE,AT", "cities": "", "work_modes": "", "seniorities": "",
         "employment_types": "", "min_salary_eur_year": "60000",
-        "retrieval_limit": "400", "rerank_limit": "150", "notify_threshold": "70",
+        "retrieval_limit": "400", "rerank_limit": "150",
     }
     assert (await client.post("/profile", data=form)).status_code == 303
     async with connect() as conn:
         after_scoring = (await users_q.get_profile(conn, seeded["user_id"])).version
     assert after_scoring > before
 
-    presentation_only = {**form, "notify_threshold": "80"}
+    presentation_only = {**form, "rerank_limit": "200"}
     assert (await client.post("/profile", data=presentation_only)).status_code == 303
     async with connect() as conn:
         after_presentation = (await users_q.get_profile(conn, seeded["user_id"])).version

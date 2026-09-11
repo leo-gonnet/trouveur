@@ -158,12 +158,26 @@ td.num, th.num { text-align: right; }
           border-left: 3px solid var(--accent); }
 .actions { display: flex; gap: var(--space-2); margin-top: var(--space-3); }
 
-.score { flex: none; min-width: 2.4rem; text-align: center; font-weight: 650;
-         font-size: .82rem; padding: 3px 7px; border-radius: var(--radius-sm);
-         font-variant-numeric: tabular-nums; }
-.score.high { background: var(--good-soft); color: var(--good); }
-.score.mid  { background: var(--warn-soft); color: var(--warn); }
-.score.low  { background: var(--surface-2); color: var(--fg-muted); }
+/* The first thing read on a row, and the thing the list is sorted by, so it is sized to be
+   glanceable rather than to fit in a line of text. */
+.score { flex: none; min-width: 2.9rem; text-align: center; font-weight: 700;
+         font-size: 1.02rem; line-height: 1.1; padding: var(--space-2) var(--space-2);
+         border-radius: var(--radius-sm); font-variant-numeric: tabular-nums;
+         border: 1px solid transparent; }
+.score.high { background: var(--good-soft); color: var(--good);
+              border-color: color-mix(in srgb, var(--good) 30%, transparent); }
+.score.mid  { background: var(--warn-soft); color: var(--warn);
+              border-color: color-mix(in srgb, var(--warn) 30%, transparent); }
+.score.low  { background: var(--bad-soft); color: var(--bad);
+              border-color: color-mix(in srgb, var(--bad) 25%, transparent); }
+.score.none { background: var(--surface-2); color: var(--fg-muted); font-weight: 500; }
+
+/* Long by design now that nothing is filtered out, so it scrolls in place and the KPI row and
+   the page heading stay put. Capped in vh rather than in rows: the point is that the viewport
+   keeps its shape, not that a particular number of results fits. */
+.results-scroll { max-height: 72vh; overflow-y: auto; overscroll-behavior: contain;
+                  border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.results-scroll > .job:last-child { border-bottom: 0; }
 
 .pill { display: inline-flex; align-items: center; gap: 4px; font-size: .76rem;
         padding: 2px 8px; border-radius: 999px; background: var(--surface-2);

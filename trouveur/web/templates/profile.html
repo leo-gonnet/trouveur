@@ -60,9 +60,8 @@
     <div class="card-head"><h2>Volume</h2></div>
     <label>Retrieve per run <span class="hint">free; higher means better recall</span>
       <input name="retrieval_limit" type="number" min="25" max="2000" value="{{ profile.retrieval_limit }}"></label>
-    <label>Rerank per run <span class="hint">this is what costs money</span>
+    <label>Rerank per run <span class="hint">this is what costs money, and it is how many land on <a href="/recommendations">Recommendations</a></span>
       <input name="rerank_limit" type="number" min="0" max="1000" value="{{ profile.rerank_limit }}"></label>
-    <label>Recommendation threshold<input name="notify_threshold" type="number" min="0" max="100" value="{{ profile.notify_threshold }}"></label>
     <button class="primary" type="submit">Save profile</button>
   </section>
 </form>

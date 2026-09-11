@@ -152,28 +152,45 @@ def test_a_real_drop_at_a_comparable_corpus_size_is_still_reported():
     assert len(found) == 1 and "T1" in found[0]
 
 
-def test_a_positive_scored_below_the_threshold_is_reported_as_lost():
-    """The paid stage's own recall loss: retrieved, rule-passed, and still never shown.
+def test_a_negative_outranking_a_positive_is_counted_as_an_inversion():
+    """With no threshold the page shows everything in score order, so order is the whole verdict.
 
-    Every recall figure above this counts the needle as found, because retrieval did find it.
+    A negative at 80 above a positive at 70 is a bad posting the reader meets first.
     """
     needles = [{"id": "good", "tier": "T1"}, {"id": "bad", "tier": "N"}]
-    graded = harness.grade_scores(needles, {"good": 69, "bad": 10}, threshold=70)
-    assert graded["lost"] == ["good"]
-    assert graded["leaked"] == []
+    graded = harness.grade_scores(needles, {"good": 70, "bad": 80})
+    assert graded["inversions"] == 1
+    assert graded["outranking"] == ["bad"]
+    assert graded["margin"] == -10
 
 
-def test_a_negative_scored_at_the_threshold_is_reported_as_leaked():
-    """At the threshold, not merely above it -- the digest gates on `>=`."""
+def test_cleanly_separated_scores_have_no_inversions_and_a_positive_margin():
     needles = [{"id": "good", "tier": "T1"}, {"id": "bad", "tier": "N"}]
-    graded = harness.grade_scores(needles, {"good": 95, "bad": 70}, threshold=70)
-    assert graded["leaked"] == ["bad"]
-    assert graded["lost"] == []
+    graded = harness.grade_scores(needles, {"good": 90, "bad": 40})
+    assert graded["inversions"] == 0
+    assert graded["outranking"] == []
+    assert graded["margin"] == 50
+
+
+def test_a_tie_counts_as_an_inversion():
+    """Equal scores leave the order to the tiebreak, which is not a quality signal."""
+    needles = [{"id": "good", "tier": "T1"}, {"id": "bad", "tier": "N"}]
+    assert harness.grade_scores(needles, {"good": 70, "bad": 70})["inversions"] == 1
+
+
+def test_inversions_are_counted_per_pair_not_per_negative():
+    """One bad posting above three good ones is three things the reader steps over."""
+    needles = [
+        {"id": "g1", "tier": "T1"}, {"id": "g2", "tier": "T2"},
+        {"id": "g3", "tier": "T3"}, {"id": "bad", "tier": "N"},
+    ]
+    graded = harness.grade_scores(needles, {"g1": 60, "g2": 65, "g3": 70, "bad": 75})
+    assert graded["inversions"] == 3
 
 
 def test_an_unscored_needle_is_counted_as_unscored_not_as_a_failure():
     """A batch the model mangled leaves postings unscored; scoring them 0 would cache a lie."""
     needles = [{"id": "good", "tier": "T1"}, {"id": "bad", "tier": "N"}]
-    graded = harness.grade_scores(needles, {}, threshold=70)
+    graded = harness.grade_scores(needles, {})
     assert graded["unscored"] == 2
-    assert graded["lost"] == [] and graded["leaked"] == []
+    assert graded["inversions"] == 0 and graded["margin"] is None

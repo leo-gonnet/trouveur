@@ -34,6 +34,8 @@ class UserProfile(BaseModel):
     employment_types: list[EmploymentType] = Field(default_factory=list)
     min_salary_eur_year: Decimal = Decimal(0)
 
+    # How much of the corpus reaches each stage. Retrieval is free; reranking is not, so
+    # rerank_limit is the one knob that decides the bill -- and, since everything reranked is
+    # shown, it is also how long the Recommendations page is.
     retrieval_limit: int = 400
     rerank_limit: int = 150
-    notify_threshold: int = 70

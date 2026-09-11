@@ -316,14 +316,19 @@ async def apply_scores(conn: AsyncConnection, user_id: int, rows: Sequence[dict]
 
 
 async def recommendations(
-    conn: AsyncConnection, user_id: int, threshold: int, limit: int = 100
+    conn: AsyncConnection, user_id: int, limit: int = 1000
 ) -> list[sa.Row]:
-    """The strict page: retrieved, passed the rules, scored, and above the user's threshold.
+    """Everything the reranker scored for this user, best first.
 
-    Deliberately narrow and often empty. It is not a filtered view of the corpus; it is the set of
-    postings the whole pipeline is prepared to defend. Search is where everything else stays
-    visible -- keep the two apart, and keep the distinction here in the query rather than in a
-    template, where the next page to be written will quietly get it wrong.
+    There is deliberately no score cut. A threshold hid good postings behind a number the user had
+    to guess, and guessing it low enough to see them made it meaningless; how much gets scored is
+    already decided by `rerank_limit`, which is the knob that costs money. So the page shows what
+    was paid for, ordered by the score, and the reader draws their own line.
+
+    Still not a filtered view of the corpus: this is the set that passed the rules and was scored.
+    Search is where everything else stays visible -- keep the two apart, and keep the distinction
+    here in the query rather than in a template, where the next page to be written will quietly
+    get it wrong.
     """
     return list(
         await conn.execute(
@@ -340,14 +345,13 @@ async def recommendations(
                 WHERE m.user_id = :user_id
                   AND m.rule_verdict = 'pass'
                   AND m.llm_score IS NOT NULL
-                  AND m.llm_score >= :threshold
                   AND m.state <> 'dismissed'
                   AND j.closed_at IS NULL
                 ORDER BY m.llm_score DESC, j.posted_at DESC NULLS LAST
                 LIMIT :limit
                 """
             ),
-            {"user_id": user_id, "threshold": threshold, "limit": limit},
+            {"user_id": user_id, "limit": limit},
         )
     )
 
@@ -441,8 +445,13 @@ async def set_state(conn: AsyncConnection, user_id: int, job_id: int, state: str
 
 
 async def pending_digest(
-    conn: AsyncConnection, user_id: int, threshold: int, limit: int = 25
+    conn: AsyncConnection, user_id: int, limit: int = 25
 ) -> list[sa.Row]:
+    """The best unsent postings for one user, capped by count rather than by score.
+
+    A digest has to be finite, but the bound is how many a person will read, not a quality line:
+    a threshold that is right in a busy week silently sends nothing in a quiet one.
+    """
     return list(
         await conn.execute(
             sa.text(
@@ -454,13 +463,13 @@ async def pending_digest(
                 JOIN job j ON j.id = m.job_id
                 JOIN job_facet f ON f.job_id = j.id
                 WHERE m.user_id = :user_id AND m.notified_at IS NULL
-                  AND m.llm_score >= :threshold AND m.state <> 'dismissed'
+                  AND m.llm_score IS NOT NULL AND m.state <> 'dismissed'
                   AND j.closed_at IS NULL
                 ORDER BY m.llm_score DESC
                 LIMIT :limit
                 """
             ),
-            {"user_id": user_id, "threshold": threshold, "limit": limit},
+            {"user_id": user_id, "limit": limit},
         )
     )
 

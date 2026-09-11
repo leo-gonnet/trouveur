@@ -393,12 +393,10 @@ def test_notify(user_id: int) -> None:
             user = await users_q.get_user(conn, user_id)
             if user is None or not user.email:
                 return "That user does not exist or has no email address."
-            profile = await users_q.get_profile(conn, user_id)
-            threshold = profile.notify_threshold if profile else 70
-            rows = await match_q.pending_digest(conn, user_id, threshold)
+            rows = await match_q.pending_digest(conn, user_id)
             if not rows:
-                return f"Nothing pending above {threshold}."
-            subject, text, body = mailer.render(rows, threshold)
+                return "Nothing pending to send."
+            subject, text, body = mailer.render(rows)
             mailer.send(settings, user.email, subject, text, body)
             await match_q.mark_notified(conn, user_id, [row.id for row in rows])
             return f"sent {len(rows)} posting(s) to {user.email}"

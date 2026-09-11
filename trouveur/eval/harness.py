@@ -245,9 +245,10 @@ async def _rerank_needles(
     measurable at retrieval. What this does answer is the question the tiers already set up, one
     stage later:
 
-      - a positive scored below the threshold is retrieved, rule-passed, and still never shown;
-      - a negative scored at or above it reaches the digest, which is what the rules cut exists
-        to prevent and evidently did not.
+      - a negative scored at or above a positive is a negative the user reads first, because the
+        page is ordered by this score and nothing is filtered out of it;
+      - the gap between the worst positive and the best negative is how much room a reader has
+        before the two kinds start interleaving.
 
     Reuses `rerank.score_batch`, so the prompt, the model and the provider pin are the ones
     production sends. A copy of the prompt here would grade something the user never runs.
@@ -268,7 +269,6 @@ async def _rerank_needles(
     if not rows:
         return {}
 
-    threshold = profile.notify_threshold
     scores: dict[str, int] = {}
     cost = Decimal(0)
     errors: list[str] = []
@@ -293,36 +293,50 @@ async def _rerank_needles(
 
     return {
         "model": model,
-        **grade_scores(list(graded.values()), scores, threshold),
+        **grade_scores(list(graded.values()), scores),
         "cost_usd": f"{cost:.6f}",
         "errors": errors,
     }
 
 
-def grade_scores(needles: list[dict], scores: dict[str, int], threshold: int) -> dict:
-    """Mark each scored needle against the threshold the digest actually gates on.
+def grade_scores(needles: list[dict], scores: dict[str, int]) -> dict:
+    """Grade the reranker by the order it puts the needles in, not against a cut-off.
+
+    There is no threshold to grade against any more: the page shows everything that was scored,
+    ordered by the score, so what matters is not whether a posting cleared a line but whether a
+    planted negative outranks a planted positive -- that is a bad posting the user reads first.
+
+    `margin` is the distance between the worst positive and the best negative. Positive means the
+    two groups are cleanly separated with that much room; negative means they interleave.
 
     Pure, and separate from the call that produced the scores, so the direction of the comparison
-    is testable without spending money. Getting it backwards would report a reranker that drops
-    every good job as flawless.
+    is testable without spending money.
     """
+    positive = {
+        n["id"]: scores[n["id"]]
+        for n in needles
+        if n["tier"] in POSITIVE_TIERS and n["id"] in scores
+    }
+    negative = {
+        n["id"]: scores[n["id"]] for n in needles if n["tier"] == "N" and n["id"] in scores
+    }
     return {
-        "threshold": threshold,
         "scored": len(scores),
         "unscored": sum(1 for n in needles if n["id"] not in scores),
         "scores": dict(sorted(scores.items())),
-        # A positive the paid stage drops below the threshold. Invisible to every recall number
-        # above it, because retrieval did its job and the loss happens afterwards.
-        "lost": sorted(
-            n["id"] for n in needles
-            if n["tier"] in POSITIVE_TIERS and n["id"] in scores
-            and scores[n["id"]] < threshold
+        # Pairs, not postings: one negative scoring above three positives is three things the
+        # reader has to step over, and a single count of "bad negatives" would hide that.
+        "inversions": sum(
+            1 for bad in negative.values() for good in positive.values() if bad >= good
         ),
-        # A negative the paid stage would forward to the digest.
-        "leaked": sorted(
-            n["id"] for n in needles
-            if n["tier"] == "N" and n["id"] in scores and scores[n["id"]] >= threshold
+        # The negatives a reader meets before the worst genuine match.
+        "outranking": sorted(
+            name
+            for name, bad in negative.items()
+            if positive and bad >= min(positive.values())
         ),
+        "margin": (min(positive.values()) - max(negative.values())) if positive and negative
+        else None,
     }
 
 
@@ -501,15 +515,17 @@ def render(card: Scorecard, baseline: dict | None) -> str:
             )
         if persona.rerank:
             r = persona.rerank
+            margin = "-" if r["margin"] is None else f"{r['margin']:+d}"
             lines.append(
-                f"{'':<24}rerank @{r['threshold']}: {r['scored']} scored"
+                f"{'':<24}rerank: {r['scored']} scored"
                 f"{'  ' + str(r['unscored']) + ' unscored' if r['unscored'] else ''}"
-                f"   lost {len(r['lost'])}   leaked {len(r['leaked'])}   ${r['cost_usd']}"
+                f"   {r['inversions']} inversions   margin {margin}   ${r['cost_usd']}"
             )
-            if r["lost"]:
-                lines.append(f"{'':<24}  below threshold: {', '.join(r['lost'])}")
-            if r["leaked"]:
-                lines.append(f"{'':<24}  negatives above threshold: {', '.join(r['leaked'])}")
+            if r["outranking"]:
+                lines.append(
+                    f"{'':<24}  negatives above the worst positive: "
+                    f"{', '.join(r['outranking'])}"
+                )
             for error in r["errors"]:
                 lines.append(f"{'':<24}  ! {error}")
         lines.append("")
@@ -544,13 +560,14 @@ def render(card: Scorecard, baseline: dict | None) -> str:
 
     scored = [p.rerank for p in card.personas if p.rerank]
     if scored:
-        lost = sum(len(r["lost"]) for r in scored)
-        leaked = sum(len(r["leaked"]) for r in scored)
         graded = sum(r["scored"] for r in scored)
+        inversions = sum(r["inversions"] for r in scored)
+        margins = [r["margin"] for r in scored if r["margin"] is not None]
         cost = sum(Decimal(r["cost_usd"]) for r in scored)
+        worst = f"{min(margins):+d}" if margins else "-"
         lines.append(
             f"rerank ({scored[0]['model']})   {graded} needles scored   "
-            f"{lost} positives lost below threshold   {leaked} negatives leaked   ${cost:.4f}"
+            f"{inversions} negative-over-positive pairs   worst margin {worst}   ${cost:.4f}"
         )
     return "\n".join(lines)
 

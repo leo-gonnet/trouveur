@@ -128,11 +128,11 @@ def _arguments(ctx: dict) -> dict[str, dict]:
         },
         "match.put_cached_scores": {"rows": [ctx["cache_row"]]},
         "match.apply_scores": {"user_id": user_id, "rows": [ctx["score_row"]]},
-        "match.recommendations": {"user_id": user_id, "threshold": 0},
+        "match.recommendations": {"user_id": user_id},
         "match.search_jobs": {"user_id": user_id, "query": "ingenieur", "country": "DE"},
         "match.get_job": {"user_id": user_id, "public_id": ctx["public_id"]},
         "match.set_state": {"user_id": user_id, "job_id": job_id, "state": "saved"},
-        "match.pending_digest": {"user_id": user_id, "threshold": 0},
+        "match.pending_digest": {"user_id": user_id},
         "match.mark_notified": {"user_id": user_id, "job_ids": [job_id]},
         "match.get_query_expansion": {
             "user_id": user_id, "profile_version": 1, "expansion_version": 1,

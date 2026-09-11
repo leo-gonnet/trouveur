@@ -418,7 +418,7 @@ so the deployment has no LLM spend of its own and one user's exhausted budget ca
   something to discover from the user. Spend is metered in **USD**, the currency OpenRouter bills
   in — an EUR column would put a stale exchange rate between the meter and the cap.
 - **Bump `profile.version` only for fields that change what a good match is** (`SCORING_FIELDS`). A
-  notification threshold must not invalidate a cache and bill a re-score.
+  volume setting such as `rerank_limit` must not invalidate a cache and bill a re-score.
 - **Query expansion costs one call per profile version, not per job**, and is cached. The
   deterministic expansion is the floor, not a degraded fallback: retrieval must work fully with no
   key at all.
@@ -434,11 +434,20 @@ so the deployment has no LLM spend of its own and one user's exhausted budget ca
 ## Web UI
 
 - **Recommendations and Search have deliberately different scope; do not blur them.**
-  `/recommendations` is the strict page: retrieved AND `rule_verdict='pass'` AND
-  `llm_score >= threshold`. It is meant to be short, often empty. `/search` shows **every** scraped
-  posting regardless of filter outcome, including rejected, unscored and closed ones — that is the
-  only view of what was actually collected. Adding a verdict or score filter to `search_jobs`
-  defeats its purpose; keep the distinction in the query layer, not just the UI.
+  `/recommendations` is retrieved AND `rule_verdict='pass'` AND scored, ordered by `llm_score`
+  descending. `/search` shows **every** scraped posting regardless of filter outcome, including
+  rejected, unscored and closed ones — that is the only view of what was actually collected.
+  Adding a verdict or score filter to `search_jobs` defeats its purpose; keep the distinction in
+  the query layer, not just the UI.
+- **There is no score threshold, and re-adding one is a regression.** It hid postings the user had
+  already paid to have scored, behind a number they had to guess — and guessing it low enough to
+  see them made it meaningless. Volume is bounded once, by `rerank_limit`, which is also the only
+  setting that costs money. The page shows what was paid for and the reader draws their own line,
+  so **the ordering is the product**: `ORDER BY m.llm_score DESC` is load-bearing, not cosmetic.
+  The digest is bounded the same way, by count rather than by score.
+- **The score is the first thing on a row and it is coloured** (`score_pill`, `.score.high/.mid/
+  .low`). The band names in the macro and in `app.css` must match: they did not, and every score
+  of 65 and over rendered with no colour at all for as long as that went unnoticed.
 - **Templates never re-derive.** Read stored facets. A template that parses a location or infers a
   work mode is a second implementation of a question `derive.py` already answered.
 - **The dashboard must surface what fails silently**: partition overflow, sweep completeness, the
@@ -651,10 +660,10 @@ items in the corpus, so they -- and **only** they -- are sent to the real rerank
 whole retrieved shortlist would spend real money to produce numbers nobody can mark, for the same
 reason precision is not measurable at retrieval.
 
-- **A positive scored below the threshold is a recall loss no other number can see.** Retrieval
-  found it and the rules cut passed it; the paid stage is where it disappears, and every recall
-  figure above still counts it as found. `lost` reports those.
-- **A negative scored at or above the threshold would reach the digest.** `leaked` reports those.
+- **Grade the order, not a cut-off.** There is no threshold to clear: the page shows everything
+  scored, sorted by score, so the question is whether a planted negative outranks a planted
+  positive — a bad posting the reader meets first. `inversions` counts those pairs and `margin`
+  is the distance between the worst positive and the best negative.
 - **The key comes from `TROUVEUR_EVAL_LLM_KEY`, and is never stored.** Users' keys live in the
   database and are entered through the web UI; this harness must not become a second way in.
 - It reuses `rerank.score_batch`, so the prompt, model and provider pin are the ones production

@@ -66,20 +66,39 @@ def test_search_left_joins_match_state_so_unmatched_jobs_still_appear():
     assert re.search(r"LEFT JOIN job_facet", _SEARCH_SQL)
 
 
-def test_recommendations_is_the_strict_page():
-    source = recommendations.__doc__ or ""
-    assert "strict" in source.lower()
+def test_recommendations_shows_everything_that_was_scored():
+    """Still narrower than Search -- rule-passed and scored -- but with no cut-off inside that.
 
-
-def test_recommendations_requires_a_score_above_the_threshold():
+    A threshold hid postings the user had already paid to have scored, behind a number they had
+    to guess. Re-adding one would do it again, silently.
+    """
     import inspect
 
     body = inspect.getsource(recommendations)
     assert "m.rule_verdict = 'pass'" in body
     assert "m.llm_score IS NOT NULL" in body
-    assert "m.llm_score >= :threshold" in body
     # Closed postings must never be recommended, whatever they once scored.
     assert "j.closed_at IS NULL" in body
+    assert ":threshold" not in body
+    assert "llm_score >=" not in body
+
+
+def test_recommendations_are_ordered_by_score_descending():
+    """The page is a ranking now, not a filtered set, so the order is the whole product."""
+    import inspect
+
+    assert re.search(r"ORDER BY\s+m\.llm_score DESC", inspect.getsource(recommendations))
+
+
+def test_the_digest_is_bounded_by_count_and_not_by_score():
+    """A quality line that is right in a busy week silently sends nothing in a quiet one."""
+    import inspect
+
+    from trouveur.db.queries.match import pending_digest
+
+    body = inspect.getsource(pending_digest)
+    assert ":limit" in body and ":threshold" not in body
+    assert "llm_score >=" not in body
 
 
 def test_retrieval_filters_exclude_closed_postings():

@@ -13,11 +13,14 @@
   {%- else -%}salary not stated{%- endif -%}
 {% endmacro %}
 
+{# Band names must match app.css. They did not: this emitted `good`/`ok` against a stylesheet
+   that styles `high`/`mid`/`low`, so every score of 65 and over rendered uncoloured. #}
 {% macro score_pill(score) %}
   {%- if score is none -%}
-    <span class="pill">unscored</span>
+    <span class="score none" title="not scored yet">&ndash;</span>
   {%- else -%}
-    <span class="score {% if score >= 85 %}good{% elif score >= 65 %}ok{% else %}low{% endif %}">{{ score }}</span>
+    <span class="score {% if score >= 85 %}high{% elif score >= 65 %}mid{% else %}low{% endif %}"
+          title="fit score {{ score }}/100">{{ score }}</span>
   {%- endif -%}
 {% endmacro %}
 
