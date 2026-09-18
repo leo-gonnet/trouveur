@@ -478,8 +478,9 @@ so the deployment has no LLM spend of its own and one user's exhausted budget ca
   drifted apart twice: KPI tiles emitted classes the stylesheet did not style, and a second
   "v2" block at the end of the file redefined `.score.low` and `.pill.bad` with other colours.
 - **The page is full width and is the only thing that scrolls.** A results list or a description
-  never caps its own height; a nested scrollbar was tried and rejected. Sections are a heading
-  over a hairline (`.section`); only a job result is a box.
+  never caps its own height; a nested scrollbar was tried and rejected. Dashboard-style pages
+  are boxed sections (`.section`); recommendations and search are a mail-style list of rows
+  (`.results` / `.job`), not cards.
 - No build step, no Node, on purpose — plain CSS and HTMX only.
 
 ## Database rules

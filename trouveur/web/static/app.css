@@ -7,11 +7,11 @@
    logo's red-orange appears in the logo and nowhere else. Status (good/warn/bad, score bands)
    uses muted tints so a dashboard scans without looking colourful. One system sans-serif.
 
-   Layout: the page is full width and is the only thing that scrolls. Sections are a heading
-   over a hairline, not boxes; only a job result is boxed.
+   Layout: the page is full width and is the only thing that scrolls. Dashboard-style pages are
+   boxed sections; recommendations and search are a mail-style list of rows.
 
    Components: .topbar .nav .page-head .section .section-head .grid .kpis .kpi table .pill
-   .score button/.btn(.primary .danger .ghost) label/input .notice .empty .bar .results .job
+   .score button/.btn(.primary .danger .ghost) label/input .notice .empty .bar .results .job .job-main
    .states .pager .searchbar .login */
 
 :root {
@@ -74,18 +74,20 @@ main { padding: var(--space-5) var(--space-6) var(--space-7); }
 .page-head .hint { max-width: 70ch; }
 
 /* ---------- Sections ---------- */
-.section + .section, .grid + .section, .section + .grid { margin-top: var(--space-6); }
+.section { border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-5); }
+.section + .section, .grid + .section, .section + .grid { margin-top: var(--space-5); }
 .section-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3);
-                padding-bottom: var(--space-2); margin-bottom: var(--space-3);
-                border-bottom: 1px solid var(--border); }
+                margin-bottom: var(--space-4); }
 .section > .hint { margin-bottom: var(--space-3); max-width: 80ch; }
 .section > table + .hint, .section > .bar + .hint { margin: var(--space-3) 0 0; }
-.grid { display: grid; gap: var(--space-6); grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+.grid { display: grid; gap: var(--space-5); align-items: start; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
 .grid > * { min-width: 0; }
 .grid .section { margin: 0; }
 
 /* ---------- KPIs ---------- */
-.kpis { display: flex; flex-wrap: wrap; gap: var(--space-4) var(--space-7); margin-bottom: var(--space-5); }
+.kpis { display: grid; gap: var(--space-4); margin-bottom: var(--space-5);
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+.kpi { border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-3) var(--space-4); }
 .kpi .value { display: block; font-size: 1.6rem; font-weight: 600; line-height: 1.2;
               font-variant-numeric: tabular-nums; }
 .kpi .label { font-size: .82rem; color: var(--fg-muted); }
@@ -180,22 +182,21 @@ form.inline { display: inline; }
 .queues { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: var(--space-4) 0 var(--space-2); }
 
 /* ---------- Job results ---------- */
-/* A grid of boxed cards so a wide screen shows more results rather than wider ones. The page
-   is the only scroll container: nothing here caps its own height. */
-.results { display: grid; gap: var(--space-4); align-items: start;
-           grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); }
-.results > .pager, .results > .empty { grid-column: 1 / -1; }
-.job { padding: var(--space-4); border: 1px solid var(--border); border-radius: var(--radius); }
-.job-head { display: flex; gap: var(--space-3); align-items: flex-start; }
-.job-head > div { min-width: 0; flex: 1; }
-.job-title { color: var(--fg); font-weight: 600; text-decoration: none; }
+/* A mail-style list: one row per posting, score on the left, actions on the right, hairlines
+   between. The page is the only scroll container: the list never caps its own height. */
+.results { border-top: 1px solid var(--border); }
+.job { display: flex; align-items: center; gap: var(--space-4); padding: var(--space-4) var(--space-2);
+       border-bottom: 1px solid var(--border); }
+.job:hover { background: var(--surface-2); }
+.job-main { flex: 1; min-width: 0; }
+.job-title { color: var(--fg); font-weight: 600; font-size: 1.05rem; text-decoration: none; }
 .job-title:hover { text-decoration: underline; }
-.meta { color: var(--fg-muted); font-size: .85rem; margin-top: 2px; }
-.reason { font-size: .88rem; margin-top: var(--space-2); padding: var(--space-2) var(--space-3);
-          background: var(--surface-2); border-radius: var(--radius); }
+.meta { color: var(--fg-muted); font-size: .88rem; margin-top: 2px; }
+.reason { font-size: .9rem; margin-top: var(--space-1); }
 .flags { display: flex; flex-wrap: wrap; gap: var(--space-1); margin-top: var(--space-2); }
 .actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-top: var(--space-3); }
 .actions .spacer { flex: 1; }
+.job .actions { margin: 0; flex: none; justify-content: flex-end; }
 
 /* Saved / applied / dismissed as one segmented control, so the current state is visible and
    any of the three can be chosen again. */
@@ -226,7 +227,8 @@ form.inline { display: inline; }
   .brand { padding: var(--space-2) 0; }
   .nav { order: 1; flex-basis: 100%; overflow-x: auto; padding-bottom: var(--space-2); }
   main { padding: var(--space-4) var(--space-4) var(--space-6); }
-  .results { grid-template-columns: 1fr; }
+  .job { flex-wrap: wrap; }
+  .job .actions { flex-basis: 100%; justify-content: flex-start; }
   /* A wide table scrolls inside its section here; anywhere wider the page has room for it. */
   .section { overflow-x: auto; }
 }
