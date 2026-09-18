@@ -212,7 +212,9 @@ async def set_state(request: Request, job_id: int, state: str = Form(...)):
         return HTMLResponse("Unknown state", status_code=400)
     async with connect() as conn:
         await match_q.set_state(conn, session["uid"], job_id, parsed.value)
-    return HTMLResponse(f'<span class="state state-{parsed.value}">{parsed.value}</span>')
+    return templates.TemplateResponse(
+        request, "_state.html", {"job_id": job_id, "current": parsed.value}
+    )
 
 
 @app.get("/profile", response_class=HTMLResponse)

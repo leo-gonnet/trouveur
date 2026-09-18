@@ -1,47 +1,48 @@
-{% extends "base.html" %}{% block title %}Dashboard · Trouveur{% endblock %}
+{% extends "base.html" %}{% import "_macros.html" as m %}{% block title %}Dashboard · Trouveur{% endblock %}
 {% block content %}
 <div class="page-head"><h1>Dashboard</h1></div>
 
 <div class="kpis">
-  <div class="kpi"><span class="num">{{ '{:,}'.format(overview.open) }}</span><span>open postings</span></div>
-  <div class="kpi"><span class="num">{{ '{:,}'.format(overview.total) }}</span><span>ever collected</span></div>
-  <div class="kpi"><span class="num">{{ '{:,}'.format(overview.new_today) }}</span><span>new today</span></div>
-  <div class="kpi"><span class="num">{{ '{:,}'.format(overview.companies) }}</span><span>companies</span></div>
-  <div class="kpi"><span class="num">${{ '%.2f' % (spend.cost_usd if spend else 0) }}</span><span>your spend, this month</span></div>
+  {{ m.kpi('{:,}'.format(overview.open), 'open postings') }}
+  {{ m.kpi('{:,}'.format(overview.total), 'ever collected') }}
+  {{ m.kpi('{:,}'.format(overview.new_today), 'new today') }}
+  {{ m.kpi('{:,}'.format(overview.companies), 'companies') }}
+  {{ m.kpi('${:.2f}'.format(spend.cost_usd if spend else 0), 'your spend, this month') }}
 </div>
 
-<div class="grid">
-  <section class="card">
-    <div class="card-head"><h2>Source health</h2></div>
-    <p class="hint">
-      A sweep can succeed and still not have seen everything. <em>Complete</em> means it observed a
-      source's whole live set, which is the only basis on which a posting may be retired.
-      <em>Overflowed</em> counts partitions holding more results than the API will page through —
-      those postings were never fetched, and the count is the only place that shows it.
-    </p>
-    {% if health %}
-    <table>
-      <tr><th>Source</th><th>Last run</th><th>Documents</th><th>Partitions</th><th>Overflowed</th><th>Complete</th><th>Status</th></tr>
-      {% for row in health %}
-      <tr>
-        <td>{{ row.source }}</td>
-        <td>{{ row.started_at.strftime('%Y-%m-%d %H:%M') }}</td>
-        <td class="num">{{ '{:,}'.format(row.documents_seen) }}</td>
-        <td class="num">{{ row.partitions_done }}/{{ row.partitions_total }}</td>
-        <td class="num">{% if row.partitions_overflowed %}<span class="pill bad">{{ row.partitions_overflowed }}</span>{% else %}0{% endif %}</td>
-        <td>{% if row.complete %}<span class="pill good">yes</span>{% else %}<span class="pill">delta</span>{% endif %}</td>
-        <td>{% if row.ok %}<span class="pill good">ok</span>{% else %}<span class="pill bad">failed</span>{% endif %}</td>
-      </tr>
-      {% if row.error %}<tr><td colspan="7" class="hint">{{ row.error }}</td></tr>{% endif %}
-      {% endfor %}
-    </table>
-    {% else %}<p class="empty">No sweep has run yet.</p>{% endif %}
-    {% set seen = health | map(attribute='source') | list %}
-    {% for name in sources if name not in seen %}
-      <p class="notice warn">Source <code>{{ name }}</code> is configured but has never run.</p>
+<section class="card">
+<div class="card-head"><h2>Source health</h2></div>
+  <p class="hint">
+    A sweep can succeed and still not have seen everything. <em>Complete</em> means it observed a
+    source's whole live set, which is the only basis on which a posting may be retired.
+    <em>Overflowed</em> counts partitions holding more results than the API will page through —
+    those postings were never fetched, and the count is the only place that shows it.
+  </p>
+  {% if health %}
+  <table>
+    <tr><th>Source</th><th>Last run</th><th>Documents</th><th>Partitions</th><th>Overflowed</th><th>Complete</th><th>Status</th></tr>
+    {% for row in health %}
+    <tr>
+      <td>{{ row.source }}</td>
+      <td>{{ row.started_at.strftime('%Y-%m-%d %H:%M') }}</td>
+      <td class="num">{{ '{:,}'.format(row.documents_seen) }}</td>
+      <td class="num">{{ row.partitions_done }}/{{ row.partitions_total }}</td>
+      <td class="num">{% if row.partitions_overflowed %}<span class="pill bad">{{ row.partitions_overflowed }}</span>{% else %}0{% endif %}</td>
+      <td>{% if row.complete %}<span class="pill good">yes</span>{% else %}<span class="pill">delta</span>{% endif %}</td>
+      <td>{% if row.ok %}<span class="pill good">ok</span>{% else %}<span class="pill bad">failed</span>{% endif %}</td>
+    </tr>
+    {% if row.error %}<tr><td colspan="7" class="hint">{{ row.error }}</td></tr>{% endif %}
     {% endfor %}
-  </section>
+  </table>
+  {% else %}<p class="empty">No sweep has run yet.</p>{% endif %}
+  {% set seen = health | map(attribute='source') | list %}
+  {% set never = sources | reject('in', seen) | list %}
+  {% if never %}
+    <p class="notice warn">Configured but never run: {{ never | join(', ') }}.</p>
+  {% endif %}
+</section>
 
+<div class="grid">
   <section class="card">
     <div class="card-head"><h2>Derived coverage</h2></div>
     <p class="hint">A posting can be stored and searchable but still invisible to recommendations
@@ -60,7 +61,7 @@
       </tr>
     </table>
     {% if coverage.vector_spaces > 1 %}
-      <p class="notice danger">More than one embedding version is present. Similarity across
+      <p class="notice bad">More than one embedding version is present. Similarity across
         different vector spaces returns confident nonsense — refill the embed queue to converge.</p>
     {% endif %}
   </section>
@@ -76,39 +77,6 @@
       {% endfor %}
     </table>
     {% else %}<p class="empty">All queues drained.</p>{% endif %}
-  </section>
-
-  <section class="card">
-    <div class="card-head"><h2>Tenant health</h2></div>
-    <p class="hint">
-      Read-only. The crawl set is shared by every user, so changing it is an operator action on the
-      server — <code>trouveur tenants add|enable|disable|remove</code>. A tenant failing for several
-      days is one to remove; a disabled one marked <em>discovered</em> is a candidate awaiting review.
-    </p>
-    {% if scopes %}
-    <table>
-      <tr><th>Source</th><th>Tenant</th><th>State</th><th class="num">Postings</th>
-          <th>Last success</th><th class="num">Failures</th></tr>
-      {% for row in scopes %}
-      <tr>
-        <td>{{ row.source }}</td>
-        <td><code>{{ row.scope }}</code></td>
-        <td>
-          {% if row.enabled %}<span class="pill good">sweeping</span>
-          {% else %}<span class="pill">{{ 'candidate' if row.origin == 'discovered' else 'disabled' }}</span>{% endif %}
-        </td>
-        <td class="num">{{ '{:,}'.format(row.last_documents or 0) }}</td>
-        <td>{{ row.last_ok_at.strftime('%Y-%m-%d %H:%M') if row.last_ok_at else 'never' }}</td>
-        <td class="num">
-          {% if row.consecutive_failures %}
-            <span class="pill bad">{{ row.consecutive_failures }}</span>
-          {% else %}0{% endif %}
-        </td>
-      </tr>
-      {% if row.last_error %}<tr><td colspan="6" class="hint">{{ row.last_error }}</td></tr>{% endif %}
-      {% endfor %}
-    </table>
-    {% else %}<p class="empty">No tenants registered. Add one with <code>trouveur tenants add</code>.</p>{% endif %}
   </section>
 
   <section class="card">
@@ -133,4 +101,37 @@
     </table>
   </section>
 </div>
+
+<section class="card">
+  <div class="card-head"><h2>Tenant health</h2></div>
+  <p class="hint">
+    Read-only. The crawl set is shared by every user, so changing it is an operator action on the
+    server — <code>trouveur tenants add|enable|disable|remove</code>. A tenant failing for several
+    days is one to remove; a disabled one marked <em>discovered</em> is a candidate awaiting review.
+  </p>
+  {% if scopes %}
+  <table>
+    <tr><th>Source</th><th>Tenant</th><th>State</th><th class="num">Postings</th>
+        <th>Last success</th><th class="num">Failures</th></tr>
+    {% for row in scopes %}
+    <tr>
+      <td>{{ row.source }}</td>
+      <td><code>{{ row.scope }}</code></td>
+      <td>
+        {% if row.enabled %}<span class="pill good">sweeping</span>
+        {% else %}<span class="pill">{{ 'candidate' if row.origin == 'discovered' else 'disabled' }}</span>{% endif %}
+      </td>
+      <td class="num">{{ '{:,}'.format(row.last_documents or 0) }}</td>
+      <td>{{ row.last_ok_at.strftime('%Y-%m-%d %H:%M') if row.last_ok_at else 'never' }}</td>
+      <td class="num">
+        {% if row.consecutive_failures %}
+          <span class="pill bad">{{ row.consecutive_failures }}</span>
+        {% else %}0{% endif %}
+      </td>
+    </tr>
+    {% if row.last_error %}<tr><td colspan="6" class="hint">{{ row.last_error }}</td></tr>{% endif %}
+    {% endfor %}
+  </table>
+  {% else %}<p class="empty">No tenants registered. Add one with <code>trouveur tenants add</code>.</p>{% endif %}
+</section>
 {% endblock %}

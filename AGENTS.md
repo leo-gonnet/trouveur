@@ -467,6 +467,14 @@ so the deployment has no LLM spend of its own and one user's exhausted budget ca
   cancelled run also stops before matching, so it never spends a user's LLM credit.
 - **Styling lives in one file:** `web/static/app.css`, using CSS custom properties for theming (incl.
   `prefers-color-scheme: dark`). No inline `<style>` blocks beyond one-off layout tweaks.
+- **The design system is the token block and the component list at the top of `app.css`.** A
+  template uses those classes and nothing else: no colour, radius or spacing is written in a
+  template, and a new look is a new component in `app.css`, not a one-off. The vocabulary is
+  deliberately small and the same word means the same thing everywhere — `good`/`warn`/`bad`
+  on a `pill` or a `notice`, `high`/`mid`/`low` on a `score`. Repeated markup goes through a
+  macro in `_macros.html` (`kpi`, `score_pill`, `states`, `job_card`), because markup and CSS
+  drifted apart twice: KPI tiles emitted classes the stylesheet did not style, and a second
+  "v2" block at the end of the file redefined `.score.low` and `.pill.bad` with other colours.
 - No build step, no Node, on purpose — plain CSS and HTMX only.
 
 ## Database rules

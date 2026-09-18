@@ -1,15 +1,15 @@
 {% import "_macros.html" as m %}
 {% if jobs %}
   {% for job in jobs %}{{ m.job_card(job) }}{% endfor %}
+  {% set query = "q=" ~ (q | urlencode) ~ "&country=" ~ country ~ "&work_mode=" ~ work_mode
+                 ~ "&include_closed=" ~ ('true' if include_closed else '') %}
   <div class="pager">
     {% if page > 1 %}
-      <a class="pill" hx-get="/search?q={{ q|urlencode }}&country={{ country }}&work_mode={{ work_mode }}&include_closed={{ 'true' if include_closed else '' }}&page={{ page-1 }}"
-         hx-target="#results" href="#">← previous</a>
+      <a class="pill" hx-get="/search?{{ query }}&page={{ page - 1 }}" hx-target="#results" href="#">← previous</a>
     {% endif %}
     <span class="hint">page {{ page }}</span>
     {% if has_more %}
-      <a class="pill" hx-get="/search?q={{ q|urlencode }}&country={{ country }}&work_mode={{ work_mode }}&include_closed={{ 'true' if include_closed else '' }}&page={{ page+1 }}"
-         hx-target="#results" href="#">next →</a>
+      <a class="pill" hx-get="/search?{{ query }}&page={{ page + 1 }}" hx-target="#results" href="#">next →</a>
     {% endif %}
   </div>
 {% else %}

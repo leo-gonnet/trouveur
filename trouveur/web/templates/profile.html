@@ -20,7 +20,7 @@
   Everything else on this page is free to change.
 </p>
 
-<form method="post" action="/profile" class="grid form">
+<form method="post" action="/profile" class="grid">
   <section class="card">
     <div class="card-head"><h2>Who you are</h2></div>
     <label>Current title<input name="title" value="{{ profile.title }}"></label>
@@ -62,7 +62,7 @@
       <input name="retrieval_limit" type="number" min="25" max="2000" value="{{ profile.retrieval_limit }}"></label>
     <label>Rerank per run <span class="hint">this is what costs money, and it is how many land on <a href="/recommendations">Recommendations</a></span>
       <input name="rerank_limit" type="number" min="0" max="1000" value="{{ profile.rerank_limit }}"></label>
-    <button class="primary" type="submit">Save profile</button>
+    <p class="actions"><button class="primary" type="submit">Save profile</button></p>
   </section>
 </form>
 {% endblock %}
