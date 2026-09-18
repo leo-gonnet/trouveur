@@ -14,7 +14,7 @@
 {% endmacro %}
 
 {% macro kpi(value, label) %}
-<div class="kpi"><strong class="value">{{ value }}</strong><span class="label">{{ label }}</span></div>
+<div class="kpi"><span class="label">{{ label }}</span><strong class="value">{{ value }}</strong></div>
 {% endmacro %}
 
 {# Band names must match app.css. They did not: this emitted `good`/`ok` against a stylesheet
@@ -41,7 +41,8 @@
       {{ job.company or 'company not stated' }} ·
       {{ places(job) }} ·
       {% if job.work_mode and job.work_mode != 'unknown' %}{{ job.work_mode }} · {% endif %}
-      {{ salary(job) }}
+      {{ salary(job) }} ·
+      {{ job.source }}
       {% if job.closed_at %} · <span class="pill bad">closed</span>{% endif %}
     </p>
     {% if job.llm_reason %}<p class="reason">{{ job.llm_reason }}</p>{% endif %}
@@ -50,8 +51,7 @@
     {% endif %}
   </div>
   <div class="actions">
-    <a class="pill" href="{{ job.url }}" target="_blank" rel="noopener noreferrer">Open advert ↗</a>
-    <span class="pill">{{ job.source }}</span>
+    <a href="{{ job.url }}" target="_blank" rel="noopener noreferrer">Open advert ↗</a>
     {{ states(job) }}
   </div>
 </article>

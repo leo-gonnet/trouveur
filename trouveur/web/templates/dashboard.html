@@ -7,7 +7,7 @@
   {{ m.kpi('{:,}'.format(overview.total), 'ever collected') }}
   {{ m.kpi('{:,}'.format(overview.new_today), 'new today') }}
   {{ m.kpi('{:,}'.format(overview.companies), 'companies') }}
-  {{ m.kpi('${:.2f}'.format(spend.cost_usd if spend else 0), 'your spend, this month') }}
+  {{ m.kpi('${:.2f}'.format(spend.cost_usd if spend else 0), 'spend this month (USD)') }}
 </div>
 
 <section class="section">

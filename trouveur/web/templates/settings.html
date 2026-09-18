@@ -38,7 +38,7 @@
     <div class="section-head"><h2>Spend</h2></div>
     {% if spend %}
       <div class="kpis">
-        {{ m.kpi('${:.4f}'.format(spend.cost_usd), 'this month') }}
+        {{ m.kpi('${:.4f}'.format(spend.cost_usd), 'spend this month (USD)') }}
         {{ m.kpi(spend.calls, 'calls') }}
         {{ m.kpi('{:,}'.format(spend.tokens_in), 'tokens in') }}
       </div>

@@ -6,21 +6,24 @@
    Palette: the logo's navy on a cool off-white canvas with white surfaces; the top bar is solid
    navy and carries the light logo variant. Navy is text, links, buttons and the active item; the
    logo's red-orange appears in the logo and nowhere else. Status (good/warn/bad, score bands)
-   uses muted tints so a dashboard scans without looking colourful. One system sans-serif.
+   uses muted tints so a dashboard scans without looking colourful. One system sans-serif and
+   one type scale: 13px for labels and pills, 14px for secondary text and controls, 15px body,
+   24px page title. Every control is the same height.
 
    Layout: the page is full width and is the only thing that scrolls. Dashboard-style pages are
    boxed sections; recommendations and search are a mail-style list of rows.
 
    Components: .topbar .nav .page-head .section .section-head .grid .kpis .kpi table .pill
    .score button/.btn(.primary .danger .ghost) label/input .notice .empty .bar .results .job .job-main
-   .states .pager .searchbar .login */
+   .states .pager .searchbar .login .foot */
 
 :root {
   color-scheme: light;
 
   --space-1: .25rem; --space-2: .5rem; --space-3: .75rem; --space-4: 1rem;
   --space-5: 1.5rem; --space-6: 2rem; --space-7: 3rem;
-  --radius: 4px;
+  --radius: 4px; --control: 38px;
+  --fs-sm: 13px; --fs-md: 14px;
   --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
@@ -40,16 +43,18 @@
 *, *::before, *::after { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }
 body {
-  margin: 0; background: var(--bg); color: var(--fg);
+  margin: 0; min-height: 100vh; display: flex; flex-direction: column;
+  background: var(--bg); color: var(--fg);
   font: 400 15px/1.55 var(--font); -webkit-font-smoothing: antialiased;
 }
 a { color: var(--primary); text-decoration: underline; text-underline-offset: 2px; }
 a:hover { color: var(--fg-muted); }
 h1, h2, h3, p { margin: 0; }
-h1 { font-size: 1.5rem; font-weight: 600; line-height: 1.25; }
-h2 { font-size: 1rem; font-weight: 600; line-height: 1.3; }
+h1 { font-size: 24px; font-weight: 600; line-height: 1.25; }
+h2 { font-size: 15px; font-weight: 600; line-height: 1.3; }
 code, kbd { font: .86em var(--mono); background: var(--surface-2); padding: 1px 5px; border-radius: var(--radius); }
-.hint { font-size: .86rem; color: var(--fg-muted); }
+.hint { font-size: var(--fs-md); color: var(--fg-muted); }
+.label { font-size: var(--fs-sm); font-weight: 600; color: var(--fg-muted); text-transform: uppercase; letter-spacing: .04em; }
 .num { font-variant-numeric: tabular-nums; }
 :focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 
@@ -72,7 +77,10 @@ code, kbd { font: .86em var(--mono); background: var(--surface-2); padding: 1px 
 .spacer { flex: 1; }
 .user { display: flex; align-items: center; gap: var(--space-3); }
 
-main { padding: var(--space-5) var(--space-6) var(--space-7); }
+main { flex: 1; width: 100%; max-width: 1440px; margin: 0 auto; padding: var(--space-5) var(--space-6) var(--space-7); }
+.foot { padding: var(--space-4) var(--space-6); border-top: 1px solid var(--border);
+        font-size: var(--fs-sm); color: var(--fg-muted); display: flex; gap: var(--space-4); }
+.foot a { color: inherit; }
 .page-head { display: grid; gap: var(--space-2); justify-items: start; margin-bottom: var(--space-5);
              padding-bottom: var(--space-4); border-bottom: 1px solid var(--border); }
 .page-head .hint { max-width: 70ch; }
@@ -92,23 +100,22 @@ main { padding: var(--space-5) var(--space-6) var(--space-7); }
 .kpis { display: grid; gap: var(--space-4); margin-bottom: var(--space-5);
         grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
 .kpi { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-3) var(--space-4); }
-.kpi .value { display: block; font-size: 1.6rem; font-weight: 600; line-height: 1.2;
+.kpi .value { display: block; font-size: 28px; font-weight: 600; line-height: 1.2; margin-top: var(--space-1);
               font-variant-numeric: tabular-nums; }
-.kpi .label { font-size: .82rem; color: var(--fg-muted); }
 
 /* ---------- Tables ---------- */
-table { width: 100%; border-collapse: collapse; font-size: .9rem; }
-th { text-align: left; font-weight: 600; color: var(--fg-muted); font-size: .82rem;
-     padding: 0 var(--space-3) var(--space-2); }
+table { width: 100%; border-collapse: collapse; font-size: var(--fs-md); }
+th { text-align: left; font-weight: 600; color: var(--fg-muted); font-size: var(--fs-sm);
+     text-transform: uppercase; letter-spacing: .04em; padding: 0 var(--space-3) var(--space-2); }
 td { padding: var(--space-2) var(--space-3); border-top: 1px solid var(--border);
      font-variant-numeric: tabular-nums; vertical-align: top; }
 tr:first-child > td { border-top: 0; }
 td.num, th.num { text-align: right; }
 td[colspan].hint { padding-top: 0; border-top: 0; }
-table.compact td, table.compact th { padding: var(--space-1) var(--space-2); font-size: .85rem; }
+table.compact td, table.compact th { padding: var(--space-1) var(--space-2); }
 
 /* ---------- Pills & scores ---------- */
-.pill { display: inline-flex; align-items: center; gap: 5px; font-size: .78rem; font-weight: 500;
+.pill { display: inline-flex; align-items: center; gap: 5px; font-size: var(--fs-sm); font-weight: 500;
         line-height: 1.4; padding: 2px 8px; border-radius: var(--radius); text-decoration: none;
         background: var(--surface-2); color: var(--fg-muted); border: 1px solid transparent; }
 .pill.good { background: var(--good-soft); color: var(--good); }
@@ -124,7 +131,7 @@ a.pill:hover { color: var(--fg); border-color: var(--border); }
 
 /* The first thing read on a row and what the list is sorted by, so it is sized to be glanced
    at rather than to fit in a line of text. Band names must match score_pill in _macros.html. */
-.score { flex: none; min-width: 2.75rem; text-align: center; font-weight: 700; font-size: 1rem;
+.score { flex: none; min-width: 2.75rem; text-align: center; font-weight: 700; font-size: 15px;
          line-height: 1.1; padding: var(--space-2); border-radius: var(--radius);
          font-variant-numeric: tabular-nums; }
 .score.high { background: var(--good-soft); color: var(--good); }
@@ -134,9 +141,9 @@ a.pill:hover { color: var(--fg); border-color: var(--border); }
 
 /* ---------- Buttons ---------- */
 button, .btn {
-  display: inline-flex; align-items: center; gap: var(--space-2);
-  font: inherit; font-size: .88rem; font-weight: 500; line-height: 1.3; text-decoration: none;
-  padding: var(--space-2) var(--space-4); border-radius: var(--radius);
+  display: inline-flex; align-items: center; gap: var(--space-2); height: var(--control);
+  font: inherit; font-size: var(--fs-md); font-weight: 500; line-height: 1; text-decoration: none;
+  padding: 0 var(--space-4); border-radius: var(--radius);
   border: 1px solid var(--border); background: var(--surface); color: var(--fg); cursor: pointer;
 }
 button:hover, .btn:hover { background: var(--surface-2); border-color: var(--fg-muted); color: var(--fg); }
@@ -148,16 +155,18 @@ button:disabled { opacity: .55; cursor: default; }
 .ghost { background: transparent; border-color: transparent; color: var(--fg-muted); }
 
 /* ---------- Forms ---------- */
-label { display: grid; gap: var(--space-1); margin: var(--space-4) 0 0; font-size: .88rem; font-weight: 500; }
+label { display: grid; gap: var(--space-1); margin: var(--space-4) 0 0; font-size: var(--fs-md); font-weight: 500; }
 label .hint { font-weight: 400; }
 .section-head + label, form > label:first-child { margin-top: 0; }
 label.check { display: flex; align-items: center; gap: var(--space-2); }
 input, textarea, select {
-  font: inherit; font-size: .92rem; width: 100%; padding: var(--space-2) var(--space-3);
+  font: inherit; font-size: var(--fs-md); width: 100%; height: var(--control); padding: 0 var(--space-3);
   border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--fg);
 }
-input[type=checkbox] { width: auto; margin: 0; }
-textarea { min-height: 76px; resize: vertical; }
+input:focus, textarea:focus, select:focus { outline: none; border-color: var(--primary);
+                                            box-shadow: 0 0 0 3px var(--primary-soft); }
+input[type=checkbox] { width: auto; height: auto; margin: 0; }
+textarea { height: auto; min-height: 76px; padding: var(--space-2) var(--space-3); resize: vertical; }
 form .actions { margin-top: var(--space-5); }
 form.inline { display: inline; }
 
@@ -168,14 +177,14 @@ form.inline { display: inline; }
 .searchbar label { margin: 0; }
 
 /* ---------- Notices & empty states ---------- */
-.notice { padding: var(--space-3) var(--space-4); border-radius: var(--radius); font-size: .9rem;
-          margin-bottom: var(--space-4); background: var(--surface); border: 1px solid var(--border); max-width: 90ch; }
+.notice { padding: var(--space-3) var(--space-4); border-radius: var(--radius); font-size: var(--fs-md);
+          margin-bottom: var(--space-4); background: var(--surface); border: 1px solid var(--border); }
 .notice.good { background: var(--good-soft); color: var(--good); border-color: transparent; }
 .notice.warn { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
 .notice.bad  { background: var(--bad-soft);  color: var(--bad);  border-color: transparent; }
 .notice a { color: inherit; }
 .section > .notice { margin: var(--space-3) 0 0; }
-.empty { padding: var(--space-6) 0; color: var(--fg-muted); max-width: 70ch; }
+.empty { padding: var(--space-6) var(--space-5); color: var(--fg-muted); }
 
 /* ---------- Progress ---------- */
 .bar { height: 6px; border-radius: var(--radius); background: var(--surface-2); overflow: hidden; }
@@ -194,19 +203,19 @@ form.inline { display: inline; }
 .job:first-child { border-top: 0; }
 .job:hover { background: var(--surface-2); }
 .job-main { flex: 1; min-width: 0; }
-.job-title { color: var(--fg); font-weight: 600; font-size: 1.05rem; text-decoration: none; }
+.job-title { color: var(--fg); font-weight: 600; font-size: 16px; text-decoration: none; }
 .job-title:hover { text-decoration: underline; }
-.meta { color: var(--fg-muted); font-size: .88rem; margin-top: 2px; }
-.reason { font-size: .9rem; margin-top: var(--space-1); }
+.meta { color: var(--fg-muted); font-size: var(--fs-md); margin-top: 2px; }
+.reason { font-size: var(--fs-md); margin-top: var(--space-1); }
 .flags { display: flex; flex-wrap: wrap; gap: var(--space-1); margin-top: var(--space-2); }
 .actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-top: var(--space-3); }
 .actions .spacer { flex: 1; }
-.job .actions { margin: 0; flex: none; justify-content: flex-end; }
+.job .actions { margin: 0; flex: none; justify-content: flex-end; gap: var(--space-4); font-size: var(--fs-md); }
 
 /* Saved / applied / dismissed as one segmented control, so the current state is visible and
    any of the three can be chosen again. */
 .states { display: inline-flex; }
-.states button { padding: 3px 10px; font-size: .8rem; border-radius: 0; margin-left: -1px; }
+.states button { height: 30px; padding: 0 10px; font-size: var(--fs-sm); border-radius: 0; margin-left: -1px; }
 .states button:first-child { border-radius: var(--radius) 0 0 var(--radius); margin-left: 0; }
 .states button:last-child { border-radius: 0 var(--radius) var(--radius) 0; }
 .states button[aria-pressed=true] { background: var(--primary); color: var(--primary-fg);
@@ -217,7 +226,7 @@ form.inline { display: inline; }
 .description { white-space: pre-wrap; line-height: 1.65; max-width: 80ch; }
 
 /* ---------- Login ---------- */
-.login { max-width: 24rem; margin: 12vh auto 0; display: grid; gap: var(--space-4); padding: var(--space-6);
+.login { max-width: 24rem; margin: 12vh auto var(--space-7); display: grid; gap: var(--space-4); padding: var(--space-6);
          background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
 .login h1 { display: flex; align-items: center; gap: var(--space-3); }
 .login .logo { height: 2.5rem; }
