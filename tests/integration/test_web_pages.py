@@ -139,6 +139,44 @@ async def test_a_stored_api_key_is_never_rendered(client, seeded):
     assert secret not in body
     assert secret[-8:] not in body
     assert fingerprint(secret) in body, "the page must identify which key is stored"
+    assert 'class="banner warn"' not in body, "the no-key banner must go once a key is stored"
+
+
+async def test_the_no_key_banner_is_on_every_page_until_a_key_is_set(client, seeded):
+    for path in ("/recommendations", "/search", "/profile"):
+        body = (await client.get(path)).text
+        assert 'class="banner warn"' in body, path
+    body = (await client.get("/recommendations")).text
+    assert "<button" in body and 'disabled>Match now' not in body, "informed, not blocked"
+    assert "nothing is scored until" in body
+
+
+async def test_recommendations_report_the_last_run_in_the_users_terms(client, seeded):
+    from trouveur.db.queries import admin as admin_q
+    from trouveur.models import RunStatus, RunTrigger
+
+    body = (await client.get("/recommendations")).text
+    assert "Not matched yet." in body
+
+    async with connect() as conn:
+        run_id = await admin_q.enqueue_run(conn, trigger=RunTrigger.MANUAL)
+        await admin_q.finish_run(
+            conn, run_id, status=RunStatus.SUCCESS,
+            report={"matches": [{
+                "user_id": seeded["user_id"], "retrieved": 450, "passed": 130, "scored": 120,
+                "cost_usd": "0.0400", "stopped_on_budget": True,
+            }]},
+        )
+    body = (await client.get("/recommendations")).text
+    assert "450 candidates, 130 passed your filters, 120 scored, $0.0400." in body
+    assert "Stopped at your monthly ceiling." in body
+    assert "retrieved</" not in body, "lifetime pipeline counts belong on the dashboard"
+
+
+async def test_a_zero_rerank_limit_reads_as_paused(client, seeded):
+    assert (await client.post("/settings/volume", data={"rerank_limit": "0"})).status_code == 303
+    body = (await client.get("/recommendations")).text
+    assert "Scoring is paused" in body
 
 
 async def test_saving_a_scoring_field_bumps_the_profile_version(client, seeded):
@@ -162,7 +200,6 @@ async def test_saving_a_scoring_field_bumps_the_profile_version(client, seeded):
         row = await users_q.get_profile(conn, seeded["user_id"])
     assert row.version == after_scoring
     assert row.rerank_limit == 200
-    assert row.retrieval_limit == 600, "retrieval is headroom over rerank, not a second setting"
 
 
 async def test_a_scoring_change_forgets_verdicts_but_not_what_the_user_did(client, seeded):

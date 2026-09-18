@@ -290,10 +290,3 @@ async def test_a_match_only_run_sweeps_nothing_and_matches_one_user(monkeypatch)
     assert finished["run_id"] == 7 and finished["status"] == service.RunStatus.SUCCESS
     assert finished["report"]["matches"][0]["scored"] == 2
 
-
-def test_retrieval_is_headroom_over_rerank_not_a_second_setting():
-    from trouveur.match.retrieve import retrieval_limit_for
-
-    assert retrieval_limit_for(150) == 450
-    assert retrieval_limit_for(0) == 100, "a floor keeps search and the rules alive unscored"
-    assert retrieval_limit_for(1000) == 2000, "capped where the per-query budgets stop making sense"

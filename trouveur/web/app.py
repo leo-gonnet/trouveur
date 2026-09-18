@@ -29,7 +29,6 @@ from trouveur.db.engine import connect
 from trouveur.db.queries import admin as admin_q
 from trouveur.db.queries import match as match_q
 from trouveur.db.queries import users as users_q
-from trouveur.match import retrieve
 from trouveur.match.pipeline import profile_from_row
 from trouveur.models import RunTrigger, UserState
 from trouveur.sources.registry import NORMALIZERS
@@ -94,6 +93,12 @@ async def require_session(request: Request, call_next):
     request.state.session = session
     if session is None and not _is_public(request.url.path):
         return RedirectResponse("/login", status_code=303)
+    # Every page carries the "no key" banner, so the one fact it needs is read here rather than
+    # passed by each route -- a route that forgot would hide the banner on exactly one page.
+    request.state.needs_key = False
+    if session is not None and not _is_public(request.url.path):
+        async with connect() as conn:
+            request.state.needs_key = not await users_q.has_credential(conn, session["uid"])
     return await call_next(request)
 
 
@@ -139,18 +144,17 @@ async def recommendations(request: Request):
         # rerank budget -- the one number they already set, rather than a second one to tune.
         limit = profile_row.rerank_limit if profile_row else 150
         jobs = await match_q.recommendations(conn, session["uid"], limit)
-        stats = await match_q.match_stats(conn, session["uid"])
-        credential = await users_q.get_credential(conn, session["uid"])
         pending_run = await admin_q.pending_match_run(conn, session["uid"])
+        last_match = await admin_q.last_match_for_user(conn, session["uid"])
     return templates.TemplateResponse(
         request,
         "recommendations.html",
         {
             "active": "recommendations",
             "jobs": jobs,
-            "stats": stats,
-            "has_key": credential is not None,
+            "paused": limit == 0,
             "pending_run": pending_run,
+            "last_match": last_match,
             "username": session["u"],
         },
     )
@@ -356,8 +360,7 @@ async def settings_save(
 @app.post("/settings/volume", response_class=HTMLResponse)
 async def settings_volume_save(request: Request, rerank_limit: int = Form(150)):
     session = request.state.session
-    rerank = min(max(rerank_limit, 0), 1000)
-    values = {"rerank_limit": rerank, "retrieval_limit": retrieve.retrieval_limit_for(rerank)}
+    values = {"rerank_limit": min(max(rerank_limit, 0), 1000)}
     async with connect() as conn:
         await users_q.save_profile(conn, session["uid"], values)
     return RedirectResponse("/settings?saved=1", status_code=303)

@@ -17,20 +17,12 @@ from trouveur.match.fuse import best_ranks, reciprocal_rank_fusion
 from trouveur.models import UserProfile
 
 MIN_PER_QUERY = 25
-RETRIEVAL_HEADROOM = 3
-MIN_RETRIEVAL = 100
-MAX_RETRIEVAL = 2000
-
-
-def retrieval_limit_for(rerank_limit: int) -> int:
-    """How many candidates to retrieve so that rerank_limit survive the rules cut.
-
-    Retrieving more than will be scored changes nothing past this headroom: the rerank stage takes
-    the top rerank_limit by retrieval score, so candidate rerank_limit+1 is never read however many
-    were fetched. The multiple is not a user preference, it is an allowance for what the rules
-    reject, so it is a constant here rather than a second number to explain on a settings page.
-    """
-    return min(max(rerank_limit * RETRIEVAL_HEADROOM, MIN_RETRIEVAL), MAX_RETRIEVAL)
+# Retrieval is free, so it fetches deep for everyone rather than being tuned per user: rerank takes
+# the top rerank_limit by retrieval score whatever was fetched, so over-fetching costs nothing but
+# gives the rules cut all the headroom it can need. The dense arm is bounded below this by
+# ef_search in db/queries/match.py, which is fine -- past a couple of hundred neighbours per query
+# similarity is noise -- while the lexical arm honours the full budget.
+RETRIEVAL_LIMIT = 2000
 
 
 @dataclass
@@ -57,7 +49,7 @@ async def retrieve_arms(
         return Arms()
     provider = get_provider()
     vectors = await provider.embed_queries(queries)
-    per_query = max(profile.retrieval_limit // len(queries), MIN_PER_QUERY)
+    per_query = max(RETRIEVAL_LIMIT // len(queries), MIN_PER_QUERY)
 
     return Arms(
         dense=[

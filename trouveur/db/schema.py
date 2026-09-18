@@ -251,7 +251,6 @@ user_profile = sa.Table(
     sa.Column("seniorities", ARRAY(sa.Text), nullable=False, server_default="{}"),
     sa.Column("employment_types", ARRAY(sa.Text), nullable=False, server_default="{}"),
     sa.Column("min_salary_eur_year", sa.Numeric, nullable=False, server_default="0"),
-    sa.Column("retrieval_limit", sa.Integer, nullable=False, server_default="400"),
     sa.Column("rerank_limit", sa.Integer, nullable=False, server_default="150"),
     sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False,
               server_default=sa.func.now()),

@@ -40,7 +40,7 @@
       best of the rest on your key. Only scored postings reach
       <a href="/recommendations">Recommendations</a>.</p>
     <form method="post" action="/settings/volume">
-      <label>Recommendations per run <span class="hint">how many postings the model scores each run, best candidates first. This is the only paid step and it is the length of your list. Changing it never re-scores anything.</span>
+      <label>Recommendations per run <span class="hint">how many postings the model scores each run, best candidates first. This is the only paid step and it is the length of your list. Changing it never re-scores anything; 0 pauses scoring.</span>
         <input name="rerank_limit" type="number" min="0" max="1000" value="{{ profile.rerank_limit }}"></label>
       <p class="actions"><button class="primary" type="submit">Save</button></p>
     </form>

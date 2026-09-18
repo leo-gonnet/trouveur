@@ -136,6 +136,16 @@ async def reset_verdicts(conn: AsyncConnection, user_id: int) -> None:
     )
 
 
+async def has_credential(conn: AsyncConnection, user_id: int) -> bool:
+    return (
+        await conn.execute(
+            sa.select(sa.literal(True))
+            .select_from(user_llm_credential)
+            .where(user_llm_credential.c.user_id == user_id)
+        )
+    ).scalar() is True
+
+
 async def get_credential(conn: AsyncConnection, user_id: int) -> sa.Row | None:
     return (
         await conn.execute(

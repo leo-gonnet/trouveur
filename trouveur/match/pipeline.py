@@ -150,7 +150,7 @@ async def _retrieve(
 ) -> None:
     """Hybrid retrieval: one dense search per query, one lexical search per query, fused by rank."""
     arms = await retrieve.retrieve_arms(conn, profile, queries)
-    fused = retrieve.fuse(arms, profile.retrieval_limit)
+    fused = retrieve.fuse(arms, retrieve.RETRIEVAL_LIMIT)
     dense_rank, lexical_rank = retrieve.ranks(arms)
 
     rows = [
@@ -171,7 +171,7 @@ async def _retrieve(
 async def _apply_rules(
     conn: AsyncConnection, profile: UserProfile, report: MatchReport
 ) -> None:
-    pending = await match_q.pending_rules(conn, profile.user_id, profile.retrieval_limit)
+    pending = await match_q.pending_rules(conn, profile.user_id, retrieve.RETRIEVAL_LIMIT)
     verdicts = []
     for row in pending:
         candidate = Candidate(

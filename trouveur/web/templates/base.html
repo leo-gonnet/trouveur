@@ -33,6 +33,10 @@
     <form method="post" action="/logout" class="inline"><button type="submit" class="ghost">Log out</button></form>
   </span>
 </header>
+{% if request.state.needs_key %}
+<div class="banner warn">No OpenRouter key is set, so nothing is scored and Recommendations stays
+  empty. Search and the free stages still work. <a href="/settings">Add a key in Settings.</a></div>
+{% endif %}
 {% endif %}
 <main>{% block content %}{% endblock %}</main>
 <footer class="foot">
