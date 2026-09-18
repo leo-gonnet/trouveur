@@ -66,5 +66,8 @@ async def seeded(clean_db, gh_board, aa_listing, aa_detail):
     user_id, profile = await seed_user(title="Process Engineer", keywords=["Prozessoptimierung"])
     # At least one scored, passing match, so pages that render a job card actually render one.
     # Without it every page test passes over an empty list and the card template is never run.
-    await seed_scored_match(user_id, profile)
-    return {"user_id": user_id, "profile": profile, "aa_external_id": aa_external_id}
+    job_id = await seed_scored_match(user_id, profile)
+    return {
+        "user_id": user_id, "profile": profile, "job_id": job_id,
+        "aa_external_id": aa_external_id,
+    }

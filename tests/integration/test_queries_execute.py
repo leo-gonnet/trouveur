@@ -83,6 +83,8 @@ def _arguments(ctx: dict) -> dict[str, dict]:
         "admin.typical_sweep_seconds": {},
         "admin.recent_runs": {},
         "admin.active_run": {},
+        "admin.pending_match_run": {"user_id": user_id},
+        "admin.last_match_for_user": {"user_id": user_id},
         "admin.fail_orphaned_runs": {},
         "admin.facet_breakdown": {},
         "admin.queue_depth": {},
@@ -161,6 +163,8 @@ def _arguments(ctx: dict) -> dict[str, dict]:
         },
         "users.get_profile": {"user_id": user_id},
         "users.save_profile": {"user_id": user_id, "values": {"title": "Probe"}},
+        "users.reset_verdicts": {"user_id": user_id},
+        "users.has_credential": {"user_id": user_id},
         "users.get_credential": {"user_id": user_id},
         "users.save_credential": {
             "user_id": user_id, "api_key_encrypted": b"probe", "api_key_fingerprint": "probe",

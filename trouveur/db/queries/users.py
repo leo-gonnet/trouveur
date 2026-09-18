@@ -10,7 +10,13 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from trouveur.db.schema import app_user, user_llm_credential, user_llm_spend, user_profile
+from trouveur.db.schema import (
+    app_user,
+    user_job_match,
+    user_llm_credential,
+    user_llm_spend,
+    user_profile,
+)
 
 # Changing one of these changes what a good match *is*, so it invalidates that user's cached LLM
 # scores and forces a re-score they will be billed for. Everything else about a profile -- the
@@ -107,7 +113,37 @@ async def save_profile(
         .where(user_profile.c.user_id == user_id)
         .values(**values, version=max(version, 1), updated_at=sa.func.now())
     )
+    if rescore and current is not None:
+        await reset_verdicts(conn, user_id)
     return max(version, 1), rescore
+
+
+async def reset_verdicts(conn: AsyncConnection, user_id: int) -> None:
+    """Forget every rule verdict and score this user holds, keeping what they did about them.
+
+    The version check in pending_rerank is not enough on its own: retrieval re-stamps
+    profile_version on every row it finds again, before reranking runs, so the rows most worth
+    re-scoring were the ones that looked current. state and notified_at survive -- un-dismissing a
+    job or re-sending a digest entry because the profile changed would be the user's history lost.
+    """
+    await conn.execute(
+        user_job_match.update()
+        .where(user_job_match.c.user_id == user_id)
+        .values(
+            rule_verdict="unknown", rule_reason=None, llm_score=None, llm_reason=None,
+            llm_red_flags=None, scored_at=None,
+        )
+    )
+
+
+async def has_credential(conn: AsyncConnection, user_id: int) -> bool:
+    return (
+        await conn.execute(
+            sa.select(sa.literal(True))
+            .select_from(user_llm_credential)
+            .where(user_llm_credential.c.user_id == user_id)
+        )
+    ).scalar() is True
 
 
 async def get_credential(conn: AsyncConnection, user_id: int) -> sa.Row | None:

@@ -429,7 +429,31 @@ so the deployment has no LLM spend of its own and one user's exhausted budget ca
 - **Always pin a provider.** Unpinned, OpenRouter spreads one model across many backends at a wide
   price spread and differing quantisation, so neither cost nor scores are reproducible. Pinning also
   lets `data_collection: "deny"` keep profiles away from backends that may train on them.
-- Changing the default model is an eval question, not a taste question.
+- Changing the default model is an eval question, not a taste question. **The model and the
+  provider pin are installation settings** (`default_llm_model`, `default_llm_provider`), never
+  a per-user field: a user-chosen model makes scores incomparable across users and lets the pin
+  be cleared. The Settings page shows them read-only. Volume lives on Settings next to the
+  ceiling, not on Profile: it is a cost dial, not part of what a good match is, and every field
+  left on Profile is a `SCORING_FIELDS` member.
+- **The user sets one volume number, `rerank_limit`.** Retrieval depth is the constant
+  `retrieve.RETRIEVAL_LIMIT`, not a setting: rerank takes the top `rerank_limit` by retrieval
+  score whatever was fetched, and retrieval is free, so a per-user value was a number with no
+  effect to explain. `rerank_limit = 0` is the pause; there is deliberately no separate toggle,
+  because "auto-match off" would starve the digest silently while 0 says what it does.
+- **Recommendations shows no lifetime pipeline counts.** `retrieved`/`passed`/`scored` over all
+  history are diagnostics and live on the dashboard; the page states the *last run* in the user's
+  terms from `pipeline_run.report.matches` (which is why the runner records `passed` there).
+- **A missing key is a full-width `.banner warn` on every page**, set by the session middleware
+  (`request.state.needs_key`) so no route can forget it. The Match now button is never blocked by
+  it: the free stages still run, and the hint says nothing will be scored.
+- **A scoring change forgets the user's verdicts** (`users.reset_verdicts`, called from
+  `save_profile`). The `profile_version < current` test in `pending_rerank` cannot do this alone:
+  retrieval re-stamps `profile_version` on every row it finds again *before* reranking, so the
+  rows most worth re-scoring were exactly the ones that looked current, and old scores survived a
+  profile change labelled as new. `state` and `notified_at` are kept — they are the user's history.
+- **"Match now" is a match-only run** (`pipeline_run.match_user_id`), queued by the web app and
+  executed by the runner like any other run. It sweeps nothing and sends no digest. One per user
+  at a time; a second click while one is pending must not queue another paid run.
 
 ## Web UI
 

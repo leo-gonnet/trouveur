@@ -320,7 +320,7 @@ async def update_schedule(conn: AsyncConnection, values: dict[str, Any]) -> None
 
 async def enqueue_run(
     conn: AsyncConnection, *, trigger: RunTrigger, only_source: str | None = None,
-    backfill: bool = False,
+    backfill: bool = False, match_user_id: int | None = None,
 ) -> int:
     return (
         await conn.execute(
@@ -329,10 +329,48 @@ async def enqueue_run(
                 trigger=RunTrigger(trigger).value,
                 only_source=only_source,
                 backfill=backfill,
+                match_user_id=match_user_id,
             )
             .returning(pipeline_run.c.id)
         )
     ).scalar_one()
+
+
+async def last_match_for_user(conn: AsyncConnection, user_id: int) -> sa.Row | None:
+    """When this user was last matched and what that run did for them, from the run's report."""
+    return (
+        await conn.execute(
+            sa.text(
+                """
+                SELECT r.finished_at, m.value AS match
+                FROM pipeline_run r, jsonb_array_elements(r.report -> 'matches') m
+                WHERE r.status = 'success'
+                  AND (m.value ->> 'user_id')::bigint = :user_id
+                ORDER BY r.finished_at DESC
+                LIMIT 1
+                """
+            ),
+            {"user_id": user_id},
+        )
+    ).one_or_none()
+
+
+async def pending_match_run(conn: AsyncConnection, user_id: int) -> sa.Row | None:
+    """The match-only run this user already has queued or running, if any.
+
+    One is enough: a second would re-read the same rows on the same key.
+    """
+    return (
+        await conn.execute(
+            pipeline_run.select()
+            .where(
+                pipeline_run.c.match_user_id == user_id,
+                pipeline_run.c.status.in_([RunStatus.QUEUED.value, RunStatus.RUNNING.value]),
+            )
+            .order_by(pipeline_run.c.queued_at)
+            .limit(1)
+        )
+    ).one_or_none()
 
 
 async def claim_next_run(conn: AsyncConnection) -> sa.Row | None:

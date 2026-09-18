@@ -9,7 +9,7 @@
       <span class="pill {% if run.status == 'success' %}good{% elif run.status == 'failed' %}bad{% endif %}">
         {{ run.status }}</span>
     </td>
-    <td>{{ run.only_source or 'all' }}{% if run.backfill %} · backfill{% endif %}</td>
+    <td>{% if run.match_user_id %}match only · user {{ run.match_user_id }}{% else %}{{ run.only_source or 'all' }}{% if run.backfill %} · backfill{% endif %}{% endif %}</td>
     <td class="hint">
       {%- if run.error -%}{{ run.error[:160] }}
       {%- elif run.report -%}{{ run.report.get('summary', '') }}

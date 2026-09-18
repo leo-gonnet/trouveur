@@ -247,3 +247,46 @@ async def test_progress_is_reported_per_source_with_the_one_coming_next(monkeypa
 
 async def _noop() -> None:
     return None
+
+
+async def test_a_match_only_run_sweeps_nothing_and_matches_one_user(monkeypatch):
+    """The run named a user, so ingest is skipped entirely: no source is touched, no digest sent."""
+    from types import SimpleNamespace
+
+    from trouveur.match.pipeline import MatchReport
+    from trouveur.runner import service
+
+    calls: list[str] = []
+
+    async def fake_ingest_run(**kwargs):
+        calls.append("ingest")
+        raise AssertionError("a match-only run must not sweep")
+
+    async def fake_run_for_user(user_id, settings):
+        calls.append(f"match:{user_id}")
+        return MatchReport(user_id=user_id, retrieved=3, scored=2)
+
+    finished: dict = {}
+
+    async def fake_finish_run(conn, run_id, *, status, report=None, error=None):
+        finished.update(run_id=run_id, status=status, report=report, error=error)
+
+    class _Conn:
+        async def __aenter__(self):
+            return None
+
+        async def __aexit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(service.ingest, "run", fake_ingest_run)
+    monkeypatch.setattr(service.matching, "run_for_user", fake_run_for_user)
+    monkeypatch.setattr(service.admin_q, "finish_run", fake_finish_run)
+    monkeypatch.setattr(service, "connect", lambda: _Conn())
+
+    run = SimpleNamespace(id=7, match_user_id=42, only_source=None, backfill=False)
+    await service._execute(None, run)
+
+    assert calls == ["match:42"]
+    assert finished["run_id"] == 7 and finished["status"] == service.RunStatus.SUCCESS
+    assert finished["report"]["matches"][0]["scored"] == 2
+

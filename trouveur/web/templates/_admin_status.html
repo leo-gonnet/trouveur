@@ -16,7 +16,7 @@
       {% else %}
         <span class="hint">waiting for the runner to pick it up</span>
       {% endif %}
-      <span class="hint">{{ active_run.only_source or 'all sources' }}{% if active_run.backfill %} · backfill{% endif %}</span>
+      <span class="hint">{% if active_run.match_user_id %}match only · user {{ active_run.match_user_id }}{% else %}{{ active_run.only_source or 'all sources' }}{% if active_run.backfill %} · backfill{% endif %}{% endif %}</span>
       <form method="post" action="/admin/run/{{ active_run.id }}/cancel" class="inline">
         <button type="submit" {% if active_run.cancel_requested %}disabled{% endif %}>
           {% if active_run.cancel_requested %}stopping after this source…{% else %}Cancel{% endif %}

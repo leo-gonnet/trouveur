@@ -4,25 +4,36 @@
 <div class="page-head">
   <h1>Recommendations</h1>
   <p class="hint">
-    Everything that passed the rules and was scored, best first. How many there are is your
-    <a href="/profile">rerank budget</a>; <a href="/search">Search</a> shows everything collected.
+    Everything that passed the rules and was scored, best first. How many there are is set in
+    <a href="/settings">Settings</a>; <a href="/search">Search</a> shows everything collected.
   </p>
+  <p class="hint">
+    {% if last_match %}
+      {%- set r = last_match.match %}
+      Last matched {{ last_match.finished_at.strftime('%d.%m. %H:%M') }}: {{ r.retrieved }} candidates,
+      {%- if r.get('passed') is not none %} {{ r.passed }} passed your filters,{% endif %} {{ r.scored }} scored, ${{ r.cost_usd }}.
+      {%- if r.stopped_on_budget %} Stopped at your monthly ceiling.{% endif %}
+    {% else %}
+      Not matched yet.
+    {% endif %}
+  </p>
+  <form method="post" action="/recommendations/run" class="actions">
+    <button class="primary" type="submit" {% if pending_run %}disabled{% endif %}>Match now</button>
+    {% if pending_run %}
+      <span class="hint">Matching is {{ pending_run.status }}; this page updates when it finishes.</span>
+    {% elif request.state.needs_key or paused %}
+      <span class="hint">Runs search and the rules cut only; nothing is scored until
+        {% if paused %}scoring is unpaused{% else %}a key is set{% endif %} in <a href="/settings">Settings</a>.</span>
+    {% else %}
+      <span class="hint">Re-rank the postings already collected, without waiting for the next scan.
+        Only postings not yet scored for your current profile cost anything.</span>
+    {% endif %}
+  </form>
 </div>
 
-<div class="kpis">
-  {{ m.kpi(stats.retrieved, 'retrieved') }}
-  {{ m.kpi(stats.passed, 'passed rules') }}
-  {{ m.kpi(stats.scored, 'scored') }}
-  {{ m.kpi(stats.saved, 'saved') }}
-  {{ m.kpi(stats.applied, 'applied') }}
-</div>
-
-{% if not has_key %}
-<p class="notice">
-  No OpenRouter key is set, so nothing is being scored. Retrieval still runs and
-  <a href="/search">Search</a> works fully. Add a key in <a href="/settings">Settings</a> to rank
-  these by fit.
-</p>
+{% if paused %}
+<p class="notice warn">Scoring is paused: Recommendations per run is 0 in
+  <a href="/settings">Settings</a>. Nothing is spent and this page stays as it is.</p>
 {% endif %}
 
 {% if jobs %}
@@ -31,7 +42,8 @@
   </div>
 {% else %}
 <p class="empty">
-  Nothing scored yet. Retrieval and the rules cut are free and run without a key; scoring needs an
+  Nothing scored yet for your current profile. Matching runs after every scan, or now with the
+  button above. Retrieval and the rules cut are free and run without a key; scoring needs an
   OpenRouter key in <a href="/settings">Settings</a>. Meanwhile <a href="/search">Search</a> shows
   everything collected.
 </p>

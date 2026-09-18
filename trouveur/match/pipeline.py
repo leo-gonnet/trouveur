@@ -123,8 +123,8 @@ async def _queries(
                 settings,
                 profile,
                 api_key=decrypt(credential.api_key_encrypted),
-                model=credential.model,
-                provider_pin=credential.provider_pin,
+                model=settings.default_llm_model,
+                provider_pin=settings.default_llm_provider,
             )
             await users_q.add_spend(
                 conn, profile.user_id, tokens_in=usage.tokens_in,
@@ -150,7 +150,7 @@ async def _retrieve(
 ) -> None:
     """Hybrid retrieval: one dense search per query, one lexical search per query, fused by rank."""
     arms = await retrieve.retrieve_arms(conn, profile, queries)
-    fused = retrieve.fuse(arms, profile.retrieval_limit)
+    fused = retrieve.fuse(arms, retrieve.RETRIEVAL_LIMIT)
     dense_rank, lexical_rank = retrieve.ranks(arms)
 
     rows = [
@@ -171,7 +171,7 @@ async def _retrieve(
 async def _apply_rules(
     conn: AsyncConnection, profile: UserProfile, report: MatchReport
 ) -> None:
-    pending = await match_q.pending_rules(conn, profile.user_id, profile.retrieval_limit)
+    pending = await match_q.pending_rules(conn, profile.user_id, retrieve.RETRIEVAL_LIMIT)
     verdicts = []
     for row in pending:
         candidate = Candidate(
@@ -256,8 +256,8 @@ async def _rerank(
         try:
             scores, usage = await rerank.score_batch(
                 settings, profile, batch,
-                api_key=api_key, model=credential.model,
-                provider_pin=credential.provider_pin,
+                api_key=api_key, model=settings.default_llm_model,
+                provider_pin=settings.default_llm_provider,
             )
         except llm.LlmError as exc:
             report.errors.append(str(exc))
@@ -289,7 +289,7 @@ async def _rerank(
                     "content_hash": row.content_hash, "user_id": profile.user_id,
                     "profile_version": profile.version, "score": score.score,
                     "reason": score.reason, "red_flags": score.red_flags,
-                    "model": credential.model,
+                    "model": settings.default_llm_model,
                 }
             )
         await match_q.apply_scores(conn, profile.user_id, updates)

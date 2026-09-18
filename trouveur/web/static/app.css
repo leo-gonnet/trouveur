@@ -13,7 +13,7 @@
    Layout: the page is full width and is the only thing that scrolls. Dashboard-style pages are
    boxed sections; recommendations and search are a mail-style list of rows.
 
-   Components: .topbar .nav .page-head .section .section-head .grid .kpis .kpi table .pill
+   Components: .topbar .nav .banner .page-head .section .section-head .grid .kpis .kpi table .pill
    .score button/.btn(.primary .danger .ghost) label/input .notice .empty .bar .results .job .job-main
    .states .pager .searchbar .login .foot */
 
@@ -76,6 +76,10 @@ code, kbd { font: .86em var(--mono); background: var(--surface-2); padding: 1px 
 .nav a[aria-current="page"] { opacity: 1; border-bottom-color: var(--primary-fg); }
 .spacer { flex: 1; }
 .user { display: flex; align-items: center; gap: var(--space-3); }
+
+.banner { padding: var(--space-3) var(--space-6); font-size: var(--fs-md); text-align: center; }
+.banner.warn { background: var(--warn-soft); color: var(--warn); }
+.banner a { color: inherit; }
 
 main { flex: 1; width: 100%; max-width: 1440px; margin: 0 auto; padding: var(--space-5) var(--space-6) var(--space-7); }
 .foot { padding: var(--space-4) var(--space-6); border-top: 1px solid var(--border);

@@ -107,6 +107,9 @@ def _progress_control(run_id: int) -> ingest.RunControl:
 
 
 async def _execute(settings: Settings, run) -> None:
+    if run.match_user_id is not None:
+        await _execute_match_only(settings, run)
+        return
     report = await ingest.run(
         only_source=run.only_source,
         backfill=run.backfill,
@@ -141,6 +144,7 @@ async def _execute(settings: Settings, run) -> None:
             {
                 "user_id": match.user_id,
                 "retrieved": match.retrieved,
+                "passed": match.passed,
                 "scored": match.scored,
                 "cost_usd": str(match.cost_usd),
                 "stopped_on_budget": match.stopped_on_budget,
@@ -151,6 +155,33 @@ async def _execute(settings: Settings, run) -> None:
     }
     async with connect() as conn:
         await admin_q.finish_run(conn, run.id, status=RunStatus.SUCCESS, report=payload)
+
+
+async def _execute_match_only(settings: Settings, run) -> None:
+    """Re-rank one user over the corpus as it stands; no source is touched and no digest is sent.
+
+    The user asked for this from the page they are looking at, so the result lands there; the
+    digest for anything newly scored goes out with the next scheduled run as usual.
+    """
+    match = await matching.run_for_user(run.match_user_id, settings)
+    payload = {
+        "summary": match.summary(),
+        "matches": [
+            {
+                "user_id": match.user_id,
+                "retrieved": match.retrieved,
+                "passed": match.passed,
+                "scored": match.scored,
+                "cost_usd": str(match.cost_usd),
+                "stopped_on_budget": match.stopped_on_budget,
+            }
+        ],
+    }
+    status = RunStatus.FAILED if match.errors and not match.retrieved else RunStatus.SUCCESS
+    async with connect() as conn:
+        await admin_q.finish_run(
+            conn, run.id, status=status, report=payload, error="; ".join(match.errors) or None
+        )
 
 
 async def _tick(settings: Settings) -> None:

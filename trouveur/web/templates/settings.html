@@ -20,9 +20,8 @@
         <p class="hint">Stored key fingerprint <code>{{ credential.api_key_fingerprint }}</code>.
           The key itself is encrypted and is never shown again, including here.</p>
       {% endif %}
-      <label>Model<input name="model" value="{{ credential.model if credential else default_model }}"></label>
-      <label>Pinned provider <span class="hint">unpinned, one model spreads across backends at a wide price spread and differing quantisation, so neither cost nor scores are reproducible</span>
-        <input name="provider_pin" value="{{ credential.provider_pin or '' if credential else '' }}" placeholder="{{ default_provider }}"></label>
+      <p class="hint">Scored with <code>{{ model }}</code>{% if provider %} on <code>{{ provider }}</code>{% endif %}.
+        The model is chosen by evaluation, not per user, so every score here is comparable.</p>
       <label>Monthly ceiling <span class="hint">US dollars, the currency OpenRouter bills in. Checked before every batch, not after.</span>
         <input name="monthly_budget_usd" value="{{ credential.monthly_budget_usd if credential else '5' }}"></label>
       <p class="actions">
@@ -31,6 +30,19 @@
           <button class="danger" type="submit" formaction="/settings/delete-key" formnovalidate>Delete stored key</button>
         {% endif %}
       </p>
+    </form>
+  </section>
+
+  <section class="section">
+    <div class="section-head"><h2>Volume</h2></div>
+    <p class="hint">After every scan, a matching run for you: search pulls candidates out of the
+      corpus for free, the rules cut removes what you ruled out, and the model reads and scores the
+      best of the rest on your key. Only scored postings reach
+      <a href="/recommendations">Recommendations</a>.</p>
+    <form method="post" action="/settings/volume">
+      <label>Recommendations per run <span class="hint">how many postings the model scores each run, best candidates first. This is the only paid step and it is the length of your list. Changing it never re-scores anything; 0 pauses scoring.</span>
+        <input name="rerank_limit" type="number" min="0" max="1000" value="{{ profile.rerank_limit }}"></label>
+      <p class="actions"><button class="primary" type="submit">Save</button></p>
     </form>
   </section>
 

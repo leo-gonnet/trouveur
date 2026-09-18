@@ -93,6 +93,12 @@ async def require_session(request: Request, call_next):
     request.state.session = session
     if session is None and not _is_public(request.url.path):
         return RedirectResponse("/login", status_code=303)
+    # Every page carries the "no key" banner, so the one fact it needs is read here rather than
+    # passed by each route -- a route that forgot would hide the banner on exactly one page.
+    request.state.needs_key = False
+    if session is not None and not _is_public(request.url.path):
+        async with connect() as conn:
+            request.state.needs_key = not await users_q.has_credential(conn, session["uid"])
     return await call_next(request)
 
 
@@ -138,19 +144,32 @@ async def recommendations(request: Request):
         # rerank budget -- the one number they already set, rather than a second one to tune.
         limit = profile_row.rerank_limit if profile_row else 150
         jobs = await match_q.recommendations(conn, session["uid"], limit)
-        stats = await match_q.match_stats(conn, session["uid"])
-        credential = await users_q.get_credential(conn, session["uid"])
+        pending_run = await admin_q.pending_match_run(conn, session["uid"])
+        last_match = await admin_q.last_match_for_user(conn, session["uid"])
     return templates.TemplateResponse(
         request,
         "recommendations.html",
         {
             "active": "recommendations",
             "jobs": jobs,
-            "stats": stats,
-            "has_key": credential is not None,
+            "paused": limit == 0,
+            "pending_run": pending_run,
+            "last_match": last_match,
             "username": session["u"],
         },
     )
+
+
+@app.post("/recommendations/run")
+async def recommendations_run(request: Request):
+    """Queue a match-only run for this user. The runner executes it; the web app never matches."""
+    session = request.state.session
+    async with connect() as conn:
+        if await admin_q.pending_match_run(conn, session["uid"]) is None:
+            await admin_q.enqueue_run(
+                conn, trigger=RunTrigger.MANUAL, match_user_id=session["uid"]
+            )
+    return RedirectResponse("/recommendations", status_code=303)
 
 
 @app.get("/search", response_class=HTMLResponse)
@@ -235,7 +254,6 @@ async def profile_form(request: Request):
             "active": "profile",
             "profile": profile,
             "rescore_estimate": pending,
-            "scoring_fields": sorted(users_q.SCORING_FIELDS),
             "username": session["u"],
         },
     )
@@ -257,8 +275,6 @@ async def profile_save(
     seniorities: str = Form(""),
     employment_types: str = Form(""),
     min_salary_eur_year: str = Form("0"),
-    retrieval_limit: int = Form(400),
-    rerank_limit: int = Form(150),
 ):
     session = request.state.session
     values = {
@@ -275,8 +291,6 @@ async def profile_save(
         "seniorities": _commas(seniorities),
         "employment_types": _commas(employment_types),
         "min_salary_eur_year": _decimal(min_salary_eur_year, Decimal(0)),
-        "retrieval_limit": min(max(retrieval_limit, 25), 2000),
-        "rerank_limit": min(max(rerank_limit, 0), 1000),
     }
     async with connect() as conn:
         version, rescore = await users_q.save_profile(conn, session["uid"], values)
@@ -291,6 +305,7 @@ async def settings_form(request: Request):
     session = request.state.session
     async with connect() as conn:
         credential = await users_q.get_credential(conn, session["uid"])
+        profile = profile_from_row(await users_q.get_profile(conn, session["uid"]))
         spend = await users_q.month_spend(conn, session["uid"])
         history = await users_q.spend_history(conn, session["uid"])
     settings = get_settings()
@@ -299,8 +314,9 @@ async def settings_form(request: Request):
         "settings.html",
         {
             "active": "settings",
-            "default_model": settings.default_llm_model,
-            "default_provider": settings.default_llm_provider or "",
+            "model": settings.default_llm_model,
+            "provider": settings.default_llm_provider or "",
+            "profile": profile,
             # Never the key itself. The form shows a fingerprint so the user can tell which key is
             # stored without this page being able to disclose it to anyone who reaches it.
             "credential": credential,
@@ -315,14 +331,12 @@ async def settings_form(request: Request):
 async def settings_save(
     request: Request,
     api_key: str = Form(""),
-    model: str = Form(""),
-    provider_pin: str = Form(""),
     monthly_budget_usd: str = Form("5"),
 ):
     session = request.state.session
+    settings = get_settings()
     async with connect() as conn:
         budget = _decimal(monthly_budget_usd, Decimal(5))
-        chosen_model = model.strip() or get_settings().default_llm_model
         key = api_key.strip()
         if key:
             await users_q.save_credential(
@@ -330,8 +344,8 @@ async def settings_save(
                 session["uid"],
                 api_key_encrypted=encrypt(key),
                 api_key_fingerprint=fingerprint(key),
-                model=chosen_model,
-                provider_pin=provider_pin.strip() or None,
+                model=settings.default_llm_model,
+                provider_pin=settings.default_llm_provider,
                 monthly_budget_usd=budget,
             )
         else:
@@ -340,6 +354,15 @@ async def settings_save(
             existing = await users_q.get_credential(conn, session["uid"])
             if existing is not None:
                 await users_q.update_budget(conn, session["uid"], budget)
+    return RedirectResponse("/settings?saved=1", status_code=303)
+
+
+@app.post("/settings/volume", response_class=HTMLResponse)
+async def settings_volume_save(request: Request, rerank_limit: int = Form(150)):
+    session = request.state.session
+    values = {"rerank_limit": min(max(rerank_limit, 0), 1000)}
+    async with connect() as conn:
+        await users_q.save_profile(conn, session["uid"], values)
     return RedirectResponse("/settings?saved=1", status_code=303)
 
 

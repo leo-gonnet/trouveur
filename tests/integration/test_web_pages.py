@@ -139,6 +139,44 @@ async def test_a_stored_api_key_is_never_rendered(client, seeded):
     assert secret not in body
     assert secret[-8:] not in body
     assert fingerprint(secret) in body, "the page must identify which key is stored"
+    assert 'class="banner warn"' not in body, "the no-key banner must go once a key is stored"
+
+
+async def test_the_no_key_banner_is_on_every_page_until_a_key_is_set(client, seeded):
+    for path in ("/recommendations", "/search", "/profile"):
+        body = (await client.get(path)).text
+        assert 'class="banner warn"' in body, path
+    body = (await client.get("/recommendations")).text
+    assert "<button" in body and 'disabled>Match now' not in body, "informed, not blocked"
+    assert "nothing is scored until" in body
+
+
+async def test_recommendations_report_the_last_run_in_the_users_terms(client, seeded):
+    from trouveur.db.queries import admin as admin_q
+    from trouveur.models import RunStatus, RunTrigger
+
+    body = (await client.get("/recommendations")).text
+    assert "Not matched yet." in body
+
+    async with connect() as conn:
+        run_id = await admin_q.enqueue_run(conn, trigger=RunTrigger.MANUAL)
+        await admin_q.finish_run(
+            conn, run_id, status=RunStatus.SUCCESS,
+            report={"matches": [{
+                "user_id": seeded["user_id"], "retrieved": 450, "passed": 130, "scored": 120,
+                "cost_usd": "0.0400", "stopped_on_budget": True,
+            }]},
+        )
+    body = (await client.get("/recommendations")).text
+    assert "450 candidates, 130 passed your filters, 120 scored, $0.0400." in body
+    assert "Stopped at your monthly ceiling." in body
+    assert "retrieved</" not in body, "lifetime pipeline counts belong on the dashboard"
+
+
+async def test_a_zero_rerank_limit_reads_as_paused(client, seeded):
+    assert (await client.post("/settings/volume", data={"rerank_limit": "0"})).status_code == 303
+    body = (await client.get("/recommendations")).text
+    assert "Scoring is paused" in body
 
 
 async def test_saving_a_scoring_field_bumps_the_profile_version(client, seeded):
@@ -151,18 +189,64 @@ async def test_saving_a_scoring_field_bumps_the_profile_version(client, seeded):
         "languages": "de", "must_have": "", "deal_breakers": "", "keywords": "lean",
         "countries": "DE,AT", "cities": "", "work_modes": "", "seniorities": "",
         "employment_types": "", "min_salary_eur_year": "60000",
-        "retrieval_limit": "400", "rerank_limit": "150",
     }
     assert (await client.post("/profile", data=form)).status_code == 303
     async with connect() as conn:
         after_scoring = (await users_q.get_profile(conn, seeded["user_id"])).version
     assert after_scoring > before
 
-    presentation_only = {**form, "rerank_limit": "200"}
-    assert (await client.post("/profile", data=presentation_only)).status_code == 303
+    assert (await client.post("/settings/volume", data={"rerank_limit": "200"})).status_code == 303
     async with connect() as conn:
-        after_presentation = (await users_q.get_profile(conn, seeded["user_id"])).version
-    assert after_presentation == after_scoring
+        row = await users_q.get_profile(conn, seeded["user_id"])
+    assert row.version == after_scoring
+    assert row.rerank_limit == 200
+
+
+async def test_a_scoring_change_forgets_verdicts_but_not_what_the_user_did(client, seeded):
+    """The Profile page promises a re-score; without this, retrieval re-stamps the version on
+    every row it finds again and the old scores survive labelled as new."""
+
+    from trouveur.db.schema import user_job_match
+
+    async with connect() as conn:
+        await match_q.set_state(conn, seeded["user_id"], seeded["job_id"], "saved")
+        before = (await conn.execute(
+            user_job_match.select().where(user_job_match.c.user_id == seeded["user_id"])
+        )).one()
+    assert before.llm_score == 92 and before.rule_verdict == "pass"
+
+    form = {"title": "Something else entirely", "years_experience": "9", "countries": "DE,AT"}
+    assert (await client.post("/profile", data=form)).status_code == 303
+
+    async with connect() as conn:
+        after = (await conn.execute(
+            user_job_match.select().where(user_job_match.c.user_id == seeded["user_id"])
+        )).one()
+        pending = await match_q.pending_rules(conn, seeded["user_id"], 100)
+    assert after.llm_score is None and after.llm_reason is None and after.scored_at is None
+    assert after.rule_verdict == "unknown"
+    assert after.state == "saved", "a profile edit must not touch the user's own decisions"
+    assert [row.job_id for row in pending] == [seeded["job_id"]]
+    assert (await client.get("/recommendations")).status_code == 200
+
+
+async def test_match_now_queues_one_run_for_this_user_only(client, seeded):
+    from trouveur.db.queries import admin as admin_q
+
+    assert (await client.post("/recommendations/run")).status_code == 303
+    assert (await client.post("/recommendations/run")).status_code == 303
+    async with connect() as conn:
+        runs = await admin_q.recent_runs(conn)
+        pending = await admin_q.pending_match_run(conn, seeded["user_id"])
+    mine = [run for run in runs if run.match_user_id == seeded["user_id"]]
+    assert len(mine) == 1, "a second click must not queue a second paid run"
+    assert mine[0].only_source is None and not mine[0].backfill
+    assert pending is not None and pending.id == mine[0].id
+
+    body = (await client.get("/recommendations")).text
+    assert "disabled" in body and "Matching is queued" in body
+    body = (await client.get("/admin")).text
+    assert "match only" in body
 
 
 async def test_logout_clears_the_session(client):
