@@ -9,8 +9,8 @@
 {% if request.query_params.get('deleted') %}<p class="notice">Key deleted. Retrieval still works; nothing will be scored.</p>{% endif %}
 
 <div class="grid">
-  <section class="card">
-    <div class="card-head"><h2>Model access</h2></div>
+  <section class="section">
+    <div class="section-head"><h2>Model access</h2></div>
     <form method="post" action="/settings">
       <label>OpenRouter API key
         <input name="api_key" type="password" autocomplete="off"
@@ -34,8 +34,8 @@
     </form>
   </section>
 
-  <section class="card">
-    <div class="card-head"><h2>Spend</h2></div>
+  <section class="section">
+    <div class="section-head"><h2>Spend</h2></div>
     {% if spend %}
       <div class="kpis">
         {{ m.kpi('${:.4f}'.format(spend.cost_usd), 'this month') }}
