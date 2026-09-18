@@ -3,7 +3,8 @@
    Tokens are the only place a value is written; components below read them. A feature never
    sets a colour, a radius or a spacing of its own — add a token or a component here instead.
 
-   Palette: the logo's navy on a cool off-white canvas with white surfaces. Navy is text, links, buttons and the active item; the
+   Palette: the logo's navy on a cool off-white canvas with white surfaces; the top bar is solid
+   navy and carries the light logo variant. Navy is text, links, buttons and the active item; the
    logo's red-orange appears in the logo and nowhere else. Status (good/warn/bad, score bands)
    uses muted tints so a dashboard scans without looking colourful. One system sans-serif.
 
@@ -55,17 +56,19 @@ code, kbd { font: .86em var(--mono); background: var(--surface-2); padding: 1px 
 /* ---------- Layout ---------- */
 .topbar {
   display: flex; align-items: center; gap: var(--space-5); flex-wrap: wrap;
-  padding: 0 var(--space-6); background: var(--surface); border-bottom: 1px solid var(--border);
+  padding: 0 var(--space-6); background: var(--primary); color: var(--primary-fg);
 }
+.topbar a, .topbar .hint, .topbar .ghost { color: var(--primary-fg); text-decoration: none; opacity: .78; }
+.topbar a:hover, .topbar .ghost:hover { opacity: 1; background: transparent; border-color: transparent; }
+.topbar :focus-visible { outline-color: var(--primary-fg); }
 .brand { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-3) 0;
-         color: var(--fg); font-weight: 600; font-size: 1.1rem; text-decoration: none; }
-.brand:hover { color: var(--fg); }
+         font-weight: 600; font-size: 1.1rem; }
+.topbar .brand { opacity: 1; }
 .logo { height: 1.75rem; width: auto; display: block; }
 .nav { display: flex; gap: var(--space-4); align-self: stretch; }
 .nav a { display: flex; align-items: center; padding: 0 var(--space-1); white-space: nowrap;
-         color: var(--fg-muted); text-decoration: none; border-bottom: 2px solid transparent; }
-.nav a:hover { color: var(--fg); }
-.nav a[aria-current="page"] { color: var(--fg); border-bottom-color: var(--primary); }
+         border-bottom: 2px solid transparent; }
+.nav a[aria-current="page"] { opacity: 1; border-bottom-color: var(--primary-fg); }
 .spacer { flex: 1; }
 .user { display: flex; align-items: center; gap: var(--space-3); }
 

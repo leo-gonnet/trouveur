@@ -16,7 +16,7 @@
 <body>
 {% if username is defined and username %}
 <header class="topbar">
-  <a href="/recommendations" class="brand">{% include "_logo.html" %}Trouveur</a>
+  <a href="/recommendations" class="brand"><img src="/static/logo-dark.png" alt="" class="logo">Trouveur</a>
   <nav class="nav">
     {% for href, key, name in [('/recommendations', 'recommendations', 'Recommendations'),
                                ('/search', 'search', 'Search'),
