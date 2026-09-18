@@ -432,9 +432,21 @@ so the deployment has no LLM spend of its own and one user's exhausted budget ca
 - Changing the default model is an eval question, not a taste question. **The model and the
   provider pin are installation settings** (`default_llm_model`, `default_llm_provider`), never
   a per-user field: a user-chosen model makes scores incomparable across users and lets the pin
-  be cleared. The Settings page shows them read-only. Volume (`retrieval_limit`, `rerank_limit`)
-  lives on Settings next to the ceiling, not on Profile: it is a cost dial, not part of what a
-  good match is, and every field left on Profile is a `SCORING_FIELDS` member.
+  be cleared. The Settings page shows them read-only. Volume lives on Settings next to the
+  ceiling, not on Profile: it is a cost dial, not part of what a good match is, and every field
+  left on Profile is a `SCORING_FIELDS` member.
+- **The user sets one volume number, `rerank_limit`.** `retrieval_limit` is derived from it
+  (`retrieve.retrieval_limit_for`) as headroom for the rules cut. Retrieving more than will be
+  scored changes nothing past that headroom, because rerank takes the top `rerank_limit` by
+  retrieval score whatever was fetched — so a second knob was a number with no effect to explain.
+- **A scoring change forgets the user's verdicts** (`users.reset_verdicts`, called from
+  `save_profile`). The `profile_version < current` test in `pending_rerank` cannot do this alone:
+  retrieval re-stamps `profile_version` on every row it finds again *before* reranking, so the
+  rows most worth re-scoring were exactly the ones that looked current, and old scores survived a
+  profile change labelled as new. `state` and `notified_at` are kept — they are the user's history.
+- **"Match now" is a match-only run** (`pipeline_run.match_user_id`), queued by the web app and
+  executed by the runner like any other run. It sweeps nothing and sends no digest. One per user
+  at a time; a second click while one is pending must not queue another paid run.
 
 ## Web UI
 

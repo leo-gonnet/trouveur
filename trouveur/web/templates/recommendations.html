@@ -4,9 +4,18 @@
 <div class="page-head">
   <h1>Recommendations</h1>
   <p class="hint">
-    Everything that passed the rules and was scored, best first. How many there are is your
-    <a href="/profile">rerank budget</a>; <a href="/search">Search</a> shows everything collected.
+    Everything that passed the rules and was scored, best first. How many there are is set in
+    <a href="/settings">Settings</a>; <a href="/search">Search</a> shows everything collected.
   </p>
+  <form method="post" action="/recommendations/run" class="actions">
+    <button class="primary" type="submit" {% if pending_run %}disabled{% endif %}>Match now</button>
+    {% if pending_run %}
+      <span class="hint">Matching is {{ pending_run.status }}; this page updates when it finishes.</span>
+    {% else %}
+      <span class="hint">Re-rank the postings already collected, without waiting for the next scan.
+        Only postings not yet scored for your current profile cost anything.</span>
+    {% endif %}
+  </form>
 </div>
 
 <div class="kpis">
@@ -31,7 +40,8 @@
   </div>
 {% else %}
 <p class="empty">
-  Nothing scored yet. Retrieval and the rules cut are free and run without a key; scoring needs an
+  Nothing scored yet for your current profile. Matching runs after every scan, or now with the
+  button above. Retrieval and the rules cut are free and run without a key; scoring needs an
   OpenRouter key in <a href="/settings">Settings</a>. Meanwhile <a href="/search">Search</a> shows
   everything collected.
 </p>

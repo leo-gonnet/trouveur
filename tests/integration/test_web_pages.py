@@ -157,12 +157,59 @@ async def test_saving_a_scoring_field_bumps_the_profile_version(client, seeded):
         after_scoring = (await users_q.get_profile(conn, seeded["user_id"])).version
     assert after_scoring > before
 
-    volume = {"retrieval_limit": "400", "rerank_limit": "200"}
-    assert (await client.post("/settings/volume", data=volume)).status_code == 303
+    assert (await client.post("/settings/volume", data={"rerank_limit": "200"})).status_code == 303
     async with connect() as conn:
         row = await users_q.get_profile(conn, seeded["user_id"])
     assert row.version == after_scoring
     assert row.rerank_limit == 200
+    assert row.retrieval_limit == 600, "retrieval is headroom over rerank, not a second setting"
+
+
+async def test_a_scoring_change_forgets_verdicts_but_not_what_the_user_did(client, seeded):
+    """The Profile page promises a re-score; without this, retrieval re-stamps the version on
+    every row it finds again and the old scores survive labelled as new."""
+
+    from trouveur.db.schema import user_job_match
+
+    async with connect() as conn:
+        await match_q.set_state(conn, seeded["user_id"], seeded["job_id"], "saved")
+        before = (await conn.execute(
+            user_job_match.select().where(user_job_match.c.user_id == seeded["user_id"])
+        )).one()
+    assert before.llm_score == 92 and before.rule_verdict == "pass"
+
+    form = {"title": "Something else entirely", "years_experience": "9", "countries": "DE,AT"}
+    assert (await client.post("/profile", data=form)).status_code == 303
+
+    async with connect() as conn:
+        after = (await conn.execute(
+            user_job_match.select().where(user_job_match.c.user_id == seeded["user_id"])
+        )).one()
+        pending = await match_q.pending_rules(conn, seeded["user_id"], 100)
+    assert after.llm_score is None and after.llm_reason is None and after.scored_at is None
+    assert after.rule_verdict == "unknown"
+    assert after.state == "saved", "a profile edit must not touch the user's own decisions"
+    assert [row.job_id for row in pending] == [seeded["job_id"]]
+    assert (await client.get("/recommendations")).status_code == 200
+
+
+async def test_match_now_queues_one_run_for_this_user_only(client, seeded):
+    from trouveur.db.queries import admin as admin_q
+
+    assert (await client.post("/recommendations/run")).status_code == 303
+    assert (await client.post("/recommendations/run")).status_code == 303
+    async with connect() as conn:
+        runs = await admin_q.recent_runs(conn)
+        pending = await admin_q.pending_match_run(conn, seeded["user_id"])
+    mine = [run for run in runs if run.match_user_id == seeded["user_id"]]
+    assert len(mine) == 1, "a second click must not queue a second paid run"
+    assert mine[0].only_source is None and not mine[0].backfill
+    assert pending is not None and pending.id == mine[0].id
+
+    body = (await client.get("/recommendations")).text
+    assert "disabled" in body and "Matching is queued" in body
+    body = (await client.get("/admin")).text
+    assert "match only" in body
 
 
 async def test_logout_clears_the_session(client):

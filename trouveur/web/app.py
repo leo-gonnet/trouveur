@@ -29,6 +29,7 @@ from trouveur.db.engine import connect
 from trouveur.db.queries import admin as admin_q
 from trouveur.db.queries import match as match_q
 from trouveur.db.queries import users as users_q
+from trouveur.match import retrieve
 from trouveur.match.pipeline import profile_from_row
 from trouveur.models import RunTrigger, UserState
 from trouveur.sources.registry import NORMALIZERS
@@ -140,6 +141,7 @@ async def recommendations(request: Request):
         jobs = await match_q.recommendations(conn, session["uid"], limit)
         stats = await match_q.match_stats(conn, session["uid"])
         credential = await users_q.get_credential(conn, session["uid"])
+        pending_run = await admin_q.pending_match_run(conn, session["uid"])
     return templates.TemplateResponse(
         request,
         "recommendations.html",
@@ -148,9 +150,22 @@ async def recommendations(request: Request):
             "jobs": jobs,
             "stats": stats,
             "has_key": credential is not None,
+            "pending_run": pending_run,
             "username": session["u"],
         },
     )
+
+
+@app.post("/recommendations/run")
+async def recommendations_run(request: Request):
+    """Queue a match-only run for this user. The runner executes it; the web app never matches."""
+    session = request.state.session
+    async with connect() as conn:
+        if await admin_q.pending_match_run(conn, session["uid"]) is None:
+            await admin_q.enqueue_run(
+                conn, trigger=RunTrigger.MANUAL, match_user_id=session["uid"]
+            )
+    return RedirectResponse("/recommendations", status_code=303)
 
 
 @app.get("/search", response_class=HTMLResponse)
@@ -339,16 +354,10 @@ async def settings_save(
 
 
 @app.post("/settings/volume", response_class=HTMLResponse)
-async def settings_volume_save(
-    request: Request,
-    retrieval_limit: int = Form(400),
-    rerank_limit: int = Form(150),
-):
+async def settings_volume_save(request: Request, rerank_limit: int = Form(150)):
     session = request.state.session
-    values = {
-        "retrieval_limit": min(max(retrieval_limit, 25), 2000),
-        "rerank_limit": min(max(rerank_limit, 0), 1000),
-    }
+    rerank = min(max(rerank_limit, 0), 1000)
+    values = {"rerank_limit": rerank, "retrieval_limit": retrieve.retrieval_limit_for(rerank)}
     async with connect() as conn:
         await users_q.save_profile(conn, session["uid"], values)
     return RedirectResponse("/settings?saved=1", status_code=303)

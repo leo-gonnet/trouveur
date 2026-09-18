@@ -17,6 +17,20 @@ from trouveur.match.fuse import best_ranks, reciprocal_rank_fusion
 from trouveur.models import UserProfile
 
 MIN_PER_QUERY = 25
+RETRIEVAL_HEADROOM = 3
+MIN_RETRIEVAL = 100
+MAX_RETRIEVAL = 2000
+
+
+def retrieval_limit_for(rerank_limit: int) -> int:
+    """How many candidates to retrieve so that rerank_limit survive the rules cut.
+
+    Retrieving more than will be scored changes nothing past this headroom: the rerank stage takes
+    the top rerank_limit by retrieval score, so candidate rerank_limit+1 is never read however many
+    were fetched. The multiple is not a user preference, it is an allowance for what the rules
+    reject, so it is a constant here rather than a second number to explain on a settings page.
+    """
+    return min(max(rerank_limit * RETRIEVAL_HEADROOM, MIN_RETRIEVAL), MAX_RETRIEVAL)
 
 
 @dataclass
