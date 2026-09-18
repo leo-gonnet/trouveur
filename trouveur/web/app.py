@@ -103,7 +103,7 @@ async def root(request: Request):
 async def login_form(request: Request):
     if request.state.session:
         return RedirectResponse("/recommendations", 303)
-    return templates.TemplateResponse(request, "login.html", {"error": None})
+    return templates.TemplateResponse(request, "login.html", {"error": None, "attempted": ""})
 
 
 @app.post("/login", response_class=HTMLResponse)
@@ -113,7 +113,7 @@ async def login(request: Request, username: str = Form(...), password: str = For
         user_id, message = await auth.authenticate(conn, settings, username, password)
     if user_id is None:
         return templates.TemplateResponse(
-            request, "login.html", {"error": message}, status_code=401
+            request, "login.html", {"error": message, "attempted": username}, status_code=401
         )
     response = RedirectResponse("/recommendations", status_code=303)
     auth.set_cookie(response, settings, auth.issue_session(settings, user_id, username))
