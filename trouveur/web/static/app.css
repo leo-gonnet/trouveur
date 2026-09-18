@@ -3,7 +3,7 @@
    Tokens are the only place a value is written; components below read them. A feature never
    sets a colour, a radius or a spacing of its own — add a token or a component here instead.
 
-   Palette: the logo's navy on white. Navy is text, links, buttons and the active item; the
+   Palette: the logo's navy on a cool off-white canvas with white surfaces. Navy is text, links, buttons and the active item; the
    logo's red-orange appears in the logo and nowhere else. Status (good/warn/bad, score bands)
    uses muted tints so a dashboard scans without looking colourful. One system sans-serif.
 
@@ -23,8 +23,9 @@
   --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
-  --bg: #ffffff;
-  --surface-2: #f4f6f8;
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --surface-2: #eef0f3;
   --border: #d9dee5;
   --fg: #1e2634;
   --fg-muted: #66707d;
@@ -54,7 +55,7 @@ code, kbd { font: .86em var(--mono); background: var(--surface-2); padding: 1px 
 /* ---------- Layout ---------- */
 .topbar {
   display: flex; align-items: center; gap: var(--space-5); flex-wrap: wrap;
-  padding: 0 var(--space-6); border-bottom: 1px solid var(--border);
+  padding: 0 var(--space-6); background: var(--surface); border-bottom: 1px solid var(--border);
 }
 .brand { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-3) 0;
          color: var(--fg); font-weight: 600; font-size: 1.1rem; text-decoration: none; }
@@ -74,7 +75,7 @@ main { padding: var(--space-5) var(--space-6) var(--space-7); }
 .page-head .hint { max-width: 70ch; }
 
 /* ---------- Sections ---------- */
-.section { border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-5); }
+.section { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-5); }
 .section + .section, .grid + .section, .section + .grid { margin-top: var(--space-5); }
 .section-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3);
                 margin-bottom: var(--space-4); }
@@ -87,7 +88,7 @@ main { padding: var(--space-5) var(--space-6) var(--space-7); }
 /* ---------- KPIs ---------- */
 .kpis { display: grid; gap: var(--space-4); margin-bottom: var(--space-5);
         grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
-.kpi { border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-3) var(--space-4); }
+.kpi { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-3) var(--space-4); }
 .kpi .value { display: block; font-size: 1.6rem; font-weight: 600; line-height: 1.2;
               font-variant-numeric: tabular-nums; }
 .kpi .label { font-size: .82rem; color: var(--fg-muted); }
@@ -133,7 +134,7 @@ button, .btn {
   display: inline-flex; align-items: center; gap: var(--space-2);
   font: inherit; font-size: .88rem; font-weight: 500; line-height: 1.3; text-decoration: none;
   padding: var(--space-2) var(--space-4); border-radius: var(--radius);
-  border: 1px solid var(--border); background: var(--bg); color: var(--fg); cursor: pointer;
+  border: 1px solid var(--border); background: var(--surface); color: var(--fg); cursor: pointer;
 }
 button:hover, .btn:hover { background: var(--surface-2); border-color: var(--fg-muted); color: var(--fg); }
 button:disabled { opacity: .55; cursor: default; }
@@ -150,7 +151,7 @@ label .hint { font-weight: 400; }
 label.check { display: flex; align-items: center; gap: var(--space-2); }
 input, textarea, select {
   font: inherit; font-size: .92rem; width: 100%; padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); color: var(--fg);
+  border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--fg);
 }
 input[type=checkbox] { width: auto; margin: 0; }
 textarea { min-height: 76px; resize: vertical; }
@@ -165,10 +166,10 @@ form.inline { display: inline; }
 
 /* ---------- Notices & empty states ---------- */
 .notice { padding: var(--space-3) var(--space-4); border-radius: var(--radius); font-size: .9rem;
-          margin-bottom: var(--space-4); background: var(--surface-2); max-width: 90ch; }
-.notice.good { background: var(--good-soft); color: var(--good); }
-.notice.warn { background: var(--warn-soft); color: var(--warn); }
-.notice.bad  { background: var(--bad-soft);  color: var(--bad); }
+          margin-bottom: var(--space-4); background: var(--surface); border: 1px solid var(--border); max-width: 90ch; }
+.notice.good { background: var(--good-soft); color: var(--good); border-color: transparent; }
+.notice.warn { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
+.notice.bad  { background: var(--bad-soft);  color: var(--bad);  border-color: transparent; }
 .notice a { color: inherit; }
 .section > .notice { margin: var(--space-3) 0 0; }
 .empty { padding: var(--space-6) 0; color: var(--fg-muted); max-width: 70ch; }
@@ -184,9 +185,10 @@ form.inline { display: inline; }
 /* ---------- Job results ---------- */
 /* A mail-style list: one row per posting, score on the left, actions on the right, hairlines
    between. The page is the only scroll container: the list never caps its own height. */
-.results { border-top: 1px solid var(--border); }
-.job { display: flex; align-items: center; gap: var(--space-4); padding: var(--space-4) var(--space-2);
-       border-bottom: 1px solid var(--border); }
+.results { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+.job { display: flex; align-items: center; gap: var(--space-4); padding: var(--space-4) var(--space-5);
+       border-top: 1px solid var(--border); }
+.job:first-child { border-top: 0; }
 .job:hover { background: var(--surface-2); }
 .job-main { flex: 1; min-width: 0; }
 .job-title { color: var(--fg); font-weight: 600; font-size: 1.05rem; text-decoration: none; }
@@ -207,11 +209,13 @@ form.inline { display: inline; }
 .states button[aria-pressed=true] { background: var(--primary); color: var(--primary-fg);
                                      border-color: var(--primary); position: relative; }
 
-.pager { display: flex; align-items: center; justify-content: center; gap: var(--space-3); padding: var(--space-3); }
+.pager { display: flex; align-items: center; justify-content: center; gap: var(--space-3); padding: var(--space-3);
+         border-top: 1px solid var(--border); }
 .description { white-space: pre-wrap; line-height: 1.65; max-width: 80ch; }
 
 /* ---------- Login ---------- */
-.login { max-width: 22rem; margin: 12vh auto 0; display: grid; gap: var(--space-4); }
+.login { max-width: 24rem; margin: 12vh auto 0; display: grid; gap: var(--space-4); padding: var(--space-6);
+         background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
 .login h1 { display: flex; align-items: center; gap: var(--space-3); }
 .login .logo { height: 2.5rem; }
 .login .actions { margin-top: var(--space-4); }
