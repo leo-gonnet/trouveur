@@ -5,7 +5,7 @@ moment a request is built, never logged, and never sent back to the browser -- t
 shows a fingerprint so a user can tell which key is stored without the application being able to
 show it to anyone who reaches the page.
 
-Losing TROUVEUR_ENCRYPTION_KEY makes stored keys unrecoverable, which is the correct failure: the
+Losing ENCRYPTION_KEY makes stored keys unrecoverable, which is the correct failure: the
 alternative is a key that can be derived from something already in the database.
 """
 
@@ -29,7 +29,7 @@ def _cipher() -> Fernet:
     secret = get_settings().encryption_key
     if not secret or secret == "dev-only-insecure-encryption-key":
         raise CredentialError(
-            "TROUVEUR_ENCRYPTION_KEY is unset or still the development default. Set it to a "
+            "ENCRYPTION_KEY is unset or still the development default. Set it to a "
             "random secret before storing any user's API key."
         )
     # Fernet wants 32 url-safe base64 bytes; the operator supplies an arbitrary passphrase.
@@ -45,7 +45,7 @@ def decrypt(token: bytes) -> str:
         return _cipher().decrypt(bytes(token)).decode()
     except InvalidToken as exc:
         raise CredentialError(
-            "A stored API key could not be decrypted. TROUVEUR_ENCRYPTION_KEY has probably "
+            "A stored API key could not be decrypted. ENCRYPTION_KEY has probably "
             "changed; the affected users must re-enter their key."
         ) from exc
 

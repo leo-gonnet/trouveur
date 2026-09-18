@@ -11,6 +11,7 @@ in trouveur/ingest/derive.py, and the two would drift.
 
 from __future__ import annotations
 
+import importlib.metadata
 import logging
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
@@ -44,6 +45,7 @@ app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")
 # green test suite -- the exact silent-wrong-answer failure this codebase is built to avoid.
 templates = Jinja2Templates(directory=BASE / "templates")
 templates.env.undefined = StrictUndefined
+templates.env.globals["version"] = importlib.metadata.version("trouveur")
 
 
 def _lines(raw: str) -> list[str]:

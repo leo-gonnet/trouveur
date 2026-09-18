@@ -13,8 +13,8 @@
 </div>
 
 <div class="grid">
-  <section class="card">
-    <div class="card-head"><h2>Assessment</h2></div>
+  <section class="section">
+    <div class="section-head"><h2>Assessment</h2></div>
     <table>
       <tr><td>Score</td><td>{{ m.score_pill(job.llm_score) }}</td></tr>
       <tr><td>Reason</td><td>{{ job.llm_reason or '—' }}</td></tr>
@@ -23,8 +23,8 @@
     </table>
   </section>
 
-  <section class="card">
-    <div class="card-head"><h2>Derived facets</h2></div>
+  <section class="section">
+    <div class="section-head"><h2>Derived facets</h2></div>
     <table>
       <tr><td>Work mode</td><td>{{ job.work_mode }}</td></tr>
       <tr><td>Seniority</td><td>{{ job.seniority }}</td></tr>
@@ -39,8 +39,8 @@
   </section>
 </div>
 
-<section class="card">
-  <div class="card-head"><h2>Advert</h2></div>
+<section class="section">
+  <div class="section-head"><h2>Advert</h2></div>
   <p class="description">{{ job.description or 'No description was collected for this posting.' }}</p>
 </section>
 {% endblock %}

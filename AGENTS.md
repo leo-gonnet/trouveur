@@ -465,8 +465,10 @@ so the deployment has no LLM spend of its own and one user's exhausted budget ca
   mid-source has seen part of its live set, and `closable_scopes` is read straight off it — so an
   interrupted source that reached the closing step could retire postings that are still live. A
   cancelled run also stops before matching, so it never spends a user's LLM credit.
-- **Styling lives in one file:** `web/static/app.css`, using CSS custom properties for theming (incl.
-  `prefers-color-scheme: dark`). No inline `<style>` blocks beyond one-off layout tweaks.
+- **Styling lives in one file:** `web/static/app.css`, light only, one system sans-serif, the
+  logo's navy on white. The logo's red-orange is used in the logo and nowhere else, and there
+  is no display font: that combination read as another product's theme. No inline `<style>`
+  blocks beyond one-off layout tweaks.
 - **The design system is the token block and the component list at the top of `app.css`.** A
   template uses those classes and nothing else: no colour, radius or spacing is written in a
   template, and a new look is a new component in `app.css`, not a one-off. The vocabulary is
@@ -475,6 +477,10 @@ so the deployment has no LLM spend of its own and one user's exhausted budget ca
   macro in `_macros.html` (`kpi`, `score_pill`, `states`, `job_card`), because markup and CSS
   drifted apart twice: KPI tiles emitted classes the stylesheet did not style, and a second
   "v2" block at the end of the file redefined `.score.low` and `.pill.bad` with other colours.
+- **The page is full width and is the only thing that scrolls.** A results list or a description
+  never caps its own height; a nested scrollbar was tried and rejected. Dashboard-style pages
+  are boxed sections (`.section`); recommendations and search are a mail-style list of rows
+  (`.results` / `.job`), not cards.
 - No build step, no Node, on purpose — plain CSS and HTMX only.
 
 ## Database rules

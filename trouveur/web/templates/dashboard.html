@@ -7,11 +7,11 @@
   {{ m.kpi('{:,}'.format(overview.total), 'ever collected') }}
   {{ m.kpi('{:,}'.format(overview.new_today), 'new today') }}
   {{ m.kpi('{:,}'.format(overview.companies), 'companies') }}
-  {{ m.kpi('${:.2f}'.format(spend.cost_usd if spend else 0), 'your spend, this month') }}
+  {{ m.kpi('${:.2f}'.format(spend.cost_usd if spend else 0), 'spend this month (USD)') }}
 </div>
 
-<section class="card">
-<div class="card-head"><h2>Source health</h2></div>
+<section class="section">
+<div class="section-head"><h2>Source health</h2></div>
   <p class="hint">
     A sweep can succeed and still not have seen everything. <em>Complete</em> means it observed a
     source's whole live set, which is the only basis on which a posting may be retired.
@@ -43,8 +43,8 @@
 </section>
 
 <div class="grid">
-  <section class="card">
-    <div class="card-head"><h2>Derived coverage</h2></div>
+  <section class="section">
+    <div class="section-head"><h2>Derived coverage</h2></div>
     <p class="hint">A posting can be stored and searchable but still invisible to recommendations
       until its facets and embedding land. This is that gap, rather than it looking like poor recall.</p>
     <table>
@@ -66,8 +66,8 @@
     {% endif %}
   </section>
 
-  <section class="card">
-    <div class="card-head"><h2>Work queues</h2></div>
+  <section class="section">
+    <div class="section-head"><h2>Work queues</h2></div>
     {% if queues %}
     <table>
       <tr><th>Kind</th><th class="num">Pending</th><th>Oldest</th></tr>
@@ -79,8 +79,8 @@
     {% else %}<p class="empty">All queues drained.</p>{% endif %}
   </section>
 
-  <section class="card">
-    <div class="card-head"><h2>Open postings by country</h2></div>
+  <section class="section">
+    <div class="section-head"><h2>Open postings by country</h2></div>
     {% if countries %}
     <table>
       {% for row in countries %}
@@ -90,8 +90,8 @@
     {% else %}<p class="empty">Nothing derived yet.</p>{% endif %}
   </section>
 
-  <section class="card">
-    <div class="card-head"><h2>Your matches</h2></div>
+  <section class="section">
+    <div class="section-head"><h2>Your matches</h2></div>
     <table>
       <tr><td>Retrieved</td><td class="num">{{ '{:,}'.format(stats.retrieved) }}</td></tr>
       <tr><td>Passed rules</td><td class="num">{{ '{:,}'.format(stats.passed) }}</td></tr>
@@ -102,8 +102,8 @@
   </section>
 </div>
 
-<section class="card">
-  <div class="card-head"><h2>Tenant health</h2></div>
+<section class="section">
+  <div class="section-head"><h2>Tenant health</h2></div>
   <p class="hint">
     Read-only. The crawl set is shared by every user, so changing it is an operator action on the
     server — <code>trouveur tenants add|enable|disable|remove</code>. A tenant failing for several

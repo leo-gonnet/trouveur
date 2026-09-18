@@ -14,7 +14,7 @@
 {% endmacro %}
 
 {% macro kpi(value, label) %}
-<div class="kpi"><strong class="value">{{ value }}</strong><span class="label">{{ label }}</span></div>
+<div class="kpi"><span class="label">{{ label }}</span><strong class="value">{{ value }}</strong></div>
 {% endmacro %}
 
 {# Band names must match app.css. They did not: this emitted `good`/`ok` against a stylesheet
@@ -34,28 +34,25 @@
 
 {% macro job_card(job) %}
 <article class="job">
-  <div class="job-head">
-    {{ score_pill(job.llm_score) }}
-    <div>
-      <a class="job-title" href="/job/{{ job.public_id }}">{{ job.title }}</a>
-      <p class="meta">
-        {{ job.company or 'company not stated' }} ·
-        {{ places(job) }} ·
-        {% if job.work_mode and job.work_mode != 'unknown' %}{{ job.work_mode }} · {% endif %}
-        {{ salary(job) }}
-        {% if job.closed_at %} · <span class="pill bad">closed</span>{% endif %}
-      </p>
-      {% if job.llm_reason %}<p class="reason">{{ job.llm_reason }}</p>{% endif %}
-      {% if job.llm_red_flags %}
-        <p class="flags">{% for flag in job.llm_red_flags %}<span class="pill warn">{{ flag }}</span>{% endfor %}</p>
-      {% endif %}
-      <div class="actions">
-        <a class="pill" href="{{ job.url }}" target="_blank" rel="noopener noreferrer">Open advert ↗</a>
-        <span class="pill">{{ job.source }}</span>
-        <span class="spacer"></span>
-        {{ states(job) }}
-      </div>
-    </div>
+  {{ score_pill(job.llm_score) }}
+  <div class="job-main">
+    <a class="job-title" href="/job/{{ job.public_id }}">{{ job.title }}</a>
+    <p class="meta">
+      {{ job.company or 'company not stated' }} ·
+      {{ places(job) }} ·
+      {% if job.work_mode and job.work_mode != 'unknown' %}{{ job.work_mode }} · {% endif %}
+      {{ salary(job) }} ·
+      {{ job.source }}
+      {% if job.closed_at %} · <span class="pill bad">closed</span>{% endif %}
+    </p>
+    {% if job.llm_reason %}<p class="reason">{{ job.llm_reason }}</p>{% endif %}
+    {% if job.llm_red_flags %}
+      <p class="flags">{% for flag in job.llm_red_flags %}<span class="pill warn">{{ flag }}</span>{% endfor %}</p>
+    {% endif %}
+  </div>
+  <div class="actions">
+    <a href="{{ job.url }}" target="_blank" rel="noopener noreferrer">Open advert ↗</a>
+    {{ states(job) }}
   </div>
 </article>
 {% endmacro %}

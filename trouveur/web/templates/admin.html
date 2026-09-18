@@ -8,16 +8,16 @@
   </p>
 </div>
 
-<section class="card">
-  <div class="card-head"><h2>Now</h2></div>
+<section class="section">
+  <div class="section-head"><h2>Now</h2></div>
   <div hx-get="/admin/status" hx-trigger="every 3s" hx-swap="innerHTML">
     {% include "_admin_status.html" %}
   </div>
 </section>
 
 <div class="grid">
-  <section class="card">
-    <div class="card-head"><h2>Schedule</h2></div>
+  <section class="section">
+    <div class="section-head"><h2>Schedule</h2></div>
     <form method="post" action="/admin/schedule">
       <label class="check">
         <input type="checkbox" name="enabled" value="true" {% if schedule.enabled %}checked{% endif %}>
@@ -29,8 +29,8 @@
     </form>
   </section>
 
-  <section class="card">
-    <div class="card-head"><h2>Run now</h2></div>
+  <section class="section">
+    <div class="section-head"><h2>Run now</h2></div>
     <form method="post" action="/admin/run">
       <label>Source
         <select name="only_source">
@@ -47,15 +47,15 @@
   </section>
 </div>
 
-<section class="card">
-  <div class="card-head"><h2>Recent runs</h2></div>
+<section class="section">
+  <div class="section-head"><h2>Recent runs</h2></div>
   <div hx-get="/admin/runs" hx-trigger="every 5s" hx-swap="innerHTML">
     {% include "_admin_runs.html" %}
   </div>
 </section>
 
-<section class="card">
-  <div class="card-head"><h2>Recent sweeps</h2></div>
+<section class="section">
+  <div class="section-head"><h2>Recent sweeps</h2></div>
   {% if sweeps %}
   <table>
     <tr><th>Source</th><th>Started</th><th class="num">Docs</th><th class="num">Upserted</th>
