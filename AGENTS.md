@@ -452,8 +452,29 @@ so the deployment has no LLM spend of its own and one user's exhausted budget ca
   work mode is a second implementation of a question `derive.py` already answered.
 - **The dashboard must surface what fails silently**: partition overflow, sweep completeness, the
   gap between stored and recommendable, queue depth, and more than one embedding version present.
+- **A run must be watchable while it runs, not only once it is over.** The runner writes
+  `sources_total`/`sources_done`/`current_source` on `pipeline_run` as it goes, and the sweep sink
+  updates `source_sweep.documents_seen` per batch. Without those a long source and a wedged one
+  look identical — which is exactly how a Workday sweep sat for an hour before anyone noticed.
+- **Estimate only from measured history, and say so when there is none.** The remaining time on
+  the Scans page is the sum of each pending source's median duration over its own last sweeps.
+  Averaging *across* sources would be fiction: a board is seconds and Arbeitsagentur is half an
+  hour. A source with no history contributes nothing and the page says it cannot estimate yet.
+- **Cancellation is a request, not a kill** (`pipeline_run.cancel_requested`). A queued run ends
+  at once; a running one is stopped **between sources**, never inside one. A sweep torn down
+  mid-source has seen part of its live set, and `closable_scopes` is read straight off it — so an
+  interrupted source that reached the closing step could retire postings that are still live. A
+  cancelled run also stops before matching, so it never spends a user's LLM credit.
 - **Styling lives in one file:** `web/static/app.css`, using CSS custom properties for theming (incl.
   `prefers-color-scheme: dark`). No inline `<style>` blocks beyond one-off layout tweaks.
+- **The design system is the token block and the component list at the top of `app.css`.** A
+  template uses those classes and nothing else: no colour, radius or spacing is written in a
+  template, and a new look is a new component in `app.css`, not a one-off. The vocabulary is
+  deliberately small and the same word means the same thing everywhere — `good`/`warn`/`bad`
+  on a `pill` or a `notice`, `high`/`mid`/`low` on a `score`. Repeated markup goes through a
+  macro in `_macros.html` (`kpi`, `score_pill`, `states`, `job_card`), because markup and CSS
+  drifted apart twice: KPI tiles emitted classes the stylesheet did not style, and a second
+  "v2" block at the end of the file redefined `.score.low` and `.pill.bad` with other colours.
 - No build step, no Node, on purpose — plain CSS and HTMX only.
 
 ## Database rules

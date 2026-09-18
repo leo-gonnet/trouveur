@@ -1,0 +1,6 @@
+<span class="states" hx-target="this" hx-swap="outerHTML">
+  {% for state in ['saved', 'applied', 'dismissed'] %}
+    <button hx-post="/job/{{ job_id }}/state" hx-vals='{"state": "{{ state }}"}'
+            aria-pressed="{{ 'true' if current == state else 'false' }}">{{ state }}</button>
+  {% endfor %}
+</span>

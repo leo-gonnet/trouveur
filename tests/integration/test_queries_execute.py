@@ -73,6 +73,14 @@ def _arguments(ctx: dict) -> dict[str, dict]:
         "admin.enqueue_run": {"trigger": RunTrigger.MANUAL, "only_source": source},
         "admin.claim_next_run": {},
         "admin.finish_run": {"run_id": ctx["run_id"], "status": RunStatus.SUCCESS, "report": {}},
+        "admin.request_cancel": {"run_id": ctx["run_id"]},
+        "admin.cancel_requested": {"run_id": ctx["run_id"]},
+        "admin.start_run_progress": {"run_id": ctx["run_id"], "sources_total": 3},
+        "admin.advance_run_progress": {
+            "run_id": ctx["run_id"], "done": 1, "current_source": source,
+        },
+        "admin.running_sweeps": {},
+        "admin.typical_sweep_seconds": {},
         "admin.recent_runs": {},
         "admin.active_run": {},
         "admin.fail_orphaned_runs": {},
@@ -94,6 +102,7 @@ def _arguments(ctx: dict) -> dict[str, dict]:
         "ingest.close_stale": {"source": source, "older_than": timedelta(days=3650)},
         "ingest.close_retired": {"job_ids": []},
         "ingest.start_sweep": {"source": source},
+        "ingest.record_sweep_progress": {"sweep_id": ctx["sweep_id"], "documents_seen": 7},
         "ingest.finish_sweep": {
             "sweep_id": ctx["sweep_id"], "ok": True, "complete": False, "partitions_total": 1,
             "partitions_done": 1, "partitions_overflowed": 0, "documents_seen": 1,

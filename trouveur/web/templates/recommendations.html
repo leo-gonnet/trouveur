@@ -10,11 +10,11 @@
 </div>
 
 <div class="kpis">
-  <div class="kpi"><span class="num">{{ stats.retrieved }}</span><span>retrieved</span></div>
-  <div class="kpi"><span class="num">{{ stats.passed }}</span><span>passed rules</span></div>
-  <div class="kpi"><span class="num">{{ stats.scored }}</span><span>scored</span></div>
-  <div class="kpi"><span class="num">{{ stats.saved }}</span><span>saved</span></div>
-  <div class="kpi"><span class="num">{{ stats.applied }}</span><span>applied</span></div>
+  {{ m.kpi(stats.retrieved, 'retrieved') }}
+  {{ m.kpi(stats.passed, 'passed rules') }}
+  {{ m.kpi(stats.scored, 'scored') }}
+  {{ m.kpi(stats.saved, 'saved') }}
+  {{ m.kpi(stats.applied, 'applied') }}
 </div>
 
 {% if not has_key %}
@@ -26,7 +26,7 @@
 {% endif %}
 
 {% if jobs %}
-  <div class="results-scroll">
+  <div class="results">
     {% for job in jobs %}{{ m.job_card(job) }}{% endfor %}
   </div>
 {% else %}

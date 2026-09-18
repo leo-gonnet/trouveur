@@ -1,4 +1,4 @@
-{% extends "base.html" %}{% block title %}Settings · Trouveur{% endblock %}
+{% extends "base.html" %}{% import "_macros.html" as m %}{% block title %}Settings · Trouveur{% endblock %}
 {% block content %}
 <div class="page-head">
   <h1>Settings</h1>
@@ -25,26 +25,26 @@
         <input name="provider_pin" value="{{ credential.provider_pin or '' if credential else '' }}" placeholder="{{ default_provider }}"></label>
       <label>Monthly ceiling <span class="hint">US dollars, the currency OpenRouter bills in. Checked before every batch, not after.</span>
         <input name="monthly_budget_usd" value="{{ credential.monthly_budget_usd if credential else '5' }}"></label>
-      <button class="primary" type="submit">Save</button>
+      <p class="actions">
+        <button class="primary" type="submit">Save</button>
+        {% if credential %}
+          <button class="danger" type="submit" formaction="/settings/delete-key" formnovalidate>Delete stored key</button>
+        {% endif %}
+      </p>
     </form>
-    {% if credential %}
-      <form method="post" action="/settings/delete-key" class="inline">
-        <button class="danger" type="submit">Delete stored key</button>
-      </form>
-    {% endif %}
   </section>
 
   <section class="card">
     <div class="card-head"><h2>Spend</h2></div>
     {% if spend %}
       <div class="kpis">
-        <div class="kpi"><span class="num">${{ '%.4f' % spend.cost_usd }}</span><span>this month</span></div>
-        <div class="kpi"><span class="num">{{ spend.calls }}</span><span>calls</span></div>
-        <div class="kpi"><span class="num">{{ '{:,}'.format(spend.tokens_in) }}</span><span>tokens in</span></div>
+        {{ m.kpi('${:.4f}'.format(spend.cost_usd), 'this month') }}
+        {{ m.kpi(spend.calls, 'calls') }}
+        {{ m.kpi('{:,}'.format(spend.tokens_in), 'tokens in') }}
       </div>
       {% if credential %}
         {% set used = (spend.cost_usd / credential.monthly_budget_usd * 100) if credential.monthly_budget_usd > 0 else 100 %}
-        <div class="bar-track"><div class="bar-fill" style="width: {{ [used, 100] | min }}%"></div></div>
+        <div class="bar"><span style="width: {{ [used, 100] | min }}%"></span></div>
         <p class="hint">{{ '%.0f' % used }}% of your ${{ credential.monthly_budget_usd }} ceiling.</p>
       {% endif %}
     {% else %}

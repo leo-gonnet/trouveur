@@ -399,6 +399,112 @@ async def active_run(conn: AsyncConnection) -> sa.Row | None:
     ).one_or_none()
 
 
+async def request_cancel(conn: AsyncConnection, run_id: int) -> bool:
+    """Ask a run to stop. Only a flag: the runner decides when it is safe to act on it.
+
+    A queued run has not started, so it is cancelled outright. A running one is left to the runner,
+    which stops between sources -- killing it mid-source would leave a partially observed source
+    that must never be treated as complete.
+    """
+    cancelled_now = await conn.execute(
+        pipeline_run.update()
+        .where(
+            pipeline_run.c.id == run_id,
+            pipeline_run.c.status == RunStatus.QUEUED.value,
+        )
+        .values(
+            status=RunStatus.CANCELLED.value,
+            finished_at=sa.func.now(),
+            cancel_requested=True,
+        )
+    )
+    if cancelled_now.rowcount:
+        return True
+    asked = await conn.execute(
+        pipeline_run.update()
+        .where(
+            pipeline_run.c.id == run_id,
+            pipeline_run.c.status == RunStatus.RUNNING.value,
+        )
+        .values(cancel_requested=True)
+    )
+    return bool(asked.rowcount)
+
+
+async def cancel_requested(conn: AsyncConnection, run_id: int) -> bool:
+    return bool(
+        await conn.scalar(
+            sa.select(pipeline_run.c.cancel_requested).where(pipeline_run.c.id == run_id)
+        )
+    )
+
+
+async def start_run_progress(conn: AsyncConnection, run_id: int, sources_total: int) -> None:
+    await conn.execute(
+        pipeline_run.update()
+        .where(pipeline_run.c.id == run_id)
+        .values(sources_total=sources_total, sources_done=0, current_source=None)
+    )
+
+
+async def advance_run_progress(
+    conn: AsyncConnection, run_id: int, *, done: int, current_source: str | None
+) -> None:
+    await conn.execute(
+        pipeline_run.update()
+        .where(pipeline_run.c.id == run_id)
+        .values(sources_done=done, current_source=current_source)
+    )
+
+
+async def running_sweeps(conn: AsyncConnection) -> list[sa.Row]:
+    """Sweeps with no verdict yet -- the ones happening right now.
+
+    `start_sweep` inserts the row before the first request, so a source appears here the moment it
+    begins and its documents_seen climbs while it works.
+    """
+    return list(
+        await conn.execute(
+            sa.select(
+                source_sweep.c.source,
+                source_sweep.c.started_at,
+                source_sweep.c.documents_seen,
+            )
+            .where(source_sweep.c.ok.is_(None))
+            .order_by(source_sweep.c.started_at)
+        )
+    )
+
+
+async def typical_sweep_seconds(conn: AsyncConnection, limit: int = 5) -> dict[str, float]:
+    """Median wall-clock seconds per source over its last few finished sweeps.
+
+    The only defensible basis for an estimate: how long this source actually took here, on this
+    crawl set. A source with no history is absent from the result rather than guessed at, so the
+    page can say it does not know instead of inventing a number.
+    """
+    rows = await conn.execute(
+        sa.text(
+            """
+            SELECT source,
+                   percentile_cont(0.5) WITHIN GROUP (
+                       ORDER BY EXTRACT(EPOCH FROM (finished_at - started_at))
+                   ) AS seconds
+            FROM (
+                SELECT source, started_at, finished_at,
+                       row_number() OVER (PARTITION BY source ORDER BY started_at DESC) AS rn
+                FROM source_sweep
+                WHERE finished_at IS NOT NULL AND ok
+            ) recent
+            WHERE rn <= :limit
+            GROUP BY source
+            """
+        ),
+        {"limit": limit},
+    )
+    return {row.source: float(row.seconds or 0) for row in rows}
+
+
 async def fail_orphaned_runs(conn: AsyncConnection) -> int:
     """Fail runs left 'running' by a process that died. Without this the queue wedges."""
     result = await conn.execute(

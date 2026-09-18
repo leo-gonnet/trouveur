@@ -8,6 +8,13 @@
   </p>
 </div>
 
+<section class="card">
+  <div class="card-head"><h2>Now</h2></div>
+  <div hx-get="/admin/status" hx-trigger="every 3s" hx-swap="innerHTML">
+    {% include "_admin_status.html" %}
+  </div>
+</section>
+
 <div class="grid">
   <section class="card">
     <div class="card-head"><h2>Schedule</h2></div>
@@ -18,7 +25,7 @@
       </label>
       <label>Hour<input name="run_hour" type="number" min="0" max="23" value="{{ schedule.run_hour }}"></label>
       <label>Minute<input name="run_minute" type="number" min="0" max="59" value="{{ schedule.run_minute }}"></label>
-      <button class="primary" type="submit">Save schedule</button>
+      <p class="actions"><button class="primary" type="submit">Save schedule</button></p>
     </form>
   </section>
 
@@ -32,8 +39,10 @@
         </select>
       </label>
       <label class="check"><input type="checkbox" name="backfill" value="true"> backfill (wider window)</label>
-      <button class="primary" type="submit" {% if active_run %}disabled{% endif %}>Queue a run</button>
-      {% if active_run %}<p class="hint">A run is already {{ active_run.status }}.</p>{% endif %}
+      <p class="actions">
+        <button class="primary" type="submit" {% if active_run %}disabled{% endif %}>Queue a run</button>
+        {% if active_run %}<span class="hint">A run is already {{ active_run.status }}.</span>{% endif %}
+      </p>
     </form>
   </section>
 </div>

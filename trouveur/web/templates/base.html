@@ -5,6 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
 <title>{% block title %}Trouveur{% endblock %}</title>
+<link rel="icon" type="image/png" href="/static/favicon.png">
+<link rel="icon" type="image/png" href="/static/favicon-dark.png" media="(prefers-color-scheme: dark)">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
 <link rel="stylesheet" href="/static/app.css">
 <script src="https://unpkg.com/htmx.org@2.0.4"
         integrity="sha384-HGfztofotfshcF7+8n44JQL2oJmowVChPTg48S+jvZoztPfvwD79OC/LTtG6dMp+"
@@ -13,18 +16,22 @@
 <body>
 {% if username is defined and username %}
 <header class="topbar">
-  <a href="/recommendations" class="brand"><span class="dot"></span>Trouveur</a>
+  <a href="/recommendations" class="brand">{% include "_logo.html" %}Trouveur</a>
   <nav class="nav">
-    <a href="/recommendations" {% if active=='recommendations' %}aria-current="page"{% endif %}>Recommendations</a>
-    <a href="/search" {% if active=='search' %}aria-current="page"{% endif %}>Search</a>
-    <a href="/dashboard" {% if active=='dashboard' %}aria-current="page"{% endif %}>Dashboard</a>
-    <a href="/profile" {% if active=='profile' %}aria-current="page"{% endif %}>Profile</a>
-    <a href="/settings" {% if active=='settings' %}aria-current="page"{% endif %}>Settings</a>
-    <a href="/admin" {% if active=='admin' %}aria-current="page"{% endif %}>Scans</a>
+    {% for href, key, name in [('/recommendations', 'recommendations', 'Recommendations'),
+                               ('/search', 'search', 'Search'),
+                               ('/dashboard', 'dashboard', 'Dashboard'),
+                               ('/profile', 'profile', 'Profile'),
+                               ('/settings', 'settings', 'Settings'),
+                               ('/admin', 'admin', 'Scans')] %}
+      <a href="{{ href }}" {% if active == key %}aria-current="page"{% endif %}>{{ name }}</a>
+    {% endfor %}
   </nav>
   <span class="spacer"></span>
-  <span class="hint">{{ username }}</span>
-  <form method="post" action="/logout"><button type="submit">Log out</button></form>
+  <span class="user">
+    <span class="hint">{{ username }}</span>
+    <form method="post" action="/logout" class="inline"><button type="submit" class="ghost">Log out</button></form>
+  </span>
 </header>
 {% endif %}
 <main>{% block content %}{% endblock %}</main>

@@ -10,7 +10,7 @@
 
 <form class="searchbar" hx-get="/search" hx-target="#results" hx-push-url="true"
       hx-trigger="submit, change from:select, change from:input[type=checkbox]">
-  <input name="q" value="{{ q }}" placeholder="Title, company, description…" autofocus>
+  <input name="q" type="search" value="{{ q }}" placeholder="Title, company, description…" autofocus>
   <select name="country">
     <option value="">Any country</option>
     {% for code in ['AT','DE','CH','NL','FR','GB','US'] %}
@@ -30,5 +30,5 @@
   <button class="primary" type="submit">Search</button>
 </form>
 
-<div id="results">{% include "_results.html" %}</div>
+<div id="results" class="results">{% include "_results.html" %}</div>
 {% endblock %}

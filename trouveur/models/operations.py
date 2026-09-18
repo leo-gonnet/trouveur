@@ -15,6 +15,7 @@ class RunStatus(StrEnum):
     RUNNING = "running"
     SUCCESS = "success"
     FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 class RunTrigger(StrEnum):
