@@ -235,7 +235,6 @@ async def profile_form(request: Request):
             "active": "profile",
             "profile": profile,
             "rescore_estimate": pending,
-            "scoring_fields": sorted(users_q.SCORING_FIELDS),
             "username": session["u"],
         },
     )
@@ -257,8 +256,6 @@ async def profile_save(
     seniorities: str = Form(""),
     employment_types: str = Form(""),
     min_salary_eur_year: str = Form("0"),
-    retrieval_limit: int = Form(400),
-    rerank_limit: int = Form(150),
 ):
     session = request.state.session
     values = {
@@ -275,8 +272,6 @@ async def profile_save(
         "seniorities": _commas(seniorities),
         "employment_types": _commas(employment_types),
         "min_salary_eur_year": _decimal(min_salary_eur_year, Decimal(0)),
-        "retrieval_limit": min(max(retrieval_limit, 25), 2000),
-        "rerank_limit": min(max(rerank_limit, 0), 1000),
     }
     async with connect() as conn:
         version, rescore = await users_q.save_profile(conn, session["uid"], values)
@@ -291,6 +286,7 @@ async def settings_form(request: Request):
     session = request.state.session
     async with connect() as conn:
         credential = await users_q.get_credential(conn, session["uid"])
+        profile = profile_from_row(await users_q.get_profile(conn, session["uid"]))
         spend = await users_q.month_spend(conn, session["uid"])
         history = await users_q.spend_history(conn, session["uid"])
     settings = get_settings()
@@ -299,8 +295,9 @@ async def settings_form(request: Request):
         "settings.html",
         {
             "active": "settings",
-            "default_model": settings.default_llm_model,
-            "default_provider": settings.default_llm_provider or "",
+            "model": settings.default_llm_model,
+            "provider": settings.default_llm_provider or "",
+            "profile": profile,
             # Never the key itself. The form shows a fingerprint so the user can tell which key is
             # stored without this page being able to disclose it to anyone who reaches it.
             "credential": credential,
@@ -315,14 +312,12 @@ async def settings_form(request: Request):
 async def settings_save(
     request: Request,
     api_key: str = Form(""),
-    model: str = Form(""),
-    provider_pin: str = Form(""),
     monthly_budget_usd: str = Form("5"),
 ):
     session = request.state.session
+    settings = get_settings()
     async with connect() as conn:
         budget = _decimal(monthly_budget_usd, Decimal(5))
-        chosen_model = model.strip() or get_settings().default_llm_model
         key = api_key.strip()
         if key:
             await users_q.save_credential(
@@ -330,8 +325,8 @@ async def settings_save(
                 session["uid"],
                 api_key_encrypted=encrypt(key),
                 api_key_fingerprint=fingerprint(key),
-                model=chosen_model,
-                provider_pin=provider_pin.strip() or None,
+                model=settings.default_llm_model,
+                provider_pin=settings.default_llm_provider,
                 monthly_budget_usd=budget,
             )
         else:
@@ -340,6 +335,22 @@ async def settings_save(
             existing = await users_q.get_credential(conn, session["uid"])
             if existing is not None:
                 await users_q.update_budget(conn, session["uid"], budget)
+    return RedirectResponse("/settings?saved=1", status_code=303)
+
+
+@app.post("/settings/volume", response_class=HTMLResponse)
+async def settings_volume_save(
+    request: Request,
+    retrieval_limit: int = Form(400),
+    rerank_limit: int = Form(150),
+):
+    session = request.state.session
+    values = {
+        "retrieval_limit": min(max(retrieval_limit, 25), 2000),
+        "rerank_limit": min(max(rerank_limit, 0), 1000),
+    }
+    async with connect() as conn:
+        await users_q.save_profile(conn, session["uid"], values)
     return RedirectResponse("/settings?saved=1", status_code=303)
 
 

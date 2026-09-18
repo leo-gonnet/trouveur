@@ -20,9 +20,8 @@
         <p class="hint">Stored key fingerprint <code>{{ credential.api_key_fingerprint }}</code>.
           The key itself is encrypted and is never shown again, including here.</p>
       {% endif %}
-      <label>Model<input name="model" value="{{ credential.model if credential else default_model }}"></label>
-      <label>Pinned provider <span class="hint">unpinned, one model spreads across backends at a wide price spread and differing quantisation, so neither cost nor scores are reproducible</span>
-        <input name="provider_pin" value="{{ credential.provider_pin or '' if credential else '' }}" placeholder="{{ default_provider }}"></label>
+      <p class="hint">Scored with <code>{{ model }}</code>{% if provider %} on <code>{{ provider }}</code>{% endif %}.
+        The model is chosen by evaluation, not per user, so every score here is comparable.</p>
       <label>Monthly ceiling <span class="hint">US dollars, the currency OpenRouter bills in. Checked before every batch, not after.</span>
         <input name="monthly_budget_usd" value="{{ credential.monthly_budget_usd if credential else '5' }}"></label>
       <p class="actions">
@@ -31,6 +30,17 @@
           <button class="danger" type="submit" formaction="/settings/delete-key" formnovalidate>Delete stored key</button>
         {% endif %}
       </p>
+    </form>
+  </section>
+
+  <section class="section">
+    <div class="section-head"><h2>Volume</h2></div>
+    <form method="post" action="/settings/volume">
+      <label>Retrieve per run <span class="hint">free; higher means better recall</span>
+        <input name="retrieval_limit" type="number" min="25" max="2000" value="{{ profile.retrieval_limit }}"></label>
+      <label>Rerank per run <span class="hint">this is what costs money, and it is how many land on <a href="/recommendations">Recommendations</a>. Changing it never re-scores anything.</span>
+        <input name="rerank_limit" type="number" min="0" max="1000" value="{{ profile.rerank_limit }}"></label>
+      <p class="actions"><button class="primary" type="submit">Save</button></p>
     </form>
   </section>
 

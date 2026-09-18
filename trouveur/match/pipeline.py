@@ -123,8 +123,8 @@ async def _queries(
                 settings,
                 profile,
                 api_key=decrypt(credential.api_key_encrypted),
-                model=credential.model,
-                provider_pin=credential.provider_pin,
+                model=settings.default_llm_model,
+                provider_pin=settings.default_llm_provider,
             )
             await users_q.add_spend(
                 conn, profile.user_id, tokens_in=usage.tokens_in,
@@ -256,8 +256,8 @@ async def _rerank(
         try:
             scores, usage = await rerank.score_batch(
                 settings, profile, batch,
-                api_key=api_key, model=credential.model,
-                provider_pin=credential.provider_pin,
+                api_key=api_key, model=settings.default_llm_model,
+                provider_pin=settings.default_llm_provider,
             )
         except llm.LlmError as exc:
             report.errors.append(str(exc))
@@ -289,7 +289,7 @@ async def _rerank(
                     "content_hash": row.content_hash, "user_id": profile.user_id,
                     "profile_version": profile.version, "score": score.score,
                     "reason": score.reason, "red_flags": score.red_flags,
-                    "model": credential.model,
+                    "model": settings.default_llm_model,
                 }
             )
         await match_q.apply_scores(conn, profile.user_id, updates)

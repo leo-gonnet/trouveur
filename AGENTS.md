@@ -429,7 +429,12 @@ so the deployment has no LLM spend of its own and one user's exhausted budget ca
 - **Always pin a provider.** Unpinned, OpenRouter spreads one model across many backends at a wide
   price spread and differing quantisation, so neither cost nor scores are reproducible. Pinning also
   lets `data_collection: "deny"` keep profiles away from backends that may train on them.
-- Changing the default model is an eval question, not a taste question.
+- Changing the default model is an eval question, not a taste question. **The model and the
+  provider pin are installation settings** (`default_llm_model`, `default_llm_provider`), never
+  a per-user field: a user-chosen model makes scores incomparable across users and lets the pin
+  be cleared. The Settings page shows them read-only. Volume (`retrieval_limit`, `rerank_limit`)
+  lives on Settings next to the ceiling, not on Profile: it is a cost dial, not part of what a
+  good match is, and every field left on Profile is a `SCORING_FIELDS` member.
 
 ## Web UI
 
