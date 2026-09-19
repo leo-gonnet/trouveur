@@ -131,12 +131,6 @@ async def test_scores_are_cached_and_spend_accumulates(
                 for job_id in job_ids
             ],
         )
-        pending = await mq.pending_rules(conn, user_id, 100)
-        await mq.apply_rule_verdicts(
-            conn,
-            [{"user_id": user_id, "job_id": row.job_id, "rule_verdict": "pass",
-              "rule_reason": "ok"} for row in pending],
-        )
         to_score = await mq.pending_rerank(conn, user_id, profile.version, 100)
         await mq.apply_scores(
             conn, user_id,

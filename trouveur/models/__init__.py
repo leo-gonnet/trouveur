@@ -6,24 +6,24 @@ from trouveur.models.job import (
     SalaryQuote,
     dedup_key,
 )
-from trouveur.models.match import Candidate, RerankResult, RuleVerdict, UserState
+from trouveur.models.match import RerankResult, UserState
 from trouveur.models.operations import RunStatus, RunTrigger, TenantOrigin
-from trouveur.models.profile import UserProfile
+from trouveur.models.profile import COUNTRY_NAMES, LANGUAGES, UserProfile
 from trouveur.models.raw import DocumentKind, RawDocument
 from trouveur.models.text import collapse_whitespace, fold, normalize_for_hash
 
 __all__ = [
-    "Candidate",
+    "COUNTRY_NAMES",
     "CanonicalJob",
     "DocumentKind",
     "EmploymentType",
     "JobFacets",
+    "LANGUAGES",
     "Location",
     "RawDocument",
     "RerankResult",
     "RunStatus",
     "RunTrigger",
-    "RuleVerdict",
     "SalaryPeriod",
     "SalaryQuote",
     "Seniority",

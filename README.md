@@ -17,7 +17,7 @@ INGEST  (shared corpus, runs once for everyone)
 MATCH   (per user, cheap, re-runnable)
   profile ──> expanded queries ──> hard filters
           ──> dense ANN ─┐
-          ──> BM25/FTS  ─┴─ RRF fusion ──> rules cut ──> LLM rerank ──> digest
+          ──> BM25/FTS  ─┴─ RRF fusion ──> LLM rerank ──> digest
 ```
 
 Raw payloads are archived verbatim and kept, and everything derived from them carries a version.

@@ -124,32 +124,10 @@ async def upsert_matches(conn: AsyncConnection, rows: Sequence[dict]) -> int:
     return (await conn.execute(stmt)).rowcount or 0
 
 
-async def apply_rule_verdicts(conn: AsyncConnection, rows: Sequence[dict]) -> None:
-    if not rows:
-        return
-    await conn.execute(
-        sa.text(
-            """
-            UPDATE user_job_match m
-            SET rule_verdict = CAST(t.verdict AS rule_verdict), rule_reason = t.reason
-            FROM unnest(CAST(:job_ids AS bigint[]), CAST(:verdicts AS text[]),
-                        CAST(:reasons AS text[])) AS t(job_id, verdict, reason)
-            WHERE m.user_id = :user_id AND m.job_id = t.job_id
-            """
-        ),
-        {
-            "user_id": rows[0]["user_id"],
-            "job_ids": [row["job_id"] for row in rows],
-            "verdicts": [row["rule_verdict"] for row in rows],
-            "reasons": [row["rule_reason"] for row in rows],
-        },
-    )
-
-
 async def pending_rerank(
     conn: AsyncConnection, user_id: int, profile_version: int, limit: int
 ) -> list[sa.Row]:
-    """Jobs this user has retrieved, passed the rules, and not yet been scored for.
+    """Jobs this user has retrieved and not yet been scored for.
 
     Ordered by retrieval score so that a budget cut-off keeps the most promising ones rather than
     an arbitrary slice.
@@ -165,7 +143,6 @@ async def pending_rerank(
                 JOIN job j ON j.id = m.job_id
                 JOIN job_facet f ON f.job_id = j.id
                 WHERE m.user_id = :user_id
-                  AND m.rule_verdict = 'pass'
                   AND j.closed_at IS NULL
                   AND (m.llm_score IS NULL OR m.profile_version < :profile_version)
                 ORDER BY m.retrieval_score DESC NULLS LAST
@@ -215,7 +192,7 @@ async def count_pending_rerank(
                     """
                     SELECT count(*) FROM user_job_match m
                     JOIN job j ON j.id = m.job_id
-                    WHERE m.user_id = :user_id AND m.rule_verdict = 'pass'
+                    WHERE m.user_id = :user_id
                       AND j.closed_at IS NULL
                       AND (m.llm_score IS NULL OR m.profile_version < :profile_version)
                     """
@@ -224,36 +201,6 @@ async def count_pending_rerank(
             )
         ).scalar_one()
         or 0
-    )
-
-
-async def pending_rules(
-    conn: AsyncConnection, user_id: int, limit: int
-) -> list[sa.Row]:
-    """Retrieved jobs this user has no rule verdict for yet.
-
-    Distinct from pending_rerank, which selects rows that have ALREADY passed the rules. Reusing
-    that query here would mean the rules stage only ever re-judged rows it had previously passed,
-    and every newly retrieved job would stay 'unknown' forever -- invisible to recommendations,
-    with no error anywhere.
-    """
-    return list(
-        await conn.execute(
-            sa.text(
-                """
-                SELECT m.job_id, j.content_hash, j.title, j.company, j.description,
-                       f.is_agency
-                FROM user_job_match m
-                JOIN job j ON j.id = m.job_id
-                JOIN job_facet f ON f.job_id = j.id
-                WHERE m.user_id = :user_id AND m.rule_verdict = 'unknown'
-                  AND j.closed_at IS NULL
-                ORDER BY m.retrieval_score DESC NULLS LAST
-                LIMIT :limit
-                """
-            ),
-            {"user_id": user_id, "limit": limit},
-        )
     )
 
 
@@ -325,7 +272,7 @@ async def recommendations(
     already decided by `rerank_limit`, which is the knob that costs money. So the page shows what
     was paid for, ordered by the score, and the reader draws their own line.
 
-    Still not a filtered view of the corpus: this is the set that passed the rules and was scored.
+    Still not a filtered view of the corpus: this is the set that was scored.
     Search is where everything else stays visible -- keep the two apart, and keep the distinction
     here in the query rather than in a template, where the next page to be written will quietly
     get it wrong.
@@ -343,7 +290,6 @@ async def recommendations(
                 JOIN job j ON j.id = m.job_id
                 JOIN job_facet f ON f.job_id = j.id
                 WHERE m.user_id = :user_id
-                  AND m.rule_verdict = 'pass'
                   AND m.llm_score IS NOT NULL
                   AND m.state <> 'dismissed'
                   AND j.closed_at IS NULL
@@ -356,15 +302,14 @@ async def recommendations(
     )
 
 
-# Every scraped posting, whatever the filters decided. A rejected or unscored job stays findable
-# here, which is the entire point of the page: adding a verdict or score filter would turn it into
+# Every scraped posting, whatever the filters decided. A filtered-out or unscored job stays findable
+# here, which is the entire point of the page: adding a score filter would turn it into
 # a second, worse recommendations page and destroy the only view of what was actually collected.
 _SEARCH_SQL = """
 SELECT j.id, j.public_id, j.url, j.title, j.company, j.posted_at, j.source, j.closed_at,
        j.locations, f.countries, f.cities, f.work_mode::text AS work_mode,
        f.salary_min_eur_year, f.salary_max_eur_year,
-       m.llm_score, m.llm_reason, m.llm_red_flags,
-       m.rule_verdict::text AS rule_verdict, m.state::text AS state
+       m.llm_score, m.llm_reason, m.llm_red_flags, m.state::text AS state
 FROM job j
 LEFT JOIN job_facet f ON f.job_id = j.id
 LEFT JOIN user_job_match m ON m.job_id = j.id AND m.user_id = :user_id
@@ -418,7 +363,6 @@ async def get_job(conn: AsyncConnection, user_id: int, public_id: str) -> sa.Row
                        f.salary_min_eur_year, f.salary_max_eur_year, f.salary_annualised,
                        f.skills, f.is_agency,
                        m.llm_score, m.llm_reason, m.llm_red_flags,
-                       m.rule_verdict::text AS rule_verdict, m.rule_reason,
                        m.state::text AS state
                 FROM job j
                 LEFT JOIN job_facet f ON f.job_id = j.id
@@ -533,7 +477,6 @@ async def match_stats(conn: AsyncConnection, user_id: int) -> sa.Row:
             sa.text(
                 """
                 SELECT count(*) AS retrieved,
-                       count(*) FILTER (WHERE rule_verdict = 'pass') AS passed,
                        count(*) FILTER (WHERE llm_score IS NOT NULL) AS scored,
                        count(*) FILTER (WHERE state = 'saved') AS saved,
                        count(*) FILTER (WHERE state = 'applied') AS applied

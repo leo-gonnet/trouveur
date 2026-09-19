@@ -1,4 +1,5 @@
 {% extends "base.html" %}{% block title %}Profile · Trouveur{% endblock %}
+{% from "_macros.html" import tags, checks %}
 {% block content %}
 <div class="page-head">
   <h1>Profile</h1>
@@ -25,36 +26,60 @@
     <div class="section-head"><h2>Who you are</h2></div>
     <label>Current title<input name="title" value="{{ profile.title }}"></label>
     <label>Years of experience<input name="years_experience" type="number" min="0" max="60" value="{{ profile.years_experience }}"></label>
-    <label>Languages <span class="hint">comma separated</span>
-      <input name="languages" value="{{ profile.languages | join(', ') }}"></label>
+    <div class="field">
+      <span class="field-name">Languages you work in</span>
+      {{ tags('languages', profile.languages, options=language_names, placeholder='Pick a language…',
+              hint='Told to the reranker; not a filter.') }}
+    </div>
     <label>Objectives <span class="hint">free text; used to expand your search queries</span>
       <textarea name="objectives" rows="4">{{ profile.objectives }}</textarea></label>
   </section>
 
   <section class="section">
     <div class="section-head"><h2>What you want</h2></div>
-    <label>Keywords <span class="hint">one per line</span>
-      <textarea name="keywords" rows="4">{{ profile.keywords | join('\n') }}</textarea></label>
-    <label>Must have <span class="hint">one per line</span>
-      <textarea name="must_have" rows="3">{{ profile.must_have | join('\n') }}</textarea></label>
-    <label>Deal breakers <span class="hint">one per line; matched against title, company and advert</span>
-      <textarea name="deal_breakers" rows="3">{{ profile.deal_breakers | join('\n') }}</textarea></label>
+    <p class="hint">Type one, press Enter, repeat.</p>
+    <div class="field">
+      <span class="field-name">Keywords</span>
+      {{ tags('keywords', profile.keywords, placeholder='Add a keyword…',
+              hint='Each one is a search query on its own.') }}
+    </div>
+    <div class="field">
+      <span class="field-name">Must have</span>
+      {{ tags('must_have', profile.must_have, placeholder='Add a requirement…',
+              hint='Searched for, and shown to the reranker.') }}
+    </div>
+    <div class="field">
+      <span class="field-name">Preferred cities</span>
+      {{ tags('cities', profile.cities, placeholder='Add a city…',
+              hint='A preference the reranker weighs, not a filter: spelled any way you like, and nearby places still count.') }}
+    </div>
   </section>
 
   <section class="section">
     <div class="section-head"><h2>Hard filters</h2></div>
-    <p class="hint">Applied in the query, before anything is ranked. Leave a field empty to accept any value.</p>
-    <label>Countries <span class="hint">ISO codes, comma separated</span>
-      <input name="countries" value="{{ profile.countries | join(', ') }}"></label>
-    <label>Cities<input name="cities" value="{{ profile.cities | join(', ') }}"></label>
-    <label>Work modes <span class="hint">remote, hybrid, onsite</span>
-      <input name="work_modes" value="{{ profile.work_modes | join(', ') }}"></label>
-    <label>Seniorities <span class="hint">junior, mid, senior, lead, executive</span>
-      <input name="seniorities" value="{{ profile.seniorities | join(', ') }}"></label>
-    <label>Employment types<input name="employment_types" value="{{ profile.employment_types | join(', ') }}"></label>
+    <p class="hint">Applied in the query, before anything is ranked. Leave a filter empty to accept
+      any value. Once set, a filter also drops postings that state nothing for it — tick
+      <em>not stated</em> to keep those.</p>
+    <div class="field">
+      <span class="field-name">Countries</span>
+      {{ tags('countries', profile.countries, options=country_names, placeholder='Pick a country…') }}
+    </div>
+    <div class="field">
+      <span class="field-name">Work mode</span>
+      {{ checks('work_modes', work_mode_options, profile.work_modes) }}
+    </div>
+    <div class="field">
+      <span class="field-name">Seniority</span>
+      {{ checks('seniorities', seniority_options, profile.seniorities) }}
+    </div>
+    <div class="field">
+      <span class="field-name">Employment type</span>
+      {{ checks('employment_types', employment_type_options, profile.employment_types) }}
+    </div>
     <label>Minimum salary <span class="hint">&euro;/year; postings that state nothing are never rejected on this</span>
       <input name="min_salary_eur_year" value="{{ profile.min_salary_eur_year }}"></label>
     <p class="actions"><button class="primary" type="submit">Save profile</button></p>
   </section>
 </form>
+<script src="/static/app.js"></script>
 {% endblock %}

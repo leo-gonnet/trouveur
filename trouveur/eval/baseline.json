@@ -9,7 +9,6 @@
       "inversions": 7,
       "missed": [],
       "negatives_retrieved": 2,
-      "negatives_surviving_rules": 0,
       "negatives_total": 3,
       "persona": "wing_nachhaltigkeit",
       "queries": 7,
@@ -63,7 +62,6 @@
       "inversions": 5,
       "missed": [],
       "negatives_retrieved": 2,
-      "negatives_surviving_rules": 0,
       "negatives_total": 3,
       "persona": "backend_java",
       "queries": 6,
@@ -119,7 +117,6 @@
         "data_t2b"
       ],
       "negatives_retrieved": 1,
-      "negatives_surviving_rules": 0,
       "negatives_total": 3,
       "persona": "maschinenbau_zu_daten",
       "queries": 5,

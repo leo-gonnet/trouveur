@@ -18,7 +18,6 @@
     <table>
       <tr><td>Score</td><td>{{ m.score_pill(job.llm_score) }}</td></tr>
       <tr><td>Reason</td><td>{{ job.llm_reason or '—' }}</td></tr>
-      <tr><td>Rules</td><td>{{ job.rule_verdict or 'unknown' }}{% if job.rule_reason %} — {{ job.rule_reason }}{% endif %}</td></tr>
       <tr><td>Red flags</td><td>{% for flag in job.llm_red_flags or [] %}<span class="pill warn">{{ flag }}</span> {% else %}—{% endfor %}</td></tr>
     </table>
   </section>

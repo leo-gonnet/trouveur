@@ -21,7 +21,6 @@ from trouveur.db import schema
 from trouveur.models import (
     DocumentKind,
     EmploymentType,
-    RuleVerdict,
     RunStatus,
     RunTrigger,
     SalaryPeriod,
@@ -41,7 +40,6 @@ BINDINGS: dict[str, type[StrEnum]] = {
     "employment_type": EmploymentType,
     "work_kind": WorkKind,
     "tenant_origin": TenantOrigin,
-    "rule_verdict": RuleVerdict,
     "user_state": UserState,
     "run_status": RunStatus,
     "run_trigger": RunTrigger,
@@ -80,3 +78,12 @@ def test_python_and_schema_declare_the_same_members(name: str):
         f"only in schema.py {sorted(declared - in_python)}. "
         "Adding a member needs a migration (ALTER TYPE ... ADD VALUE), not just an enum edit."
     )
+
+
+def test_the_profile_offers_exactly_the_countries_derivation_can_produce():
+    """A country the form offers but no posting can derive is a filter that matches nothing,
+    silently; one derivation produces but the form cannot name is unreachable by any filter."""
+    from trouveur.ingest import vocab
+    from trouveur.models import COUNTRY_NAMES
+
+    assert set(COUNTRY_NAMES) == set(vocab.COUNTRIES.values())

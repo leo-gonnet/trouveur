@@ -1,11 +1,11 @@
-"""Per-user matching: retrieve, cut, rerank. Orchestration only.
+"""Per-user matching: retrieve, then rerank. Orchestration only.
 
 Runs per user in isolation. One user's expired API key, exhausted budget or malformed profile must
 never affect another's results, which is also why spend and credentials are per user rather than
 per installation.
 
-The three stages are deliberately separate and get cheaper to re-run in that order: retrieval is
-free and re-runnable, the rules cut is free, and only the last stage costs money.
+The two stages are deliberately separate: retrieval is free and re-runnable, and only the last
+stage costs money.
 """
 
 from __future__ import annotations
@@ -22,8 +22,7 @@ from trouveur.db.engine import connect
 from trouveur.db.queries import match as match_q
 from trouveur.db.queries import users as users_q
 from trouveur.match import expand, llm, rerank, retrieve
-from trouveur.match.rules import evaluate
-from trouveur.models import Candidate, RuleVerdict, UserProfile
+from trouveur.models import UserProfile
 from trouveur.versions import QUERY_EXPANSION_VERSION
 
 log = logging.getLogger(__name__)
@@ -34,8 +33,6 @@ class MatchReport:
     user_id: int
     queries: int = 0
     retrieved: int = 0
-    passed: int = 0
-    rejected: int = 0
     scored: int = 0
     from_cache: int = 0
     cost_usd: Decimal = Decimal(0)
@@ -45,7 +42,7 @@ class MatchReport:
     def summary(self) -> str:
         return (
             f"user={self.user_id} queries={self.queries} retrieved={self.retrieved} "
-            f"pass={self.passed} scored={self.scored} cached={self.from_cache} "
+            f"scored={self.scored} cached={self.from_cache} "
             f"cost=${self.cost_usd:.4f}"
             + (" [budget reached]" if self.stopped_on_budget else "")
         )
@@ -96,7 +93,6 @@ async def run_for_user(user_id: int, settings: Settings | None = None) -> MatchR
 
     async with connect() as conn:
         await _retrieve(conn, profile, queries, report)
-        await _apply_rules(conn, profile, report)
 
     if credential is not None:
         async with connect() as conn:
@@ -166,36 +162,6 @@ async def _retrieve(
     ]
     await match_q.upsert_matches(conn, rows)
     report.retrieved = len(rows)
-
-
-async def _apply_rules(
-    conn: AsyncConnection, profile: UserProfile, report: MatchReport
-) -> None:
-    pending = await match_q.pending_rules(conn, profile.user_id, retrieve.RETRIEVAL_LIMIT)
-    verdicts = []
-    for row in pending:
-        candidate = Candidate(
-            job_id=row.job_id,
-            content_hash=row.content_hash,
-            title=row.title,
-            company=row.company,
-            description=row.description,
-            is_agency=row.is_agency,
-        )
-        verdict, reason = evaluate(candidate, profile)
-        verdicts.append(
-            {
-                "user_id": profile.user_id,
-                "job_id": row.job_id,
-                "rule_verdict": verdict.value,
-                "rule_reason": reason,
-            }
-        )
-        if verdict is RuleVerdict.PASS:
-            report.passed += 1
-        else:
-            report.rejected += 1
-    await match_q.apply_rule_verdicts(conn, verdicts)
 
 
 async def _rerank(

@@ -80,13 +80,6 @@ async def seed_scored_match(user_id: int, profile) -> int:
                 "retrieval_score": 0.9, "dense_rank": 1, "lexical_rank": 1,
             }],
         )
-        await match_q.apply_rule_verdicts(
-            conn,
-            [{
-                "user_id": user_id, "job_id": job_id,
-                "rule_verdict": "pass", "rule_reason": "passed rules",
-            }],
-        )
         await match_q.apply_scores(
             conn, user_id,
             [{

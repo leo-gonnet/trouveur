@@ -27,7 +27,6 @@ employment_type = _enum(
 )
 work_kind = _enum("work_kind", "detail", "derive", "embed", "dedup")
 tenant_origin = _enum("tenant_origin", "manual", "discovered")
-rule_verdict = _enum("rule_verdict", "pass", "reject", "unknown")
 user_state = _enum("user_state", "new", "saved", "applied", "dismissed")
 run_status = _enum("run_status", "queued", "running", "success", "failed", "cancelled")
 run_trigger = _enum("run_trigger", "scheduled", "manual")
@@ -243,7 +242,6 @@ user_profile = sa.Table(
     sa.Column("objectives", sa.Text, nullable=False, server_default=""),
     sa.Column("languages", ARRAY(sa.Text), nullable=False, server_default="{}"),
     sa.Column("must_have", ARRAY(sa.Text), nullable=False, server_default="{}"),
-    sa.Column("deal_breakers", ARRAY(sa.Text), nullable=False, server_default="{}"),
     sa.Column("keywords", ARRAY(sa.Text), nullable=False, server_default="{}"),
     sa.Column("countries", ARRAY(sa.Text), nullable=False, server_default="{AT,DE,CH}"),
     sa.Column("cities", ARRAY(sa.Text), nullable=False, server_default="{}"),
@@ -300,8 +298,6 @@ user_job_match = sa.Table(
     sa.Column("retrieval_score", sa.Float),
     sa.Column("dense_rank", sa.Integer),
     sa.Column("lexical_rank", sa.Integer),
-    sa.Column("rule_verdict", rule_verdict, nullable=False, server_default="unknown"),
-    sa.Column("rule_reason", sa.Text),
     sa.Column("llm_score", sa.SmallInteger),
     sa.Column("llm_reason", sa.Text),
     sa.Column("llm_red_flags", JSONB),

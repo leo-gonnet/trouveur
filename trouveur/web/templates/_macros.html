@@ -56,3 +56,28 @@
   </div>
 </article>
 {% endmacro %}
+
+{# A list field. Without the script it is a one-per-line textarea, and that is also what is
+   posted: the script only renders the same value as chips. `options` (code -> name) restricts
+   entries to that list; the textarea then carries codes and the chips show names. #}
+{% macro tags(name, values, hint='', options=none, placeholder='') %}
+<div class="tags">
+  <textarea name="{{ name }}" rows="2" data-placeholder="{{ placeholder }}"
+            {% if options %}list="{{ name }}-options"{% endif %}>{{ values | join('\n') }}</textarea>
+  {% if options %}
+    <datalist id="{{ name }}-options">
+      {% for code, label in options.items() %}<option value="{{ code }}">{{ label }}</option>{% endfor %}
+    </datalist>
+  {% endif %}
+</div>
+{% if hint %}<span class="hint">{{ hint }}</span>{% endif %}
+{% endmacro %}
+
+{% macro checks(name, options, selected) %}
+<div class="checks">
+  {% for value, label in options %}
+    <label class="check"><input type="checkbox" name="{{ name }}" value="{{ value }}"
+      {% if value in selected %}checked{% endif %}>{{ label }}</label>
+  {% endfor %}
+</div>
+{% endmacro %}

@@ -4,14 +4,13 @@
 <div class="page-head">
   <h1>Recommendations</h1>
   <p class="hint">
-    Everything that passed the rules and was scored, best first. How many there are is set in
+    Everything that was scored, best first. How many there are is set in
     <a href="/settings">Settings</a>; <a href="/search">Search</a> shows everything collected.
   </p>
   <p class="hint">
     {% if last_match %}
       {%- set r = last_match.match %}
-      Last matched {{ last_match.finished_at.strftime('%d.%m. %H:%M') }}: {{ r.retrieved }} candidates,
-      {%- if r.get('passed') is not none %} {{ r.passed }} passed your filters,{% endif %} {{ r.scored }} scored, ${{ r.cost_usd }}.
+      Last matched {{ last_match.finished_at.strftime('%d.%m. %H:%M') }}: {{ r.retrieved }} candidates, {{ r.scored }} scored, ${{ r.cost_usd }}.
       {%- if r.stopped_on_budget %} Stopped at your monthly ceiling.{% endif %}
     {% else %}
       Not matched yet.
@@ -22,7 +21,7 @@
     {% if pending_run %}
       <span class="hint">Matching is {{ pending_run.status }}; this page updates when it finishes.</span>
     {% elif request.state.needs_key or paused %}
-      <span class="hint">Runs search and the rules cut only; nothing is scored until
+      <span class="hint">Runs search only; nothing is scored until
         {% if paused %}scoring is unpaused{% else %}a key is set{% endif %} in <a href="/settings">Settings</a>.</span>
     {% else %}
       <span class="hint">Re-rank the postings already collected, without waiting for the next scan.
@@ -43,7 +42,7 @@
 {% else %}
 <p class="empty">
   Nothing scored yet for your current profile. Matching runs after every scan, or now with the
-  button above. Retrieval and the rules cut are free and run without a key; scoring needs an
+  button above. Retrieval is free and runs without a key; scoring needs an
   OpenRouter key in <a href="/settings">Settings</a>. Meanwhile <a href="/search">Search</a> shows
   everything collected.
 </p>

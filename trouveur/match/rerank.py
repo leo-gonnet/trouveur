@@ -5,7 +5,7 @@ from three files cannot be reviewed, and a change to one fragment silently resco
 
 Cost discipline is structural rather than advisory:
 
-  - Retrieval and the rules cut run first, so this only ever sees a shortlist.
+  - Retrieval runs first and rerank_limit bounds what is sent, so this only ever sees a shortlist.
   - Every result is cached by (content_hash, user, profile_version), so a posting is scored once
     per profile, ever. Re-scoring an unchanged posting is a bug, not an inefficiency.
   - The monthly ceiling is checked before each batch is sent, not reported after it returns. A
@@ -43,8 +43,9 @@ Score each job 0-100 for how well it matches the candidate's profile and objecti
 
 Judge the substance of the role, not the polish of the advert. German and English adverts are
 equally valid and neither is preferred. Penalise heavily: staffing agencies, disguised sales
-roles, roles far junior or far senior to the candidate, and adverts that violate a stated
-deal-breaker.
+roles, internships and working-student roles, and roles far junior or far senior to the
+candidate. Preferred cities are a preference, not a requirement: a role there, nearby, or remote
+satisfies it; elsewhere is a compromise, never a rejection.
 
 Return ONLY a JSON array, one object per job, no prose:
 [{"id": <int>, "score": <int 0-100>, "reason": "<one sentence, max 25 words>",
@@ -94,9 +95,9 @@ def build_prompt(profile: UserProfile, candidates: list) -> str:
         f"current title: {profile.title or 'unstated'}\n"
         f"years of experience: {profile.years_experience}\n"
         f"languages: {', '.join(profile.languages) or 'unstated'}\n"
+        f"preferred cities: {', '.join(profile.cities) or 'none stated'}\n"
         f"objectives: {profile.objectives or 'unstated'}\n"
         f"must have: {'; '.join(profile.must_have) or 'none stated'}\n"
-        f"deal breakers: {'; '.join(profile.deal_breakers) or 'none stated'}\n"
         f"minimum salary: {int(profile.min_salary_eur_year)} EUR/year\n\n"
         f"JOBS TO SCORE ({len(candidates)})\n\n" + "\n\n".join(listing)
     )

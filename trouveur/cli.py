@@ -55,7 +55,7 @@ def sweep(only_source: str | None, backfill: bool) -> None:
 @main.command()
 @click.option("--user", "user_id", type=int, default=None, help="Match one user.")
 def match(user_id: int | None) -> None:
-    """Retrieve, apply rules and rerank. Reranking spends the user's own LLM credit."""
+    """Retrieve and rerank. Reranking spends the user's own LLM credit."""
     from trouveur.match import run_all, run_for_user
 
     settings = get_settings()
