@@ -1,0 +1,3198 @@
+{
+ "rows": [
+  {
+   "persona": "wing_nachhaltigkeit",
+   "strategy": "det",
+   "queries_dense": 7,
+   "queries_lexical": 7,
+   "seconds": 11.95,
+   "retrieved": 2000,
+   "recall": {
+    "fused": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 1,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "dense": {
+     "T1": {
+      "found": 2,
+      "total": 3
+     },
+     "T2": {
+      "found": 1,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "lexical": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 0,
+      "total": 2
+     },
+     "T3": {
+      "found": 0,
+      "total": 2
+     }
+    }
+   },
+   "ranks": {
+    "wing_t1_kreislauf": 1,
+    "wing_t1_referent": 137,
+    "wing_t2_ressourcen": null,
+    "wing_t2_umweltstrategie": 37,
+    "wing_t3_circular_en": 64,
+    "wing_t3_green_transformation": 29,
+    "wing_t1_rare_iso": 130
+   },
+   "negative_ranks": {
+    "wing_n_werkstudent": 73,
+    "wing_n_ueberlassung": 2,
+    "wing_n_wrong_country": null
+   },
+   "inversions_at_window": 9,
+   "negatives_in_window": 2
+  },
+  {
+   "persona": "backend_java",
+   "strategy": "det",
+   "queries_dense": 6,
+   "queries_lexical": 6,
+   "seconds": 11.71,
+   "retrieved": 2000,
+   "recall": {
+    "fused": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 1,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "dense": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 1,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "lexical": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 0,
+      "total": 2
+     },
+     "T3": {
+      "found": 0,
+      "total": 2
+     }
+    }
+   },
+   "ranks": {
+    "java_t1a": 1,
+    "java_t1b": 5,
+    "java_t2a": 1047,
+    "java_t2b": null,
+    "java_t3b": 759,
+    "java_t3_platform_en": 863,
+    "java_t1_rare_mongo": 171
+   },
+   "negative_ranks": {
+    "java_n1": 682,
+    "java_n2": 15,
+    "java_n3": null
+   },
+   "inversions_at_window": 5,
+   "negatives_in_window": 1
+  },
+  {
+   "persona": "maschinenbau_zu_daten",
+   "strategy": "det",
+   "queries_dense": 5,
+   "queries_lexical": 5,
+   "seconds": 10.09,
+   "retrieved": 2000,
+   "recall": {
+    "fused": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 1,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "dense": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 1,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "lexical": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 0,
+      "total": 2
+     },
+     "T3": {
+      "found": 0,
+      "total": 2
+     }
+    }
+   },
+   "ranks": {
+    "data_t1a": 2,
+    "data_t1b": 1,
+    "data_t2a": 84,
+    "data_t2b": null,
+    "data_t3b": 86,
+    "data_t3_industrial_ds_en": 247,
+    "data_t1_rare_pdm": 31
+   },
+   "negative_ranks": {
+    "data_n1": null,
+    "data_n2": 4,
+    "data_n3": null
+   },
+   "inversions_at_window": 5,
+   "negatives_in_window": 1
+  },
+  {
+   "persona": "wing_nachhaltigkeit",
+   "strategy": "phrases8",
+   "queries_dense": 8,
+   "queries_lexical": 8,
+   "seconds": 14.23,
+   "retrieved": 2000,
+   "recall": {
+    "fused": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 1,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "dense": {
+     "T1": {
+      "found": 2,
+      "total": 3
+     },
+     "T2": {
+      "found": 1,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "lexical": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 0,
+      "total": 2
+     },
+     "T3": {
+      "found": 0,
+      "total": 2
+     }
+    }
+   },
+   "ranks": {
+    "wing_t1_kreislauf": 1,
+    "wing_t1_referent": 141,
+    "wing_t2_ressourcen": null,
+    "wing_t2_umweltstrategie": 54,
+    "wing_t3_circular_en": 37,
+    "wing_t3_green_transformation": 43,
+    "wing_t1_rare_iso": 135
+   },
+   "negative_ranks": {
+    "wing_n_werkstudent": 83,
+    "wing_n_ueberlassung": 2,
+    "wing_n_wrong_country": null
+   },
+   "inversions_at_window": 9,
+   "negatives_in_window": 2
+  },
+  {
+   "persona": "backend_java",
+   "strategy": "phrases8",
+   "queries_dense": 8,
+   "queries_lexical": 8,
+   "seconds": 15.2,
+   "retrieved": 1817,
+   "recall": {
+    "fused": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 1,
+      "total": 2
+     },
+     "T3": {
+      "found": 1,
+      "total": 2
+     }
+    },
+    "dense": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 1,
+      "total": 2
+     },
+     "T3": {
+      "found": 1,
+      "total": 2
+     }
+    },
+    "lexical": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 0,
+      "total": 2
+     },
+     "T3": {
+      "found": 0,
+      "total": 2
+     }
+    }
+   },
+   "ranks": {
+    "java_t1a": 1,
+    "java_t1b": 21,
+    "java_t2a": 1152,
+    "java_t2b": null,
+    "java_t3b": 598,
+    "java_t3_platform_en": null,
+    "java_t1_rare_mongo": 285
+   },
+   "negative_ranks": {
+    "java_n1": 788,
+    "java_n2": 52,
+    "java_n3": null
+   },
+   "inversions_at_window": 5,
+   "negatives_in_window": 1
+  },
+  {
+   "persona": "maschinenbau_zu_daten",
+   "strategy": "phrases8",
+   "queries_dense": 8,
+   "queries_lexical": 8,
+   "seconds": 16.48,
+   "retrieved": 1993,
+   "recall": {
+    "fused": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 2,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "dense": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 2,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "lexical": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 0,
+      "total": 2
+     },
+     "T3": {
+      "found": 1,
+      "total": 2
+     }
+    }
+   },
+   "ranks": {
+    "data_t1a": 1,
+    "data_t1b": 2,
+    "data_t2a": 174,
+    "data_t2b": 1371,
+    "data_t3b": 32,
+    "data_t3_industrial_ds_en": 33,
+    "data_t1_rare_pdm": 125
+   },
+   "negative_ranks": {
+    "data_n1": null,
+    "data_n2": 4,
+    "data_n3": null
+   },
+   "inversions_at_window": 5,
+   "negatives_in_window": 1
+  },
+  {
+   "persona": "wing_nachhaltigkeit",
+   "strategy": "ads3_dense",
+   "queries_dense": 3,
+   "queries_lexical": 7,
+   "seconds": 7.1,
+   "retrieved": 2000,
+   "recall": {
+    "fused": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 2,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "dense": {
+     "T1": {
+      "found": 1,
+      "total": 3
+     },
+     "T2": {
+      "found": 2,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "lexical": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 0,
+      "total": 2
+     },
+     "T3": {
+      "found": 0,
+      "total": 2
+     }
+    }
+   },
+   "ranks": {
+    "wing_t1_kreislauf": 1,
+    "wing_t1_referent": 86,
+    "wing_t2_ressourcen": 1426,
+    "wing_t2_umweltstrategie": 34,
+    "wing_t3_circular_en": 20,
+    "wing_t3_green_transformation": 146,
+    "wing_t1_rare_iso": 606
+   },
+   "negative_ranks": {
+    "wing_n_werkstudent": 39,
+    "wing_n_ueberlassung": 2,
+    "wing_n_wrong_country": null
+   },
+   "inversions_at_window": 10,
+   "negatives_in_window": 2
+  },
+  {
+   "persona": "backend_java",
+   "strategy": "ads3_dense",
+   "queries_dense": 3,
+   "queries_lexical": 6,
+   "seconds": 6.66,
+   "retrieved": 1957,
+   "recall": {
+    "fused": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 1,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "dense": {
+     "T1": {
+      "found": 2,
+      "total": 3
+     },
+     "T2": {
+      "found": 1,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "lexical": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 0,
+      "total": 2
+     },
+     "T3": {
+      "found": 0,
+      "total": 2
+     }
+    }
+   },
+   "ranks": {
+    "java_t1a": 1,
+    "java_t1b": 16,
+    "java_t2a": 928,
+    "java_t2b": null,
+    "java_t3b": 1434,
+    "java_t3_platform_en": 118,
+    "java_t1_rare_mongo": 444
+   },
+   "negative_ranks": {
+    "java_n1": 515,
+    "java_n2": 40,
+    "java_n3": null
+   },
+   "inversions_at_window": 5,
+   "negatives_in_window": 1
+  },
+  {
+   "persona": "maschinenbau_zu_daten",
+   "strategy": "ads3_dense",
+   "queries_dense": 3,
+   "queries_lexical": 5,
+   "seconds": 6.54,
+   "retrieved": 2000,
+   "recall": {
+    "fused": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 2,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "dense": {
+     "T1": {
+      "found": 2,
+      "total": 3
+     },
+     "T2": {
+      "found": 2,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "lexical": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 0,
+      "total": 2
+     },
+     "T3": {
+      "found": 0,
+      "total": 2
+     }
+    }
+   },
+   "ranks": {
+    "data_t1a": 2,
+    "data_t1b": 1,
+    "data_t2a": 620,
+    "data_t2b": 1604,
+    "data_t3b": 17,
+    "data_t3_industrial_ds_en": 20,
+    "data_t1_rare_pdm": 265
+   },
+   "negative_ranks": {
+    "data_n1": null,
+    "data_n2": 7,
+    "data_n3": null
+   },
+   "inversions_at_window": 5,
+   "negatives_in_window": 1
+  },
+  {
+   "persona": "wing_nachhaltigkeit",
+   "strategy": "ads5_dense",
+   "queries_dense": 5,
+   "queries_lexical": 7,
+   "seconds": 10.24,
+   "retrieved": 2000,
+   "recall": {
+    "fused": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 2,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "dense": {
+     "T1": {
+      "found": 1,
+      "total": 3
+     },
+     "T2": {
+      "found": 2,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "lexical": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 0,
+      "total": 2
+     },
+     "T3": {
+      "found": 0,
+      "total": 2
+     }
+    }
+   },
+   "ranks": {
+    "wing_t1_kreislauf": 1,
+    "wing_t1_referent": 141,
+    "wing_t2_ressourcen": 241,
+    "wing_t2_umweltstrategie": 23,
+    "wing_t3_circular_en": 3,
+    "wing_t3_green_transformation": 55,
+    "wing_t1_rare_iso": 733
+   },
+   "negative_ranks": {
+    "wing_n_werkstudent": 79,
+    "wing_n_ueberlassung": 2,
+    "wing_n_wrong_country": null
+   },
+   "inversions_at_window": 9,
+   "negatives_in_window": 2
+  },
+  {
+   "persona": "backend_java",
+   "strategy": "ads5_dense",
+   "queries_dense": 5,
+   "queries_lexical": 6,
+   "seconds": 10.45,
+   "retrieved": 1673,
+   "recall": {
+    "fused": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 2,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "dense": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 2,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "lexical": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 0,
+      "total": 2
+     },
+     "T3": {
+      "found": 0,
+      "total": 2
+     }
+    }
+   },
+   "ranks": {
+    "java_t1a": 1,
+    "java_t1b": 13,
+    "java_t2a": 255,
+    "java_t2b": 313,
+    "java_t3b": 568,
+    "java_t3_platform_en": 101,
+    "java_t1_rare_mongo": 428
+   },
+   "negative_ranks": {
+    "java_n1": 621,
+    "java_n2": 44,
+    "java_n3": null
+   },
+   "inversions_at_window": 5,
+   "negatives_in_window": 1
+  },
+  {
+   "persona": "maschinenbau_zu_daten",
+   "strategy": "ads5_dense",
+   "queries_dense": 5,
+   "queries_lexical": 5,
+   "seconds": 10.32,
+   "retrieved": 1878,
+   "recall": {
+    "fused": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 2,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "dense": {
+     "T1": {
+      "found": 2,
+      "total": 3
+     },
+     "T2": {
+      "found": 2,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "lexical": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 0,
+      "total": 2
+     },
+     "T3": {
+      "found": 0,
+      "total": 2
+     }
+    }
+   },
+   "ranks": {
+    "data_t1a": 2,
+    "data_t1b": 1,
+    "data_t2a": 736,
+    "data_t2b": 1233,
+    "data_t3b": 10,
+    "data_t3_industrial_ds_en": 37,
+    "data_t1_rare_pdm": 341
+   },
+   "negative_ranks": {
+    "data_n1": null,
+    "data_n2": 12,
+    "data_n3": null
+   },
+   "inversions_at_window": 4,
+   "negatives_in_window": 1
+  },
+  {
+   "persona": "wing_nachhaltigkeit",
+   "strategy": "ads15_dense",
+   "queries_dense": 15,
+   "queries_lexical": 7,
+   "seconds": 31.83,
+   "retrieved": 1962,
+   "recall": {
+    "fused": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 2,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "dense": {
+     "T1": {
+      "found": 2,
+      "total": 3
+     },
+     "T2": {
+      "found": 2,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "lexical": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 0,
+      "total": 2
+     },
+     "T3": {
+      "found": 0,
+      "total": 2
+     }
+    }
+   },
+   "ranks": {
+    "wing_t1_kreislauf": 1,
+    "wing_t1_referent": 243,
+    "wing_t2_ressourcen": 102,
+    "wing_t2_umweltstrategie": 24,
+    "wing_t3_circular_en": 6,
+    "wing_t3_green_transformation": 93,
+    "wing_t1_rare_iso": 202
+   },
+   "negative_ranks": {
+    "wing_n_werkstudent": 166,
+    "wing_n_ueberlassung": 2,
+    "wing_n_wrong_country": null
+   },
+   "inversions_at_window": 6,
+   "negatives_in_window": 1
+  },
+  {
+   "persona": "backend_java",
+   "strategy": "ads15_dense",
+   "queries_dense": 15,
+   "queries_lexical": 6,
+   "seconds": 31.58,
+   "retrieved": 1416,
+   "recall": {
+    "fused": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 2,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "dense": {
+     "T1": {
+      "found": 2,
+      "total": 3
+     },
+     "T2": {
+      "found": 2,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "lexical": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 0,
+      "total": 2
+     },
+     "T3": {
+      "found": 0,
+      "total": 2
+     }
+    }
+   },
+   "ranks": {
+    "java_t1a": 1,
+    "java_t1b": 18,
+    "java_t2a": 267,
+    "java_t2b": 269,
+    "java_t3b": 555,
+    "java_t3_platform_en": 39,
+    "java_t1_rare_mongo": 743
+   },
+   "negative_ranks": {
+    "java_n1": 847,
+    "java_n2": 76,
+    "java_n3": null
+   },
+   "inversions_at_window": 4,
+   "negatives_in_window": 1
+  },
+  {
+   "persona": "maschinenbau_zu_daten",
+   "strategy": "ads15_dense",
+   "queries_dense": 15,
+   "queries_lexical": 5,
+   "seconds": 31.11,
+   "retrieved": 1686,
+   "recall": {
+    "fused": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 1,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "dense": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 1,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "lexical": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 0,
+      "total": 2
+     },
+     "T3": {
+      "found": 0,
+      "total": 2
+     }
+    }
+   },
+   "ranks": {
+    "data_t1a": 2,
+    "data_t1b": 1,
+    "data_t2a": 208,
+    "data_t2b": null,
+    "data_t3b": 13,
+    "data_t3_industrial_ds_en": 69,
+    "data_t1_rare_pdm": 167
+   },
+   "negative_ranks": {
+    "data_n1": null,
+    "data_n2": 38,
+    "data_n3": null
+   },
+   "inversions_at_window": 4,
+   "negatives_in_window": 1
+  },
+  {
+   "persona": "wing_nachhaltigkeit",
+   "strategy": "ads15_pooled",
+   "queries_dense": 1,
+   "queries_lexical": 7,
+   "seconds": 6.74,
+   "retrieved": 2000,
+   "recall": {
+    "fused": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 2,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "dense": {
+     "T1": {
+      "found": 1,
+      "total": 3
+     },
+     "T2": {
+      "found": 2,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "lexical": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 0,
+      "total": 2
+     },
+     "T3": {
+      "found": 0,
+      "total": 2
+     }
+    }
+   },
+   "ranks": {
+    "wing_t1_kreislauf": 1,
+    "wing_t1_referent": 25,
+    "wing_t2_ressourcen": 627,
+    "wing_t2_umweltstrategie": 169,
+    "wing_t3_circular_en": 63,
+    "wing_t3_green_transformation": 506,
+    "wing_t1_rare_iso": 436
+   },
+   "negative_ranks": {
+    "wing_n_werkstudent": 6,
+    "wing_n_ueberlassung": 2,
+    "wing_n_wrong_country": null
+   },
+   "inversions_at_window": 12,
+   "negatives_in_window": 2
+  },
+  {
+   "persona": "backend_java",
+   "strategy": "ads15_pooled",
+   "queries_dense": 1,
+   "queries_lexical": 6,
+   "seconds": 6.69,
+   "retrieved": 2000,
+   "recall": {
+    "fused": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 2,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "dense": {
+     "T1": {
+      "found": 2,
+      "total": 3
+     },
+     "T2": {
+      "found": 2,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "lexical": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 0,
+      "total": 2
+     },
+     "T3": {
+      "found": 0,
+      "total": 2
+     }
+    }
+   },
+   "ranks": {
+    "java_t1a": 1,
+    "java_t1b": 18,
+    "java_t2a": 756,
+    "java_t2b": 965,
+    "java_t3b": 615,
+    "java_t3_platform_en": 270,
+    "java_t1_rare_mongo": 338
+   },
+   "negative_ranks": {
+    "java_n1": 381,
+    "java_n2": 45,
+    "java_n3": null
+   },
+   "inversions_at_window": 5,
+   "negatives_in_window": 1
+  },
+  {
+   "persona": "maschinenbau_zu_daten",
+   "strategy": "ads15_pooled",
+   "queries_dense": 1,
+   "queries_lexical": 5,
+   "seconds": 5.95,
+   "retrieved": 2000,
+   "recall": {
+    "fused": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 0,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "dense": {
+     "T1": {
+      "found": 2,
+      "total": 3
+     },
+     "T2": {
+      "found": 1,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "lexical": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 0,
+      "total": 2
+     },
+     "T3": {
+      "found": 0,
+      "total": 2
+     }
+    }
+   },
+   "ranks": {
+    "data_t1a": 3,
+    "data_t1b": 1,
+    "data_t2a": null,
+    "data_t2b": null,
+    "data_t3b": 149,
+    "data_t3_industrial_ds_en": 289,
+    "data_t1_rare_pdm": 155
+   },
+   "negative_ranks": {
+    "data_n1": null,
+    "data_n2": 11,
+    "data_n3": null
+   },
+   "inversions_at_window": 5,
+   "negatives_in_window": 1
+  },
+  {
+   "persona": "wing_nachhaltigkeit",
+   "strategy": "ads15_both",
+   "queries_dense": 15,
+   "queries_lexical": 15,
+   "seconds": 32.34,
+   "retrieved": 1159,
+   "recall": {
+    "fused": {
+     "T1": {
+      "found": 2,
+      "total": 3
+     },
+     "T2": {
+      "found": 2,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "dense": {
+     "T1": {
+      "found": 2,
+      "total": 3
+     },
+     "T2": {
+      "found": 2,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "lexical": {
+     "T1": {
+      "found": 0,
+      "total": 3
+     },
+     "T2": {
+      "found": 0,
+      "total": 2
+     },
+     "T3": {
+      "found": 0,
+      "total": 2
+     }
+    }
+   },
+   "ranks": {
+    "wing_t1_kreislauf": 4,
+    "wing_t1_referent": null,
+    "wing_t2_ressourcen": 95,
+    "wing_t2_umweltstrategie": 21,
+    "wing_t3_circular_en": 6,
+    "wing_t3_green_transformation": 87,
+    "wing_t1_rare_iso": 336
+   },
+   "negative_ranks": {
+    "wing_n_werkstudent": null,
+    "wing_n_ueberlassung": 1,
+    "wing_n_wrong_country": null
+   },
+   "inversions_at_window": 7,
+   "negatives_in_window": 1
+  },
+  {
+   "persona": "backend_java",
+   "strategy": "ads15_both",
+   "queries_dense": 15,
+   "queries_lexical": 15,
+   "seconds": 31.26,
+   "retrieved": 934,
+   "recall": {
+    "fused": {
+     "T1": {
+      "found": 2,
+      "total": 3
+     },
+     "T2": {
+      "found": 2,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "dense": {
+     "T1": {
+      "found": 2,
+      "total": 3
+     },
+     "T2": {
+      "found": 2,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "lexical": {
+     "T1": {
+      "found": 0,
+      "total": 3
+     },
+     "T2": {
+      "found": 0,
+      "total": 2
+     },
+     "T3": {
+      "found": 0,
+      "total": 2
+     }
+    }
+   },
+   "ranks": {
+    "java_t1a": 1,
+    "java_t1b": 27,
+    "java_t2a": 198,
+    "java_t2b": 200,
+    "java_t3b": 389,
+    "java_t3_platform_en": 31,
+    "java_t1_rare_mongo": null
+   },
+   "negative_ranks": {
+    "java_n1": null,
+    "java_n2": 100,
+    "java_n3": null
+   },
+   "inversions_at_window": 4,
+   "negatives_in_window": 1
+  },
+  {
+   "persona": "maschinenbau_zu_daten",
+   "strategy": "ads15_both",
+   "queries_dense": 15,
+   "queries_lexical": 15,
+   "seconds": 31.27,
+   "retrieved": 992,
+   "recall": {
+    "fused": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 1,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "dense": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 1,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "lexical": {
+     "T1": {
+      "found": 0,
+      "total": 3
+     },
+     "T2": {
+      "found": 0,
+      "total": 2
+     },
+     "T3": {
+      "found": 0,
+      "total": 2
+     }
+    }
+   },
+   "ranks": {
+    "data_t1a": 1,
+    "data_t1b": 2,
+    "data_t2a": 191,
+    "data_t2b": null,
+    "data_t3b": 13,
+    "data_t3_industrial_ds_en": 61,
+    "data_t1_rare_pdm": 293
+   },
+   "negative_ranks": {
+    "data_n1": null,
+    "data_n2": 47,
+    "data_n3": null
+   },
+   "inversions_at_window": 4,
+   "negatives_in_window": 1
+  },
+  {
+   "persona": "wing_nachhaltigkeit",
+   "strategy": "titles15",
+   "queries_dense": 15,
+   "queries_lexical": 15,
+   "seconds": 26.33,
+   "retrieved": 1472,
+   "recall": {
+    "fused": {
+     "T1": {
+      "found": 1,
+      "total": 3
+     },
+     "T2": {
+      "found": 1,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "dense": {
+     "T1": {
+      "found": 1,
+      "total": 3
+     },
+     "T2": {
+      "found": 1,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "lexical": {
+     "T1": {
+      "found": 0,
+      "total": 3
+     },
+     "T2": {
+      "found": 0,
+      "total": 2
+     },
+     "T3": {
+      "found": 1,
+      "total": 2
+     }
+    }
+   },
+   "ranks": {
+    "wing_t1_kreislauf": 25,
+    "wing_t1_referent": null,
+    "wing_t2_ressourcen": null,
+    "wing_t2_umweltstrategie": 50,
+    "wing_t3_circular_en": 5,
+    "wing_t3_green_transformation": 7,
+    "wing_t1_rare_iso": null
+   },
+   "negative_ranks": {
+    "wing_n_werkstudent": null,
+    "wing_n_ueberlassung": 15,
+    "wing_n_wrong_country": null
+   },
+   "inversions_at_window": 5,
+   "negatives_in_window": 1
+  },
+  {
+   "persona": "backend_java",
+   "strategy": "titles15",
+   "queries_dense": 15,
+   "queries_lexical": 15,
+   "seconds": 30.0,
+   "retrieved": 1654,
+   "recall": {
+    "fused": {
+     "T1": {
+      "found": 2,
+      "total": 3
+     },
+     "T2": {
+      "found": 0,
+      "total": 2
+     },
+     "T3": {
+      "found": 1,
+      "total": 2
+     }
+    },
+    "dense": {
+     "T1": {
+      "found": 2,
+      "total": 3
+     },
+     "T2": {
+      "found": 0,
+      "total": 2
+     },
+     "T3": {
+      "found": 1,
+      "total": 2
+     }
+    },
+    "lexical": {
+     "T1": {
+      "found": 2,
+      "total": 3
+     },
+     "T2": {
+      "found": 0,
+      "total": 2
+     },
+     "T3": {
+      "found": 0,
+      "total": 2
+     }
+    }
+   },
+   "ranks": {
+    "java_t1a": 3,
+    "java_t1b": 98,
+    "java_t2a": null,
+    "java_t2b": null,
+    "java_t3b": null,
+    "java_t3_platform_en": 699,
+    "java_t1_rare_mongo": null
+   },
+   "negative_ranks": {
+    "java_n1": null,
+    "java_n2": 57,
+    "java_n3": null
+   },
+   "inversions_at_window": 6,
+   "negatives_in_window": 1
+  },
+  {
+   "persona": "maschinenbau_zu_daten",
+   "strategy": "titles15",
+   "queries_dense": 15,
+   "queries_lexical": 15,
+   "seconds": 29.04,
+   "retrieved": 1752,
+   "recall": {
+    "fused": {
+     "T1": {
+      "found": 2,
+      "total": 3
+     },
+     "T2": {
+      "found": 2,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "dense": {
+     "T1": {
+      "found": 2,
+      "total": 3
+     },
+     "T2": {
+      "found": 2,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "lexical": {
+     "T1": {
+      "found": 2,
+      "total": 3
+     },
+     "T2": {
+      "found": 0,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    }
+   },
+   "ranks": {
+    "data_t1a": 15,
+    "data_t1b": 7,
+    "data_t2a": 1449,
+    "data_t2b": 773,
+    "data_t3b": 28,
+    "data_t3_industrial_ds_en": 32,
+    "data_t1_rare_pdm": null
+   },
+   "negative_ranks": {
+    "data_n1": null,
+    "data_n2": 21,
+    "data_n3": null
+   },
+   "inversions_at_window": 5,
+   "negatives_in_window": 1
+  },
+  {
+   "persona": "wing_nachhaltigkeit",
+   "strategy": "titles30",
+   "queries_dense": 30,
+   "queries_lexical": 30,
+   "seconds": 53.06,
+   "retrieved": 1577,
+   "recall": {
+    "fused": {
+     "T1": {
+      "found": 1,
+      "total": 3
+     },
+     "T2": {
+      "found": 1,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "dense": {
+     "T1": {
+      "found": 1,
+      "total": 3
+     },
+     "T2": {
+      "found": 1,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "lexical": {
+     "T1": {
+      "found": 1,
+      "total": 3
+     },
+     "T2": {
+      "found": 0,
+      "total": 2
+     },
+     "T3": {
+      "found": 1,
+      "total": 2
+     }
+    }
+   },
+   "ranks": {
+    "wing_t1_kreislauf": 19,
+    "wing_t1_referent": null,
+    "wing_t2_ressourcen": null,
+    "wing_t2_umweltstrategie": 47,
+    "wing_t3_circular_en": 6,
+    "wing_t3_green_transformation": 5,
+    "wing_t1_rare_iso": null
+   },
+   "negative_ranks": {
+    "wing_n_werkstudent": null,
+    "wing_n_ueberlassung": 2,
+    "wing_n_wrong_country": null
+   },
+   "inversions_at_window": 7,
+   "negatives_in_window": 1
+  },
+  {
+   "persona": "backend_java",
+   "strategy": "titles30",
+   "queries_dense": 30,
+   "queries_lexical": 30,
+   "seconds": 57.76,
+   "retrieved": 1905,
+   "recall": {
+    "fused": {
+     "T1": {
+      "found": 2,
+      "total": 3
+     },
+     "T2": {
+      "found": 1,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "dense": {
+     "T1": {
+      "found": 2,
+      "total": 3
+     },
+     "T2": {
+      "found": 1,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "lexical": {
+     "T1": {
+      "found": 2,
+      "total": 3
+     },
+     "T2": {
+      "found": 0,
+      "total": 2
+     },
+     "T3": {
+      "found": 1,
+      "total": 2
+     }
+    }
+   },
+   "ranks": {
+    "java_t1a": 4,
+    "java_t1b": 127,
+    "java_t2a": null,
+    "java_t2b": 892,
+    "java_t3b": 229,
+    "java_t3_platform_en": 1233,
+    "java_t1_rare_mongo": null
+   },
+   "negative_ranks": {
+    "java_n1": null,
+    "java_n2": 101,
+    "java_n3": null
+   },
+   "inversions_at_window": 6,
+   "negatives_in_window": 1
+  },
+  {
+   "persona": "maschinenbau_zu_daten",
+   "strategy": "titles30",
+   "queries_dense": 30,
+   "queries_lexical": 30,
+   "seconds": 53.61,
+   "retrieved": 1890,
+   "recall": {
+    "fused": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 2,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "dense": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 2,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "lexical": {
+     "T1": {
+      "found": 2,
+      "total": 3
+     },
+     "T2": {
+      "found": 0,
+      "total": 2
+     },
+     "T3": {
+      "found": 1,
+      "total": 2
+     }
+    }
+   },
+   "ranks": {
+    "data_t1a": 25,
+    "data_t1b": 11,
+    "data_t2a": 566,
+    "data_t2b": 468,
+    "data_t3b": 24,
+    "data_t3_industrial_ds_en": 23,
+    "data_t1_rare_pdm": 857
+   },
+   "negative_ranks": {
+    "data_n1": null,
+    "data_n2": 22,
+    "data_n3": null
+   },
+   "inversions_at_window": 6,
+   "negatives_in_window": 1
+  },
+  {
+   "persona": "wing_nachhaltigkeit",
+   "strategy": "titles30_or",
+   "queries_dense": 30,
+   "queries_lexical": 1,
+   "seconds": 53.51,
+   "retrieved": 1184,
+   "recall": {
+    "fused": {
+     "T1": {
+      "found": 1,
+      "total": 3
+     },
+     "T2": {
+      "found": 1,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "dense": {
+     "T1": {
+      "found": 1,
+      "total": 3
+     },
+     "T2": {
+      "found": 1,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "lexical": {
+     "T1": {
+      "found": 0,
+      "total": 3
+     },
+     "T2": {
+      "found": 0,
+      "total": 2
+     },
+     "T3": {
+      "found": 1,
+      "total": 2
+     }
+    }
+   },
+   "ranks": {
+    "wing_t1_kreislauf": 21,
+    "wing_t1_referent": null,
+    "wing_t2_ressourcen": null,
+    "wing_t2_umweltstrategie": 45,
+    "wing_t3_circular_en": 7,
+    "wing_t3_green_transformation": 5,
+    "wing_t1_rare_iso": null
+   },
+   "negative_ranks": {
+    "wing_n_werkstudent": null,
+    "wing_n_ueberlassung": 3,
+    "wing_n_wrong_country": null
+   },
+   "inversions_at_window": 7,
+   "negatives_in_window": 1
+  },
+  {
+   "persona": "backend_java",
+   "strategy": "titles30_or",
+   "queries_dense": 30,
+   "queries_lexical": 1,
+   "seconds": 62.79,
+   "retrieved": 2000,
+   "recall": {
+    "fused": {
+     "T1": {
+      "found": 2,
+      "total": 3
+     },
+     "T2": {
+      "found": 2,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "dense": {
+     "T1": {
+      "found": 2,
+      "total": 3
+     },
+     "T2": {
+      "found": 1,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "lexical": {
+     "T1": {
+      "found": 2,
+      "total": 3
+     },
+     "T2": {
+      "found": 1,
+      "total": 2
+     },
+     "T3": {
+      "found": 1,
+      "total": 2
+     }
+    }
+   },
+   "ranks": {
+    "java_t1a": 5,
+    "java_t1b": 141,
+    "java_t2a": 1712,
+    "java_t2b": 493,
+    "java_t3b": 183,
+    "java_t3_platform_en": 713,
+    "java_t1_rare_mongo": null
+   },
+   "negative_ranks": {
+    "java_n1": 1711,
+    "java_n2": 150,
+    "java_n3": null
+   },
+   "inversions_at_window": 5,
+   "negatives_in_window": 1
+  },
+  {
+   "persona": "maschinenbau_zu_daten",
+   "strategy": "titles30_or",
+   "queries_dense": 30,
+   "queries_lexical": 1,
+   "seconds": 57.27,
+   "retrieved": 1495,
+   "recall": {
+    "fused": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 2,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "dense": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 2,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "lexical": {
+     "T1": {
+      "found": 1,
+      "total": 3
+     },
+     "T2": {
+      "found": 0,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    }
+   },
+   "ranks": {
+    "data_t1a": 18,
+    "data_t1b": 9,
+    "data_t2a": 376,
+    "data_t2b": 301,
+    "data_t3b": 10,
+    "data_t3_industrial_ds_en": 25,
+    "data_t1_rare_pdm": 543
+   },
+   "negative_ranks": {
+    "data_n1": null,
+    "data_n2": 13,
+    "data_n3": null
+   },
+   "inversions_at_window": 5,
+   "negatives_in_window": 1
+  },
+  {
+   "persona": "wing_nachhaltigkeit",
+   "strategy": "tokens_lex",
+   "queries_dense": 7,
+   "queries_lexical": 27,
+   "seconds": 13.96,
+   "retrieved": 2000,
+   "recall": {
+    "fused": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 1,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "dense": {
+     "T1": {
+      "found": 2,
+      "total": 3
+     },
+     "T2": {
+      "found": 1,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "lexical": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 0,
+      "total": 2
+     },
+     "T3": {
+      "found": 0,
+      "total": 2
+     }
+    }
+   },
+   "ranks": {
+    "wing_t1_kreislauf": 1,
+    "wing_t1_referent": 233,
+    "wing_t2_ressourcen": null,
+    "wing_t2_umweltstrategie": 69,
+    "wing_t3_circular_en": 119,
+    "wing_t3_green_transformation": 53,
+    "wing_t1_rare_iso": 121
+   },
+   "negative_ranks": {
+    "wing_n_werkstudent": 36,
+    "wing_n_ueberlassung": 7,
+    "wing_n_wrong_country": null
+   },
+   "inversions_at_window": 12,
+   "negatives_in_window": 2
+  },
+  {
+   "persona": "backend_java",
+   "strategy": "tokens_lex",
+   "queries_dense": 6,
+   "queries_lexical": 26,
+   "seconds": 12.27,
+   "retrieved": 2000,
+   "recall": {
+    "fused": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 1,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "dense": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 1,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "lexical": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 0,
+      "total": 2
+     },
+     "T3": {
+      "found": 0,
+      "total": 2
+     }
+    }
+   },
+   "ranks": {
+    "java_t1a": 3,
+    "java_t1b": 38,
+    "java_t2a": 1346,
+    "java_t2b": null,
+    "java_t3b": 1129,
+    "java_t3_platform_en": 1209,
+    "java_t1_rare_mongo": 212
+   },
+   "negative_ranks": {
+    "java_n1": null,
+    "java_n2": 58,
+    "java_n3": null
+   },
+   "inversions_at_window": 5,
+   "negatives_in_window": 1
+  },
+  {
+   "persona": "maschinenbau_zu_daten",
+   "strategy": "tokens_lex",
+   "queries_dense": 5,
+   "queries_lexical": 25,
+   "seconds": 10.73,
+   "retrieved": 2000,
+   "recall": {
+    "fused": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 1,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "dense": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 1,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "lexical": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 1,
+      "total": 2
+     },
+     "T3": {
+      "found": 0,
+      "total": 2
+     }
+    }
+   },
+   "ranks": {
+    "data_t1a": 5,
+    "data_t1b": 1,
+    "data_t2a": 80,
+    "data_t2b": null,
+    "data_t3b": 226,
+    "data_t3_industrial_ds_en": 564,
+    "data_t1_rare_pdm": 59
+   },
+   "negative_ranks": {
+    "data_n1": null,
+    "data_n2": 16,
+    "data_n3": null
+   },
+   "inversions_at_window": 5,
+   "negatives_in_window": 1
+  },
+  {
+   "persona": "wing_nachhaltigkeit",
+   "strategy": "full_proposal",
+   "queries_dense": 45,
+   "queries_lexical": 50,
+   "seconds": 88.93,
+   "retrieved": 1541,
+   "recall": {
+    "fused": {
+     "T1": {
+      "found": 2,
+      "total": 3
+     },
+     "T2": {
+      "found": 2,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "dense": {
+     "T1": {
+      "found": 2,
+      "total": 3
+     },
+     "T2": {
+      "found": 2,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "lexical": {
+     "T1": {
+      "found": 1,
+      "total": 3
+     },
+     "T2": {
+      "found": 0,
+      "total": 2
+     },
+     "T3": {
+      "found": 1,
+      "total": 2
+     }
+    }
+   },
+   "ranks": {
+    "wing_t1_kreislauf": 7,
+    "wing_t1_referent": null,
+    "wing_t2_ressourcen": 1122,
+    "wing_t2_umweltstrategie": 29,
+    "wing_t3_circular_en": 3,
+    "wing_t3_green_transformation": 17,
+    "wing_t1_rare_iso": 724
+   },
+   "negative_ranks": {
+    "wing_n_werkstudent": 526,
+    "wing_n_ueberlassung": 1,
+    "wing_n_wrong_country": null
+   },
+   "inversions_at_window": 7,
+   "negatives_in_window": 1
+  },
+  {
+   "persona": "backend_java",
+   "strategy": "full_proposal",
+   "queries_dense": 45,
+   "queries_lexical": 50,
+   "seconds": 88.73,
+   "retrieved": 1710,
+   "recall": {
+    "fused": {
+     "T1": {
+      "found": 2,
+      "total": 3
+     },
+     "T2": {
+      "found": 1,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "dense": {
+     "T1": {
+      "found": 2,
+      "total": 3
+     },
+     "T2": {
+      "found": 1,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "lexical": {
+     "T1": {
+      "found": 2,
+      "total": 3
+     },
+     "T2": {
+      "found": 0,
+      "total": 2
+     },
+     "T3": {
+      "found": 1,
+      "total": 2
+     }
+    }
+   },
+   "ranks": {
+    "java_t1a": 1,
+    "java_t1b": 39,
+    "java_t2a": null,
+    "java_t2b": 409,
+    "java_t3b": 185,
+    "java_t3_platform_en": 123,
+    "java_t1_rare_mongo": null
+   },
+   "negative_ranks": {
+    "java_n1": null,
+    "java_n2": 79,
+    "java_n3": null
+   },
+   "inversions_at_window": 5,
+   "negatives_in_window": 1
+  },
+  {
+   "persona": "maschinenbau_zu_daten",
+   "strategy": "full_proposal",
+   "queries_dense": 45,
+   "queries_lexical": 50,
+   "seconds": 90.65,
+   "retrieved": 1859,
+   "recall": {
+    "fused": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 2,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "dense": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 2,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "lexical": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 1,
+      "total": 2
+     },
+     "T3": {
+      "found": 1,
+      "total": 2
+     }
+    }
+   },
+   "ranks": {
+    "data_t1a": 5,
+    "data_t1b": 3,
+    "data_t2a": 152,
+    "data_t2b": 1488,
+    "data_t3b": 14,
+    "data_t3_industrial_ds_en": 19,
+    "data_t1_rare_pdm": 195
+   },
+   "negative_ranks": {
+    "data_n1": null,
+    "data_n2": 29,
+    "data_n3": null
+   },
+   "inversions_at_window": 3,
+   "negatives_in_window": 1
+  },
+  {
+   "persona": "wing_nachhaltigkeit",
+   "strategy": "routed_tuned",
+   "queries_dense": 22,
+   "queries_lexical": 28,
+   "seconds": 44.34,
+   "retrieved": 1691,
+   "recall": {
+    "fused": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 2,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "dense": {
+     "T1": {
+      "found": 2,
+      "total": 3
+     },
+     "T2": {
+      "found": 2,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "lexical": {
+     "T1": {
+      "found": 2,
+      "total": 3
+     },
+     "T2": {
+      "found": 0,
+      "total": 2
+     },
+     "T3": {
+      "found": 1,
+      "total": 2
+     }
+    }
+   },
+   "ranks": {
+    "wing_t1_kreislauf": 1,
+    "wing_t1_referent": 352,
+    "wing_t2_ressourcen": 372,
+    "wing_t2_umweltstrategie": 17,
+    "wing_t3_circular_en": 7,
+    "wing_t3_green_transformation": 40,
+    "wing_t1_rare_iso": 247
+   },
+   "negative_ranks": {
+    "wing_n_werkstudent": 106,
+    "wing_n_ueberlassung": 2,
+    "wing_n_wrong_country": null
+   },
+   "inversions_at_window": 9,
+   "negatives_in_window": 2
+  },
+  {
+   "persona": "backend_java",
+   "strategy": "routed_tuned",
+   "queries_dense": 21,
+   "queries_lexical": 27,
+   "seconds": 47.93,
+   "retrieved": 1558,
+   "recall": {
+    "fused": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 2,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "dense": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 2,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "lexical": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 0,
+      "total": 2
+     },
+     "T3": {
+      "found": 0,
+      "total": 2
+     }
+    }
+   },
+   "ranks": {
+    "java_t1a": 2,
+    "java_t1b": 21,
+    "java_t2a": 586,
+    "java_t2b": 572,
+    "java_t3b": 790,
+    "java_t3_platform_en": 85,
+    "java_t1_rare_mongo": 299
+   },
+   "negative_ranks": {
+    "java_n1": null,
+    "java_n2": 65,
+    "java_n3": null
+   },
+   "inversions_at_window": 5,
+   "negatives_in_window": 1
+  },
+  {
+   "persona": "maschinenbau_zu_daten",
+   "strategy": "routed_tuned",
+   "queries_dense": 20,
+   "queries_lexical": 26,
+   "seconds": 41.68,
+   "retrieved": 1860,
+   "recall": {
+    "fused": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 1,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "dense": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 1,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "lexical": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 1,
+      "total": 2
+     },
+     "T3": {
+      "found": 0,
+      "total": 2
+     }
+    }
+   },
+   "ranks": {
+    "data_t1a": 2,
+    "data_t1b": 1,
+    "data_t2a": 124,
+    "data_t2b": null,
+    "data_t3b": 19,
+    "data_t3_industrial_ds_en": 76,
+    "data_t1_rare_pdm": 96
+   },
+   "negative_ranks": {
+    "data_n1": null,
+    "data_n2": 17,
+    "data_n3": null
+   },
+   "inversions_at_window": 5,
+   "negatives_in_window": 1
+  },
+  {
+   "persona": "wing_nachhaltigkeit",
+   "strategy": "routed_pooled",
+   "queries_dense": 1,
+   "queries_lexical": 28,
+   "seconds": 6.6,
+   "retrieved": 2000,
+   "recall": {
+    "fused": {
+     "T1": {
+      "found": 2,
+      "total": 3
+     },
+     "T2": {
+      "found": 2,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "dense": {
+     "T1": {
+      "found": 1,
+      "total": 3
+     },
+     "T2": {
+      "found": 2,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "lexical": {
+     "T1": {
+      "found": 2,
+      "total": 3
+     },
+     "T2": {
+      "found": 0,
+      "total": 2
+     },
+     "T3": {
+      "found": 1,
+      "total": 2
+     }
+    }
+   },
+   "ranks": {
+    "wing_t1_kreislauf": 3,
+    "wing_t1_referent": 136,
+    "wing_t2_ressourcen": 676,
+    "wing_t2_umweltstrategie": 359,
+    "wing_t3_circular_en": 82,
+    "wing_t3_green_transformation": 648,
+    "wing_t1_rare_iso": null
+   },
+   "negative_ranks": {
+    "wing_n_werkstudent": 20,
+    "wing_n_ueberlassung": 30,
+    "wing_n_wrong_country": null
+   },
+   "inversions_at_window": 12,
+   "negatives_in_window": 2
+  },
+  {
+   "persona": "backend_java",
+   "strategy": "routed_pooled",
+   "queries_dense": 1,
+   "queries_lexical": 27,
+   "seconds": 10.05,
+   "retrieved": 2000,
+   "recall": {
+    "fused": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 2,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "dense": {
+     "T1": {
+      "found": 2,
+      "total": 3
+     },
+     "T2": {
+      "found": 2,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "lexical": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 0,
+      "total": 2
+     },
+     "T3": {
+      "found": 0,
+      "total": 2
+     }
+    }
+   },
+   "ranks": {
+    "java_t1a": 13,
+    "java_t1b": 132,
+    "java_t2a": 959,
+    "java_t2b": 1098,
+    "java_t3b": 899,
+    "java_t3_platform_en": 526,
+    "java_t1_rare_mongo": 319
+   },
+   "negative_ranks": {
+    "java_n1": null,
+    "java_n2": 121,
+    "java_n3": null
+   },
+   "inversions_at_window": 6,
+   "negatives_in_window": 1
+  },
+  {
+   "persona": "maschinenbau_zu_daten",
+   "strategy": "routed_pooled",
+   "queries_dense": 1,
+   "queries_lexical": 26,
+   "seconds": 9.35,
+   "retrieved": 2000,
+   "recall": {
+    "fused": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 1,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "dense": {
+     "T1": {
+      "found": 2,
+      "total": 3
+     },
+     "T2": {
+      "found": 1,
+      "total": 2
+     },
+     "T3": {
+      "found": 2,
+      "total": 2
+     }
+    },
+    "lexical": {
+     "T1": {
+      "found": 3,
+      "total": 3
+     },
+     "T2": {
+      "found": 1,
+      "total": 2
+     },
+     "T3": {
+      "found": 0,
+      "total": 2
+     }
+    }
+   },
+   "ranks": {
+    "data_t1a": 22,
+    "data_t1b": 5,
+    "data_t2a": 263,
+    "data_t2b": null,
+    "data_t3b": 497,
+    "data_t3_industrial_ds_en": 884,
+    "data_t1_rare_pdm": 139
+   },
+   "negative_ranks": {
+    "data_n1": null,
+    "data_n2": 38,
+    "data_n3": null
+   },
+   "inversions_at_window": 5,
+   "negatives_in_window": 1
+  }
+ ],
+ "summary": {
+  "det": {
+   "recall_at": {
+    "10": 5,
+    "25": 5,
+    "50": 8,
+    "150": 13,
+    "400": 15,
+    "2000": 18
+   },
+   "positives": 21,
+   "tiers_fused": {
+    "T1": "9/9",
+    "T2": "3/6",
+    "T3": "6/6"
+   },
+   "dense_only": "17/21",
+   "lexical_only": "9/21",
+   "mrr": 0.1839,
+   "median_rank": 84,
+   "negatives_in_window": 4,
+   "inversions_at_window": 19,
+   "queries": 36,
+   "seconds": 33.8
+  },
+  "phrases8": {
+   "recall_at": {
+    "10": 4,
+    "25": 5,
+    "50": 9,
+    "150": 13,
+    "400": 15,
+    "2000": 18
+   },
+   "positives": 21,
+   "tiers_fused": {
+    "T1": "9/9",
+    "T2": "4/6",
+    "T3": "5/6"
+   },
+   "dense_only": "17/21",
+   "lexical_only": "10/21",
+   "mrr": 0.1768,
+   "median_rank": 54,
+   "negatives_in_window": 4,
+   "inversions_at_window": 19,
+   "queries": 48,
+   "seconds": 45.9
+  },
+  "ads3_dense": {
+   "recall_at": {
+    "10": 4,
+    "25": 8,
+    "50": 9,
+    "150": 12,
+    "400": 13,
+    "2000": 20
+   },
+   "positives": 21,
+   "tiers_fused": {
+    "T1": "9/9",
+    "T2": "5/6",
+    "T3": "6/6"
+   },
+   "dense_only": "16/21",
+   "lexical_only": "9/21",
+   "mrr": 0.1805,
+   "median_rank": 118,
+   "negatives_in_window": 4,
+   "inversions_at_window": 20,
+   "queries": 27,
+   "seconds": 20.3
+  },
+  "ads5_dense": {
+   "recall_at": {
+    "10": 6,
+    "25": 8,
+    "50": 9,
+    "150": 12,
+    "400": 16,
+    "2000": 21
+   },
+   "positives": 21,
+   "tiers_fused": {
+    "T1": "9/9",
+    "T2": "6/6",
+    "T3": "6/6"
+   },
+   "dense_only": "18/21",
+   "lexical_only": "9/21",
+   "mrr": 0.197,
+   "median_rank": 101,
+   "negatives_in_window": 4,
+   "inversions_at_window": 18,
+   "queries": 33,
+   "seconds": 31.0
+  },
+  "ads15_dense": {
+   "recall_at": {
+    "10": 5,
+    "25": 8,
+    "50": 9,
+    "150": 12,
+    "400": 18,
+    "2000": 20
+   },
+   "positives": 21,
+   "tiers_fused": {
+    "T1": "9/9",
+    "T2": "5/6",
+    "T3": "6/6"
+   },
+   "dense_only": "18/21",
+   "lexical_only": "9/21",
+   "mrr": 0.1872,
+   "median_rank": 93,
+   "negatives_in_window": 3,
+   "inversions_at_window": 14,
+   "queries": 63,
+   "seconds": 94.5
+  },
+  "ads15_pooled": {
+   "recall_at": {
+    "10": 4,
+    "25": 6,
+    "50": 6,
+    "150": 8,
+    "400": 13,
+    "2000": 19
+   },
+   "positives": 21,
+   "tiers_fused": {
+    "T1": "9/9",
+    "T2": "4/6",
+    "T3": "6/6"
+   },
+   "dense_only": "16/21",
+   "lexical_only": "9/21",
+   "mrr": 0.1659,
+   "median_rank": 169,
+   "negatives_in_window": 4,
+   "inversions_at_window": 22,
+   "queries": 21,
+   "seconds": 19.4
+  },
+  "ads15_both": {
+   "recall_at": {
+    "10": 5,
+    "25": 7,
+    "50": 9,
+    "150": 12,
+    "400": 18,
+    "2000": 18
+   },
+   "positives": 21,
+   "tiers_fused": {
+    "T1": "7/9",
+    "T2": "5/6",
+    "T3": "6/6"
+   },
+   "dense_only": "18/21",
+   "lexical_only": "0/21",
+   "mrr": 0.1511,
+   "median_rank": 61,
+   "negatives_in_window": 3,
+   "inversions_at_window": 15,
+   "queries": 90,
+   "seconds": 94.9
+  },
+  "titles15": {
+   "recall_at": {
+    "10": 4,
+    "25": 6,
+    "50": 9,
+    "150": 10,
+    "400": 10,
+    "2000": 13
+   },
+   "positives": 21,
+   "tiers_fused": {
+    "T1": "5/9",
+    "T2": "3/6",
+    "T3": "5/6"
+   },
+   "dense_only": "13/21",
+   "lexical_only": "7/21",
+   "mrr": 0.0489,
+   "median_rank": 28,
+   "negatives_in_window": 3,
+   "inversions_at_window": 16,
+   "queries": 90,
+   "seconds": 85.4
+  },
+  "titles30": {
+   "recall_at": {
+    "10": 3,
+    "25": 8,
+    "50": 9,
+    "150": 10,
+    "400": 11,
+    "2000": 16
+   },
+   "positives": 21,
+   "tiers_fused": {
+    "T1": "6/9",
+    "T2": "4/6",
+    "T3": "6/6"
+   },
+   "dense_only": "16/21",
+   "lexical_only": "8/21",
+   "mrr": 0.0441,
+   "median_rank": 47,
+   "negatives_in_window": 3,
+   "inversions_at_window": 19,
+   "queries": 180,
+   "seconds": 164.4
+  },
+  "titles30_or": {
+   "recall_at": {
+    "10": 5,
+    "25": 8,
+    "50": 9,
+    "150": 10,
+    "400": 13,
+    "2000": 17
+   },
+   "positives": 21,
+   "tiers_fused": {
+    "T1": "6/9",
+    "T2": "5/6",
+    "T3": "6/6"
+   },
+   "dense_only": "16/21",
+   "lexical_only": "8/21",
+   "mrr": 0.0449,
+   "median_rank": 45,
+   "negatives_in_window": 3,
+   "inversions_at_window": 17,
+   "queries": 93,
+   "seconds": 173.6
+  },
+  "tokens_lex": {
+   "recall_at": {
+    "10": 4,
+    "25": 4,
+    "50": 5,
+    "150": 11,
+    "400": 14,
+    "2000": 18
+   },
+   "positives": 21,
+   "tiers_fused": {
+    "T1": "9/9",
+    "T2": "3/6",
+    "T3": "6/6"
+   },
+   "dense_only": "17/21",
+   "lexical_only": "10/21",
+   "mrr": 0.1265,
+   "median_rank": 119,
+   "negatives_in_window": 4,
+   "inversions_at_window": 22,
+   "queries": 96,
+   "seconds": 37.0
+  },
+  "full_proposal": {
+   "recall_at": {
+    "10": 5,
+    "25": 8,
+    "50": 10,
+    "150": 11,
+    "400": 14,
+    "2000": 18
+   },
+   "positives": 21,
+   "tiers_fused": {
+    "T1": "7/9",
+    "T2": "5/6",
+    "T3": "6/6"
+   },
+   "dense_only": "18/21",
+   "lexical_only": "10/21",
+   "mrr": 0.1087,
+   "median_rank": 39,
+   "negatives_in_window": 3,
+   "inversions_at_window": 15,
+   "queries": 285,
+   "seconds": 268.3
+  },
+  "routed_tuned": {
+   "recall_at": {
+    "10": 5,
+    "25": 8,
+    "50": 9,
+    "150": 13,
+    "400": 17,
+    "2000": 20
+   },
+   "positives": 21,
+   "tiers_fused": {
+    "T1": "9/9",
+    "T2": "5/6",
+    "T3": "6/6"
+   },
+   "dense_only": "19/21",
+   "lexical_only": "10/21",
+   "mrr": 0.1613,
+   "median_rank": 85,
+   "negatives_in_window": 4,
+   "inversions_at_window": 19,
+   "queries": 144,
+   "seconds": 133.9
+  },
+  "routed_pooled": {
+   "recall_at": {
+    "10": 2,
+    "25": 4,
+    "50": 4,
+    "150": 8,
+    "400": 11,
+    "2000": 19
+   },
+   "positives": 21,
+   "tiers_fused": {
+    "T1": "8/9",
+    "T2": "5/6",
+    "T3": "6/6"
+   },
+   "dense_only": "16/21",
+   "lexical_only": "10/21",
+   "mrr": 0.0339,
+   "median_rank": 319,
+   "negatives_in_window": 4,
+   "inversions_at_window": 23,
+   "queries": 84,
+   "seconds": 26.0
+  }
+ }
+}

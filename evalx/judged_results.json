@@ -1,0 +1,144 @@
+{
+ "depth": 20,
+ "model": "deepseek/deepseek-v4-flash",
+ "results": {
+  "det": {
+   "wing_nachhaltigkeit": {
+    "judged": 18,
+    "mean_score": 37.8,
+    "good_at_depth": 4,
+    "ndcg": 0.5721,
+    "window_size": 150
+   },
+   "backend_java": {
+    "judged": 17,
+    "mean_score": 69.7,
+    "good_at_depth": 12,
+    "ndcg": 0.7887,
+    "window_size": 150
+   },
+   "maschinenbau_zu_daten": {
+    "judged": 17,
+    "mean_score": 46.2,
+    "good_at_depth": 4,
+    "ndcg": 0.6081,
+    "window_size": 150
+   }
+  },
+  "phrases8": {
+   "wing_nachhaltigkeit": {
+    "judged": 17,
+    "mean_score": 54.7,
+    "good_at_depth": 6,
+    "ndcg": 0.7016,
+    "window_size": 150
+   },
+   "backend_java": {
+    "judged": 18,
+    "mean_score": 65.3,
+    "good_at_depth": 11,
+    "ndcg": 0.7641,
+    "window_size": 150
+   },
+   "maschinenbau_zu_daten": {
+    "judged": 20,
+    "mean_score": 52.2,
+    "good_at_depth": 5,
+    "ndcg": 0.7531,
+    "window_size": 150
+   }
+  },
+  "det_plus_ads8": {
+   "wing_nachhaltigkeit": {
+    "judged": 19,
+    "mean_score": 60.5,
+    "good_at_depth": 9,
+    "ndcg": 0.788,
+    "window_size": 150
+   },
+   "backend_java": {
+    "judged": 16,
+    "mean_score": 71.4,
+    "good_at_depth": 11,
+    "ndcg": 0.7725,
+    "window_size": 150
+   },
+   "maschinenbau_zu_daten": {
+    "judged": 17,
+    "mean_score": 52.1,
+    "good_at_depth": 6,
+    "ndcg": 0.6958,
+    "window_size": 150
+   }
+  },
+  "llm_ads_v2": {
+   "wing_nachhaltigkeit": {
+    "judged": 17,
+    "mean_score": 54.7,
+    "good_at_depth": 6,
+    "ndcg": 0.7061,
+    "window_size": 150
+   },
+   "backend_java": {
+    "judged": 17,
+    "mean_score": 59.1,
+    "good_at_depth": 9,
+    "ndcg": 0.6918,
+    "window_size": 150
+   },
+   "maschinenbau_zu_daten": {
+    "judged": 16,
+    "mean_score": 49.4,
+    "good_at_depth": 6,
+    "ndcg": 0.6693,
+    "window_size": 150
+   }
+  },
+  "titles30": {
+   "wing_nachhaltigkeit": {
+    "judged": 19,
+    "mean_score": 56.3,
+    "good_at_depth": 8,
+    "ndcg": 0.6857,
+    "window_size": 150
+   },
+   "backend_java": {
+    "judged": 15,
+    "mean_score": 49.0,
+    "good_at_depth": 5,
+    "ndcg": 0.5352,
+    "window_size": 150
+   },
+   "maschinenbau_zu_daten": {
+    "judged": 18,
+    "mean_score": 50.8,
+    "good_at_depth": 3,
+    "ndcg": 0.6558,
+    "window_size": 150
+   }
+  },
+  "full_proposal": {
+   "wing_nachhaltigkeit": {
+    "judged": 18,
+    "mean_score": 58.3,
+    "good_at_depth": 9,
+    "ndcg": 0.677,
+    "window_size": 150
+   },
+   "backend_java": {
+    "judged": 15,
+    "mean_score": 64.0,
+    "good_at_depth": 9,
+    "ndcg": 0.6856,
+    "window_size": 150
+   },
+   "maschinenbau_zu_daten": {
+    "judged": 19,
+    "mean_score": 56.6,
+    "good_at_depth": 6,
+    "ndcg": 0.7377,
+    "window_size": 150
+   }
+  }
+ }
+}

@@ -1,0 +1,134 @@
+# Evaluating the synthetic-advert expansion proposal
+
+Run 2026-09-19 against `origin/main` (17c8ae0, the deployed code), over a read-only copy of the
+production corpus: **225,524 postings, 223,944 vectors, 223,949 open**. Production was not
+touched: `pg_dump` from `trouveur-db-1`, restored into a standalone `trouveur-eval-db` on :55433.
+
+## Method
+
+The repo harness supplies everything that must match production -- planting a needle through the
+real ingest path, the profile, the retrieval SQL, RRF. Only the queries vary. `evalx/strategies.py`
+adds one capability the production path lacks: **routing a query to one arm**, without which the
+proposal cannot be tested at all (see finding 2).
+
+Two expansion fixture sets:
+
+- `expansions.json` -- written by a frontier model (Claude) from `personas.json` **alone**, hashed
+  (`expansions.sha256`) **before `needles.json` was read**, so no strategy could be tuned to the
+  answers. Upper bound on advert quality.
+- `expansions_llm.json` -- the same artifacts from `deepseek/deepseek-v4-flash`, the model
+  production pins. What would actually ship.
+
+Recall is measured on the 21 planted positives. Precision is measured separately by TREC-style
+pooling: the union of each strategy's top-20 is judged once per posting by the **production
+reranker** (same prompt, model and pin), and every strategy is scored against that one judgement
+set. The judge never sees the query that retrieved a posting, so it cannot prefer a strategy for
+phrasing itself the way the judge would.
+
+## Result
+
+Baseline `det` (deterministic queries, no API key): T1 median rank 5, T2+T3 median 503,
+13/21 inside the 150-slot rerank window, MRR 0.184.
+
+| strategy | @25 | @150 | @400 | @2000 | MRR | T1 | T2 | judged mean | good | nDCG |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `det` | 5/21 | 13/21 | 15/21 | 18/21 | 0.184 | 9/9 | 3/6 | 51.0 | 20 | 0.656 |
+| `phrases8` (today, with key) | 5/21 | 13/21 | 15/21 | 18/21 | 0.177 | 9/9 | 4/6 | 57.3 | 22 | 0.740 |
+| **`det_plus_ads8`** | **9/21** | 13/21 | **20/21** | **20/21** | 0.188 | 9/9 | 5/6 | **61.1** | **26** | **0.752** |
+| `llm_ads_v2` (cheap model) | 6/21 | 12/21 | 17/21 | 20/21 | 0.182 | 9/9 | 5/6 | 54.5 | 21 | 0.689 |
+| `titles30` | 8/21 | 10/21 | 11/21 | 16/21 | 0.044 | 6/9 | 4/6 | 52.3 | 16 | 0.626 |
+| `tokens_lex` | 4/21 | 11/21 | 14/21 | 18/21 | 0.127 | 9/9 | 3/6 | - | - | - |
+| `full_proposal` | 8/21 | 11/21 | 14/21 | 18/21 | 0.109 | 7/9 | 5/6 | 59.3 | 24 | 0.700 |
+
+Component by component:
+
+1. **Synthetic adverts, dense arm only, added to the user's own words: keep.** They move exactly
+   the tier they should -- T2/T3 are the needles sharing no vocabulary with the profile, median
+   rank 503 -> 98. Deep recall 15/21 -> 20/21 @400. And they do *not* fill the paid window with
+   noise: judged mean 51.0 -> 61.1, postings scoring >=70 20 -> 26, consistent across all three
+   personas. 5-8 adverts; 15 is not better than 8, and past that it degrades.
+
+2. **Adverts must be routed to the dense arm.** A 69-word advert becomes a 65-term ANDed
+   `websearch_to_tsquery`: **0 rows**. A 167-word one, 158 terms: **0 rows**. Both the tsvector and
+   the `LIKE` path. Sending adverts to both arms wastes half the query budget on empty results.
+
+3. **Adverts must be ADDED to the deterministic queries, not replace them.** Substituting costs
+   T1: `data_t1_rare_pdm` 31 -> 341, `wing_t1_rare_iso` 130 -> 733. The additive variants hold
+   T1 at 9/9 with no rank damage while keeping the T2 gain.
+
+4. **30 adjacent titles: drop.** Every one of the 9 T1 needles ranked worse; `wing_t1_kreislauf`
+   1 -> 19; three needles lost entirely; MRR 0.184 -> 0.044; judged nDCG below baseline (0.626).
+   **Not a budget artifact**: `titles30_deep` with 8x the per-query depth is *worse* (MRR 0.034).
+   The cause is structural -- RRF sums 1/(60+rank) across lists, so a posting sitting mid-list in
+   30 correlated title searches outscores the exact match that appears first in one.
+
+5. **Rare exact tokens: drop.** As 20 separate lexical queries: 1 needle improved, 8 worsened
+   (T2+T3 median 503 -> 846). OR'd into a single query to protect the budget: still no gain
+   (MRR 0.181 vs 0.184), and no gain on top of adverts either. The one token-dependent needle it
+   was meant to rescue, `wing_t1_rare_iso`, moved 130 -> 121.
+
+6. **Mean-pooling the advert vectors: drop.** MRR 0.166 vs 0.184 baseline, median rank 169. The
+   HyDE paper's own recipe measures worse here than simply issuing the adverts as separate queries.
+
+7. **The whole proposal as stated is worse than doing nothing** on the metric that decides the
+   bill: `full_proposal` puts 11/21 in the window against the baseline's 13/21, at 285 queries
+   and 268s per run against 36 queries and 33s.
+
+## Generation is the weak link, not the idea
+
+The proposal's benefit is a function of advert quality, and the pinned cheap model does not
+deliver it by default:
+
+- Its first-draft adverts describe the role the candidate **already has** -- fatal for a
+  career-change profile, which is exactly the case adverts are supposed to fix. T2 stayed at 3/6.
+- Its 15 adverts shared 259 distinct words against 435 for the good set: near-duplicate queries.
+- A prompt fix (`ads_v2`: "write the role they are moving TO, never the role they already have",
+  one distinct role per advert, ~70 words, discriminating words first) took it to T2 5/6 and
+  @2000 20/21 -- most of the gap closed, for $0.0004 per profile.
+- **Reliability is the real cost.** Asking for 15 long adverts in one call failed in 2 of 3
+  personas (unparseable JSON, a single 2,593-word blob, or the 6,000-token ceiling). Chunking into
+  3 calls of 5 still blew the budget once. Short adverts succeeded 15/15 for all three.
+
+## Three defects found on the way, independent of the proposal
+
+1. **The encoder truncates at 128 tokens, not the ~512 the code comments assume.** Measured on 500
+   real postings: 96.4% exceed it; the median posting has **41%** of its assembled embedding text
+   encoded. `_DESCRIPTION_BUDGET = 1200` in `ingest/embed/text.py` is ~2.4x more than the model
+   ever reads. This also caps advert length: a 200-word advert is silently cut to its first third.
+
+2. **`expand.parse_response` silently discards a common model response shape.** Asked for "a JSON
+   array of strings", the model returns an array of `{title, description}` objects a good fraction
+   of the time; the `isinstance(item, str)` filter drops every element and returns `[]`, degrading
+   to deterministic expansion with nothing surfaced to the user.
+
+3. **The pinned provider is failing right now.** `deepinfra/fp8` returns 429 `engine_overloaded`,
+   and `llm.complete` sets `allow_fallbacks: False`, so reranking fails with the misleading
+   message "OpenRouter is rate-limiting this key". The same model served fine on other providers.
+
+## On the two non-retrieval parts of the proposal
+
+- **Making a key mandatory for "Match now": the data says no.** `det` with no key reaches 18/21 at
+  depth and 13/21 in the window -- it is a working search, not a degraded one, and it beats
+  `titles30` and `full_proposal` on the window metric. It contradicts the written rule that
+  retrieval must work with no key, and the rich expansion is what the key already buys.
+- **"You will erase your hidden data" is the wrong warning.** `user_query_expansion` is keyed
+  `(user_id, profile_version, expansion_version)`, so a profile edit writes a *new* row and erases
+  nothing. What a scoring-field edit does do (`users.save_profile` -> `reset_scores`) is clear
+  every cached LLM score, which costs real money on the next match. The honest message is about
+  that cost, not about lost data.
+
+## Reproducing
+
+    scripts/devdb.sh up                        # or the standalone container on :55433
+    uv run python -m evalx.run --plant --out evalx/results.json
+    uv run python -m evalx.judge --depth 20 --strategies "det,det_plus_ads8,titles30"
+
+Judging needs `TROUVEUR_EVAL_LLM_KEY`. The whole evaluation above cost **$0.0122**.
+
+## What this does not measure
+
+- 3 personas, 21 positives. A one-needle difference is 4.8 points; the conclusions drawn here are
+  the ones where several metrics move together and a mechanism explains them.
+- Precision is pooled, so a posting no strategy retrieved is never judged.
+- The reranker is not reproducible run to run (harness note); the judged numbers are gaps between
+  strategies measured against one shared judgement set, not absolute quality.
