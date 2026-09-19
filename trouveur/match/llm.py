@@ -70,9 +70,15 @@ async def complete(
     if provider_pin:
         body["provider"] = {
             "order": [provider_pin],
-            "allow_fallbacks": False,
+            # Fallbacks are allowed, but only within the constraint below. Pinning one provider
+            # with allow_fallbacks disabled meant a single upstream outage took the whole paid
+            # stage down: deepinfra/fp8 answered 429 engine_overloaded for hours while the same
+            # model served normally elsewhere, and the user was told their own key was being
+            # rate-limited. The pin still decides who is asked first, which is what it was for.
+            "allow_fallbacks": True,
             # The user's profile and advert text leave our infrastructure here. Never route them
-            # to a backend that may train on them.
+            # to a backend that may train on them. This applies to the fallbacks too -- it is a
+            # filter over eligible providers, not a property of the pinned one.
             "data_collection": "deny",
         }
 
@@ -91,6 +97,18 @@ async def complete(
     if response.status_code == 402:
         raise LlmError("The OpenRouter account has insufficient credit for this request.")
     if response.status_code == 429:
+        # Two different failures share this status: the key is being throttled, or every eligible
+        # provider is overloaded. Telling the user to check their key when the upstream is down
+        # sends them to fix something that is not broken, so the provider's own words are passed
+        # through when it gave any.
+        detail = ""
+        try:
+            error = (response.json().get("error") or {})
+            detail = str((error.get("metadata") or {}).get("raw") or error.get("message") or "")
+        except ValueError:
+            detail = ""
+        if detail:
+            raise LlmError(f"The model provider refused the request: {detail.strip()[:300]}")
         raise LlmError("OpenRouter is rate-limiting this key; the batch will be retried later.")
     if response.status_code != 200:
         raise LlmError(f"OpenRouter returned HTTP {response.status_code}.")

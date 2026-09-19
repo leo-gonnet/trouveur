@@ -82,17 +82,17 @@ async def run_for_user(user_id: int, settings: Settings | None = None) -> MatchR
             return report
         profile = profile_from_row(profile_row)
         credential = await users_q.get_credential(conn, user_id)
-        queries = await _queries(conn, settings, profile, credential, report)
+        queries, adverts = await _queries(conn, settings, profile, credential, report)
 
     if not queries:
         report.errors.append(
             "This profile yields no search queries; set at least a title or some keywords."
         )
         return report
-    report.queries = len(queries)
+    report.queries = len(queries) + len(adverts)
 
     async with connect() as conn:
-        await _retrieve(conn, profile, queries, report)
+        await _retrieve(conn, profile, queries, report, adverts)
 
     if credential is not None:
         async with connect() as conn:
@@ -103,8 +103,13 @@ async def run_for_user(user_id: int, settings: Settings | None = None) -> MatchR
 
 async def _queries(
     conn: AsyncConnection, settings: Settings, profile: UserProfile, credential, report
-) -> list[str]:
-    """The expanded query set for this profile version, computed at most once per version."""
+) -> tuple[list[str], list[str]]:
+    """The expansion for this profile version, computed at most once per version.
+
+    Returns (queries, adverts). Queries run through both retrieval arms; adverts run through the
+    dense arm only -- see retrieve.retrieve_arms for why that is a constraint rather than a
+    preference.
+    """
     cached = await match_q.get_query_expansion(
         conn, profile.user_id, profile.version, QUERY_EXPANSION_VERSION
     )
@@ -113,6 +118,7 @@ async def _queries(
 
     deterministic = expand.deterministic_queries(profile)
     generated: list[str] = []
+    adverts: list[str] = []
     if credential is not None and deterministic:
         try:
             generated, usage = await expand.expand_with_model(
@@ -133,19 +139,42 @@ async def _queries(
             log.info("query expansion unavailable for user %s: %s", profile.user_id, exc)
             report.errors.append(f"Query expansion skipped: {exc}")
 
+        # A separate call, and a separately survivable failure. The adverts are the long output,
+        # which is where a cheap model's JSON breaks; losing them must not also lose the phrases.
+        try:
+            adverts, advert_usage = await expand.expand_adverts(
+                settings,
+                profile,
+                api_key=decrypt(credential.api_key_encrypted),
+                model=settings.default_llm_model,
+                provider_pin=settings.default_llm_provider,
+            )
+            await users_q.add_spend(
+                conn, profile.user_id, tokens_in=advert_usage.tokens_in,
+                tokens_out=advert_usage.tokens_out, cost_usd=advert_usage.cost_usd,
+            )
+            report.cost_usd += advert_usage.cost_usd
+        except (llm.LlmError, CredentialError) as exc:
+            log.info("advert expansion unavailable for user %s: %s", profile.user_id, exc)
+            report.errors.append(f"Advert expansion skipped: {exc}")
+
     combined = expand.combine(deterministic, generated)
     if combined:
         await match_q.put_query_expansion(
-            conn, profile.user_id, profile.version, QUERY_EXPANSION_VERSION, combined
+            conn, profile.user_id, profile.version, QUERY_EXPANSION_VERSION, combined, adverts
         )
-    return combined
+    return combined, adverts
 
 
 async def _retrieve(
-    conn: AsyncConnection, profile: UserProfile, queries: list[str], report: MatchReport
+    conn: AsyncConnection,
+    profile: UserProfile,
+    queries: list[str],
+    report: MatchReport,
+    adverts: list[str] | None = None,
 ) -> None:
-    """Hybrid retrieval: one dense search per query, one lexical search per query, fused by rank."""
-    arms = await retrieve.retrieve_arms(conn, profile, queries)
+    """Hybrid retrieval: dense searches per query and advert, lexical per query, fused by rank."""
+    arms = await retrieve.retrieve_arms(conn, profile, queries, adverts or [])
     fused = retrieve.fuse(arms, retrieve.RETRIEVAL_LIMIT)
     dense_rank, lexical_rank = retrieve.ranks(arms)
 

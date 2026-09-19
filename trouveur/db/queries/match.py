@@ -433,7 +433,8 @@ async def mark_notified(conn: AsyncConnection, user_id: int, job_ids: Sequence[i
 
 async def get_query_expansion(
     conn: AsyncConnection, user_id: int, profile_version: int, expansion_version: int
-) -> list[str] | None:
+) -> tuple[list[str], list[str]] | None:
+    """The cached (queries, adverts) for this profile version, or None if it has none yet."""
     row = (
         await conn.execute(
             user_query_expansion.select().where(
@@ -443,7 +444,7 @@ async def get_query_expansion(
             )
         )
     ).one_or_none()
-    return list(row.queries) if row else None
+    return (list(row.queries), list(row.adverts or [])) if row else None
 
 
 async def put_query_expansion(
@@ -452,12 +453,14 @@ async def put_query_expansion(
     profile_version: int,
     expansion_version: int,
     queries: Sequence[str],
+    adverts: Sequence[str] = (),
 ) -> None:
     stmt = pg_insert(user_query_expansion).values(
         user_id=user_id,
         profile_version=profile_version,
         expansion_version=expansion_version,
         queries=list(queries),
+        adverts=list(adverts),
     )
     await conn.execute(
         stmt.on_conflict_do_update(
@@ -466,7 +469,7 @@ async def put_query_expansion(
                 user_query_expansion.c.profile_version,
                 user_query_expansion.c.expansion_version,
             ],
-            set_={"queries": stmt.excluded.queries},
+            set_={"queries": stmt.excluded.queries, "adverts": stmt.excluded.adverts},
         )
     )
 
