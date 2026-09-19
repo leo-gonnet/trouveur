@@ -13,9 +13,11 @@ from __future__ import annotations
 
 import importlib.metadata
 import logging
+from collections.abc import Iterable
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
+from typing import Annotated
 
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -30,7 +32,15 @@ from trouveur.db.queries import admin as admin_q
 from trouveur.db.queries import match as match_q
 from trouveur.db.queries import users as users_q
 from trouveur.match.pipeline import profile_from_row
-from trouveur.models import RunTrigger, UserState
+from trouveur.models import (
+    COUNTRY_NAMES,
+    LANGUAGES,
+    EmploymentType,
+    RunTrigger,
+    Seniority,
+    UserState,
+    WorkMode,
+)
 from trouveur.sources.registry import NORMALIZERS
 from trouveur.web import auth
 from trouveur.work import backlog
@@ -52,8 +62,19 @@ def _lines(raw: str) -> list[str]:
     return [line.strip() for line in raw.splitlines() if line.strip()]
 
 
-def _commas(raw: str) -> list[str]:
-    return [item.strip() for item in raw.split(",") if item.strip()]
+class UnknownChoice(ValueError):
+    pass
+
+
+def _choices(raw: list[str], allowed: Iterable[str], what: str) -> list[str]:
+    """Keep only values the form offered. An off-list value is a hand-crafted request, and one
+    that reached the table used to break the profile page for that user on every load after."""
+    allowed = set(allowed)
+    values = [item.strip() for item in raw if item.strip()]
+    for value in values:
+        if value not in allowed:
+            raise UnknownChoice(f"Unknown {what}: {value!r}.")
+    return list(dict.fromkeys(values))
 
 
 def _decimal(raw: str, default: Decimal) -> Decimal:
@@ -238,6 +259,17 @@ async def set_state(request: Request, job_id: int, state: str = Form(...)):
     )
 
 
+# UNKNOWN is offered on purpose: a hard filter excludes every posting whose facet was not
+# stated, so "not stated" is how a user keeps them.
+_OPTIONS = {
+    enum: [
+        (member.value, "not stated" if member == "unknown" else member.replace("_", " "))
+        for member in enum
+    ]
+    for enum in (WorkMode, Seniority, EmploymentType)
+}
+
+
 @app.get("/profile", response_class=HTMLResponse)
 async def profile_form(request: Request):
     session = request.state.session
@@ -255,6 +287,11 @@ async def profile_form(request: Request):
             "profile": profile,
             "rescore_estimate": pending,
             "username": session["u"],
+            "country_names": COUNTRY_NAMES,
+            "language_names": LANGUAGES,
+            "work_mode_options": _OPTIONS[WorkMode],
+            "seniority_options": _OPTIONS[Seniority],
+            "employment_type_options": _OPTIONS[EmploymentType],
         },
     )
 
@@ -267,31 +304,34 @@ async def profile_save(
     objectives: str = Form(""),
     languages: str = Form(""),
     must_have: str = Form(""),
-    deal_breakers: str = Form(""),
     keywords: str = Form(""),
     countries: str = Form(""),
     cities: str = Form(""),
-    work_modes: str = Form(""),
-    seniorities: str = Form(""),
-    employment_types: str = Form(""),
+    work_modes: Annotated[list[str] | None, Form()] = None,
+    seniorities: Annotated[list[str] | None, Form()] = None,
+    employment_types: Annotated[list[str] | None, Form()] = None,
     min_salary_eur_year: str = Form("0"),
 ):
     session = request.state.session
-    values = {
-        "title": title.strip(),
-        "years_experience": max(0, years_experience),
-        "objectives": objectives.strip(),
-        "languages": _commas(languages),
-        "must_have": _lines(must_have),
-        "deal_breakers": _lines(deal_breakers),
-        "keywords": _lines(keywords),
-        "countries": [item.upper() for item in _commas(countries)],
-        "cities": _commas(cities),
-        "work_modes": _commas(work_modes),
-        "seniorities": _commas(seniorities),
-        "employment_types": _commas(employment_types),
-        "min_salary_eur_year": _decimal(min_salary_eur_year, Decimal(0)),
-    }
+    try:
+        values = {
+            "title": title.strip(),
+            "years_experience": max(0, years_experience),
+            "objectives": objectives.strip(),
+            "languages": _choices(_lines(languages), LANGUAGES, "language"),
+            "must_have": _lines(must_have),
+            "keywords": _lines(keywords),
+            "countries": _choices(_lines(countries), COUNTRY_NAMES, "country"),
+            "cities": _lines(cities),
+            "work_modes": _choices(work_modes or [], WorkMode, "work mode"),
+            "seniorities": _choices(seniorities or [], Seniority, "seniority"),
+            "employment_types": _choices(
+                employment_types or [], EmploymentType, "employment type"
+            ),
+            "min_salary_eur_year": _decimal(min_salary_eur_year, Decimal(0)),
+        }
+    except UnknownChoice as exc:
+        return HTMLResponse(str(exc), status_code=400)
     async with connect() as conn:
         version, rescore = await users_q.save_profile(conn, session["uid"], values)
     log.info(
@@ -372,6 +412,15 @@ async def settings_delete_key(request: Request):
     async with connect() as conn:
         await users_q.delete_credential(conn, session["uid"])
     return RedirectResponse("/settings?deleted=1", status_code=303)
+
+
+@app.get("/how-it-works", response_class=HTMLResponse)
+async def how_it_works(request: Request):
+    return templates.TemplateResponse(
+        request,
+        "how_it_works.html",
+        {"active": "how_it_works", "username": request.state.session["u"]},
+    )
 
 
 @app.get("/dashboard", response_class=HTMLResponse)

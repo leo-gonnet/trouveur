@@ -14,6 +14,28 @@ from pydantic import BaseModel, Field
 
 from trouveur.models.facets import EmploymentType, Seniority, WorkMode
 
+# What a profile may say, by code. Countries are exactly the codes derivation can produce from
+# ingest/vocab.py (a test pins the two together), because a country the form offers but no
+# posting can ever derive is a filter that silently matches nothing. Languages go to the reranker
+# only, so the list is what candidates on a DACH board plausibly speak.
+COUNTRY_NAMES: dict[str, str] = {
+    "AT": "Austria", "DE": "Germany", "CH": "Switzerland", "LU": "Luxembourg",
+    "NL": "Netherlands", "BE": "Belgium", "FR": "France", "IT": "Italy", "ES": "Spain",
+    "PT": "Portugal", "PL": "Poland", "CZ": "Czechia", "SK": "Slovakia", "SI": "Slovenia",
+    "HU": "Hungary", "HR": "Croatia", "RO": "Romania", "BG": "Bulgaria", "DK": "Denmark",
+    "SE": "Sweden", "NO": "Norway", "FI": "Finland", "IE": "Ireland", "GB": "United Kingdom",
+    "GR": "Greece", "EE": "Estonia", "LV": "Latvia", "LT": "Lithuania", "US": "United States",
+    "CA": "Canada", "IN": "India", "IL": "Israel", "SG": "Singapore", "AU": "Australia",
+    "JP": "Japan", "BR": "Brazil", "TR": "Türkiye", "ZA": "South Africa",
+}
+
+LANGUAGES: dict[str, str] = {
+    "de": "German", "en": "English", "fr": "French", "it": "Italian", "es": "Spanish",
+    "pt": "Portuguese", "nl": "Dutch", "pl": "Polish", "cs": "Czech", "sk": "Slovak",
+    "hu": "Hungarian", "ro": "Romanian", "hr": "Croatian", "sl": "Slovenian", "tr": "Turkish",
+    "ru": "Russian", "uk": "Ukrainian", "ar": "Arabic", "zh": "Chinese", "ja": "Japanese",
+}
+
 
 class UserProfile(BaseModel):
     user_id: int
@@ -24,7 +46,6 @@ class UserProfile(BaseModel):
     objectives: str = ""
     languages: list[str] = Field(default_factory=list)
     must_have: list[str] = Field(default_factory=list)
-    deal_breakers: list[str] = Field(default_factory=list)
     keywords: list[str] = Field(default_factory=list)
 
     countries: list[str] = Field(default_factory=lambda: ["AT", "DE", "CH"])

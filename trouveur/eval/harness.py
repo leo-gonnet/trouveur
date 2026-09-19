@@ -9,9 +9,9 @@ What that buys and what it does not:
   - Recall is measured rigorously. A planted needle either came back or it did not.
   - Precision is NOT measurable. The haystack is real, so an unplanted posting ranking highly is
     unjudged, not wrong. Reporting a precision number here would be inventing one.
-  - Planted negatives give a usable substitute: postings the deterministic pipeline must exclude,
-    so "did anything that should have been filtered survive" is answerable without judging the
-    haystack at all.
+  - Planted negatives give a usable substitute: postings the hard filters must exclude, or the
+    reranker must rank below every positive, so "did anything that should have been kept out get
+    through" is answerable without judging the haystack at all.
 
 Needles are tiered by which retriever should find them, because a single aggregate recall number
 cannot answer the question worth asking -- whether the hybrid earns its cost:
@@ -19,7 +19,7 @@ cannot answer the question worth asking -- whether the hybrid earns its cost:
   T1  shares vocabulary with the persona          lexical alone should suffice
   T2  same role, no shared vocabulary             only dense should reach it
   T3  adjacent role, different title entirely     needs dense plus query expansion
-  N   must be excluded by rules or hard filters   should never survive
+  N   must be excluded by hard filters, or outranked   should never reach the top
 
 This is an evaluation, not a test. It produces numbers to compare against a baseline; it does not
 pass or fail, and it never gates a merge.
@@ -39,15 +39,13 @@ from trouveur.config import get_settings
 from trouveur.db.engine import connect
 from trouveur.db.queries import admin as admin_q
 from trouveur.db.queries import ingest as ingest_q
-from trouveur.db.queries import jobs as jobs_q
 from trouveur.db.queries import match as match_q
 from trouveur.db.queries import users as users_q
 from trouveur.ingest.persist import persist
 from trouveur.ingest.workers import drain_dedup, drain_derive, drain_detail, drain_embed
 from trouveur.match import retrieve
 from trouveur.match.expand import deterministic_queries
-from trouveur.match.rules import evaluate
-from trouveur.models import Candidate, DocumentKind, RawDocument, RuleVerdict, UserProfile
+from trouveur.models import DocumentKind, RawDocument, UserProfile
 from trouveur.work import WorkKind, backlog
 
 log = logging.getLogger(__name__)
@@ -83,12 +81,8 @@ class PersonaResult:
     recall: dict[str, dict[str, dict[str, int]]] = field(default_factory=dict)
     negatives_total: int = 0
     negatives_retrieved: int = 0
-    negatives_surviving_rules: int = 0
     inversions: int = 0
     missed: list[str] = field(default_factory=list)
-    # Planted positives that retrieval found and the rules cut then rejected. Retrieved but never
-    # shown, so recall at any depth counts them as a success the user does not receive.
-    cut_by_rules: list[str] = field(default_factory=list)
     # Fused rank of every planted positive, 1-based, or null if it never appeared. Recorded
     # because found/total at one depth saturates -- at 29 of 30 needles found, the only movement
     # recall can report is a regression, while a needle sliding from rank 12 to rank 90 is a real
@@ -206,32 +200,6 @@ async def _ensure_persona(persona: dict) -> UserProfile:
         )
         await users_q.save_profile(conn, user_id, dict(persona["profile"]))
         return profile_from_row(await users_q.get_profile(conn, user_id))
-
-
-async def _rule_pass(
-    conn, profile: UserProfile, job_ids: list[int]
-) -> set[int]:
-    """Which of these survive the free deterministic cut.
-
-    Calls the real rules rather than restating them: a second implementation here would grade
-    something production does not run.
-    """
-    if not job_ids:
-        return set()
-    agency = await jobs_q.agency_flags(conn, job_ids)
-    survivors = set()
-    for row in await jobs_q.load_for_derive(conn, job_ids):
-        verdict, _ = evaluate(
-            Candidate(
-                job_id=row.id, content_hash=b"", title=row.title,
-                company=row.company, description=row.description,
-                is_agency=agency.get(row.id),
-            ),
-            profile,
-        )
-        if verdict is RuleVerdict.PASS:
-            survivors.add(row.id)
-    return survivors
 
 
 async def _rerank_needles(
@@ -413,19 +381,6 @@ async def _evaluate_persona(
             if positive in rank_of and rank_of[negative] < rank_of[positive]
         )
 
-        # Both sides are scored after the cut, because the cut is what stands between retrieval
-        # and the user. A negative that survives it reaches a paid reranker and then the digest.
-        # A positive that does NOT survive it is retrieved and still never seen -- so counting it
-        # as found, which recall at any depth does, reports a success the user never receives.
-        result.negatives_surviving_rules = len(
-            await _rule_pass(conn, profile, retrieved_negatives)
-        )
-        retrieved_positives = [job_id for job_id in positives if job_id in rank_of]
-        survived = await _rule_pass(conn, profile, retrieved_positives)
-        result.cut_by_rules = sorted(
-            positives[job_id] for job_id in retrieved_positives if job_id not in survived
-        )
-
         if rerank_enabled:
             result.rerank = await _rerank_needles(conn, get_settings(), profile, mine, planted)
 
@@ -504,15 +459,10 @@ def render(card: Scorecard, baseline: dict | None) -> str:
         lines.append(
             f"{'':<24}{'N':<6}"
             f"{persona.negatives_total - persona.negatives_retrieved:>4} filtered"
-            f"{persona.negatives_surviving_rules:>5} survived rules"
             f"{persona.inversions:>4} inversions"
         )
         if persona.missed:
             lines.append(f"{'':<24}missed: {', '.join(persona.missed)}")
-        if persona.cut_by_rules:
-            lines.append(
-                f"{'':<24}retrieved then cut by rules: {', '.join(persona.cut_by_rules)}"
-            )
         if persona.rerank:
             r = persona.rerank
             margin = "-" if r["margin"] is None else f"{r['margin']:+d}"
@@ -555,8 +505,6 @@ def render(card: Scorecard, baseline: dict | None) -> str:
     )
     reciprocal = sum(1 / rank for rank in ranks if rank is not None)
     lines.append(f"mean reciprocal rank   {reciprocal / planted:.3f}" if planted else "")
-    cut = sum(len(persona.cut_by_rules) for persona in card.personas)
-    lines.append(f"positives cut by rules after retrieval   {cut}/{planted}")
 
     scored = [p.rerank for p in card.personas if p.rerank]
     if scored:

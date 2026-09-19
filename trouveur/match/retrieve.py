@@ -18,8 +18,8 @@ from trouveur.models import UserProfile
 
 MIN_PER_QUERY = 25
 # Retrieval is free, so it fetches deep for everyone rather than being tuned per user: rerank takes
-# the top rerank_limit by retrieval score whatever was fetched, so over-fetching costs nothing but
-# gives the rules cut all the headroom it can need. The dense arm is bounded below this by
+# the top rerank_limit by retrieval score whatever was fetched, so over-fetching costs nothing. The
+# dense arm is bounded below this by
 # ef_search in db/queries/match.py, which is fine -- past a couple of hundred neighbours per query
 # similarity is noise -- while the lexical arm honours the full budget.
 RETRIEVAL_LIMIT = 2000

@@ -67,7 +67,7 @@ def test_search_left_joins_match_state_so_unmatched_jobs_still_appear():
 
 
 def test_recommendations_shows_everything_that_was_scored():
-    """Still narrower than Search -- rule-passed and scored -- but with no cut-off inside that.
+    """Still narrower than Search -- scored only -- but with no cut-off inside that.
 
     A threshold hid postings the user had already paid to have scored, behind a number they had
     to guess. Re-adding one would do it again, silently.
@@ -75,7 +75,6 @@ def test_recommendations_shows_everything_that_was_scored():
     import inspect
 
     body = inspect.getsource(recommendations)
-    assert "m.rule_verdict = 'pass'" in body
     assert "m.llm_score IS NOT NULL" in body
     # Closed postings must never be recommended, whatever they once scored.
     assert "j.closed_at IS NULL" in body

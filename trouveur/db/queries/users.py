@@ -25,7 +25,7 @@ from trouveur.db.schema import (
 SCORING_FIELDS = frozenset(
     {
         "title", "years_experience", "objectives", "languages", "must_have",
-        "deal_breakers", "keywords", "countries", "cities", "work_modes",
+        "keywords", "countries", "cities", "work_modes",
         "seniorities", "employment_types", "min_salary_eur_year",
     }
 )
@@ -114,12 +114,12 @@ async def save_profile(
         .values(**values, version=max(version, 1), updated_at=sa.func.now())
     )
     if rescore and current is not None:
-        await reset_verdicts(conn, user_id)
+        await reset_scores(conn, user_id)
     return max(version, 1), rescore
 
 
-async def reset_verdicts(conn: AsyncConnection, user_id: int) -> None:
-    """Forget every rule verdict and score this user holds, keeping what they did about them.
+async def reset_scores(conn: AsyncConnection, user_id: int) -> None:
+    """Forget every score this user holds, keeping what they did about them.
 
     The version check in pending_rerank is not enough on its own: retrieval re-stamps
     profile_version on every row it finds again, before reranking runs, so the rows most worth
@@ -130,8 +130,7 @@ async def reset_verdicts(conn: AsyncConnection, user_id: int) -> None:
         user_job_match.update()
         .where(user_job_match.c.user_id == user_id)
         .values(
-            rule_verdict="unknown", rule_reason=None, llm_score=None, llm_reason=None,
-            llm_red_flags=None, scored_at=None,
+            llm_score=None, llm_reason=None, llm_red_flags=None, scored_at=None,
         )
     )
 

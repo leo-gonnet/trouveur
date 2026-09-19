@@ -174,7 +174,7 @@
     "persona": "wing_nachhaltigkeit",
     "tier": "N",
     "source": "arbeitsagentur",
-    "note": "Heavy lexical overlap on purpose. Retrieval will surface it; the rules cut must reject it.",
+    "note": "Heavy lexical overlap on purpose. Retrieval will surface it; the reranker must rank it below every positive.",
     "listing": {
       "referenznummer": "EVAL-wing-n1",
       "stellenangebotsTitel": "Werkstudent (m/w/d) Nachhaltigkeit und Kreislaufwirtschaft",
@@ -195,7 +195,7 @@
     "persona": "wing_nachhaltigkeit",
     "tier": "N",
     "source": "arbeitsagentur",
-    "note": "A staffing agency posting the persona's exact role. Caught by the structured agency flag, not by prose matching.",
+    "note": "A staffing agency posting the persona's exact role. Only the reranker stands between it and the user.",
     "listing": {
       "referenznummer": "EVAL-wing-n2",
       "stellenangebotsTitel": "Wirtschaftsingenieur (m/w/d) Nachhaltigkeit",
@@ -396,7 +396,7 @@
     "persona": "backend_java",
     "tier": "N",
     "source": "arbeitsagentur",
-    "note": "Strong lexical overlap and an excluded role type. The rules cut must reject it.",
+    "note": "Strong lexical overlap and a working-student role. The reranker must rank it below every positive.",
     "listing": {
       "referenznummer": "EVAL-java-n1",
       "stellenangebotsTitel": "Praktikum Softwareentwicklung Java (m/w/d)",
@@ -418,7 +418,7 @@
     "persona": "backend_java",
     "tier": "N",
     "source": "arbeitsagentur",
-    "note": "The persona's exact stack, posted by a staffing agency.",
+    "note": "The persona's exact stack, posted by a staffing agency. Only the reranker stands between it and the user.",
     "listing": {
       "referenznummer": "EVAL-java-n2",
       "stellenangebotsTitel": "Java Entwickler (m/w/d) Spring Boot",
@@ -625,7 +625,7 @@
     "persona": "maschinenbau_zu_daten",
     "tier": "N",
     "source": "arbeitsagentur",
-    "note": "Lexically close and an excluded role type.",
+    "note": "Lexically close and an internship. The reranker must rank it below every positive.",
     "listing": {
       "referenznummer": "EVAL-data-n1",
       "stellenangebotsTitel": "Werkstudent Data Analytics (m/w/d)",
@@ -647,7 +647,7 @@
     "persona": "maschinenbau_zu_daten",
     "tier": "N",
     "source": "arbeitsagentur",
-    "note": "The persona's target role via a staffing agency.",
+    "note": "The persona's target role via a staffing agency. Only the reranker stands between it and the user.",
     "listing": {
       "referenznummer": "EVAL-data-n2",
       "stellenangebotsTitel": "Data Analyst (m/w/d) Predictive Maintenance",

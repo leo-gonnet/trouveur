@@ -113,7 +113,6 @@ def _arguments(ctx: dict) -> dict[str, dict]:
         # jobs
         "jobs.load_for_derive": {"job_ids": [job_id]},
         "jobs.write_facets": {"rows": [ctx["facet_row"]]},
-        "jobs.agency_flags": {"job_ids": [job_id]},
         "jobs.load_for_embedding": {"job_ids": [job_id]},
         "jobs.write_embeddings": {"rows": [(job_id, "probe:probe:384", [0.01] * 384)]},
         "jobs.load_for_dedup": {"job_ids": [job_id]},
@@ -125,15 +124,9 @@ def _arguments(ctx: dict) -> dict[str, dict]:
         },
         "match.lexical_candidates": {"profile": ctx["profile"], "query": "ingenieur", "limit": 5},
         "match.upsert_matches": {"rows": [ctx["match_row"]]},
-        "match.apply_rule_verdicts": {
-            "rows": [{
-                "user_id": user_id, "job_id": job_id, "rule_verdict": "pass", "rule_reason": "ok",
-            }]
-        },
         "match.pending_rerank": {"user_id": user_id, "profile_version": 1, "limit": 5},
         "match.count_pending_rerank": {"user_id": user_id, "profile_version": 1},
         "match.scoreable_rows": {"job_ids": [job_id]},
-        "match.pending_rules": {"user_id": user_id, "limit": 5},
         "match.cached_scores": {
             "user_id": user_id, "profile_version": 1, "hashes": [ctx["content_hash"]],
         },
@@ -163,7 +156,7 @@ def _arguments(ctx: dict) -> dict[str, dict]:
         },
         "users.get_profile": {"user_id": user_id},
         "users.save_profile": {"user_id": user_id, "values": {"title": "Probe"}},
-        "users.reset_verdicts": {"user_id": user_id},
+        "users.reset_scores": {"user_id": user_id},
         "users.has_credential": {"user_id": user_id},
         "users.get_credential": {"user_id": user_id},
         "users.save_credential": {

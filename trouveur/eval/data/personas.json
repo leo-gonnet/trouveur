@@ -20,10 +20,6 @@
       "must_have": [
         "Nachhaltigkeitsbezug"
       ],
-      "deal_breakers": [
-        "Zeitarbeit",
-        "reiner Vertrieb"
-      ],
       "countries": [
         "DE",
         "AT"
@@ -51,10 +47,6 @@
         "Backend"
       ],
       "must_have": [],
-      "deal_breakers": [
-        "Zeitarbeit",
-        "Arbeitnehmerüberlassung"
-      ],
       "countries": [
         "DE",
         "AT"
@@ -81,9 +73,6 @@
         "Predictive Maintenance"
       ],
       "must_have": [],
-      "deal_breakers": [
-        "Zeitarbeit"
-      ],
       "countries": [
         "DE",
         "AT"

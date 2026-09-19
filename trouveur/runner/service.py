@@ -144,7 +144,6 @@ async def _execute(settings: Settings, run) -> None:
             {
                 "user_id": match.user_id,
                 "retrieved": match.retrieved,
-                "passed": match.passed,
                 "scored": match.scored,
                 "cost_usd": str(match.cost_usd),
                 "stopped_on_budget": match.stopped_on_budget,
@@ -170,7 +169,6 @@ async def _execute_match_only(settings: Settings, run) -> None:
             {
                 "user_id": match.user_id,
                 "retrieved": match.retrieved,
-                "passed": match.passed,
                 "scored": match.scored,
                 "cost_usd": str(match.cost_usd),
                 "stopped_on_budget": match.stopped_on_budget,

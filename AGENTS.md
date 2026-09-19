@@ -97,7 +97,7 @@ INGEST  (shared corpus, no user involved)
 MATCH   (per user, cheap, re-runnable)
   profile ──> expanded queries ──> hard filters
           ──> dense ANN ─┐
-          ──> BM25/FTS  ─┴─ RRF fusion ──> rules cut ──> LLM rerank ──> digest
+          ──> BM25/FTS  ─┴─ RRF fusion ──> LLM rerank ──> digest
 ```
 
 V1 queried every source with the user's own keywords, which capped recall at whatever the user
@@ -122,7 +122,7 @@ query.** Sources sweep by their own structure; users select over the corpus.
 | `trouveur/ingest/embed/` | Provider seam; local ONNX default. |
 | `trouveur/ingest/pipeline.py` | Sweep orchestration. No parsing, no SQL. |
 | `trouveur/work/queue.py` | The one versioned work queue. |
-| `trouveur/match/` | Query expansion, hybrid retrieval, RRF, rules cut, reranking. |
+| `trouveur/match/` | Query expansion, hybrid retrieval, RRF, reranking. |
 | `trouveur/db/` | **All SQL.** No SQL text outside this package. |
 | `trouveur/web/` | Routes, auth, templates. Reads the DB; never fetches, never sweeps. |
 | `trouveur/runner/` | Schedules runs and drains queues. The only caller of `ingest.run`. |
@@ -410,8 +410,11 @@ Before any commit: `git status` must be clean of the above.
 **There is no installation-wide API key.** Reranking runs on each user's own OpenRouter credential,
 so the deployment has no LLM spend of its own and one user's exhausted budget cannot affect another.
 
-- **Retrieval and the rules cut run first**, and both are free. They exist to make the paid stage
-  small.
+- **Retrieval runs first and is free; `rerank_limit` is what makes the paid stage small.** There
+  is deliberately no deterministic cut between the two any more: a rule that rejected a posting
+  before scoring hid it from the user with no way to find out, and what it saved was a fraction
+  of a cent already bounded by `rerank_limit`. Internships, working-student roles and staffing
+  agencies are the reranker's to penalise, in the system prompt.
 - **Always cache by `(content_hash, user, profile_version)`.** A posting is scored once per profile,
   ever. Re-scoring an unchanged posting is a bug, not an inefficiency.
 - **Check the ceiling before a batch, not after.** A retry loop on someone else's card is not
@@ -446,7 +449,7 @@ so the deployment has no LLM spend of its own and one user's exhausted budget ca
 - **A missing key is a full-width `.banner warn` on every page**, set by the session middleware
   (`request.state.needs_key`) so no route can forget it. The Match now button is never blocked by
   it: the free stages still run, and the hint says nothing will be scored.
-- **A scoring change forgets the user's verdicts** (`users.reset_verdicts`, called from
+- **A scoring change forgets the user's scores** (`users.reset_scores`, called from
   `save_profile`). The `profile_version < current` test in `pending_rerank` cannot do this alone:
   retrieval re-stamps `profile_version` on every row it finds again *before* reranking, so the
   rows most worth re-scoring were exactly the ones that looked current, and old scores survived a
@@ -458,10 +461,10 @@ so the deployment has no LLM spend of its own and one user's exhausted budget ca
 ## Web UI
 
 - **Recommendations and Search have deliberately different scope; do not blur them.**
-  `/recommendations` is retrieved AND `rule_verdict='pass'` AND scored, ordered by `llm_score`
-  descending. `/search` shows **every** scraped posting regardless of filter outcome, including
-  rejected, unscored and closed ones — that is the only view of what was actually collected.
-  Adding a verdict or score filter to `search_jobs` defeats its purpose; keep the distinction in
+  `/recommendations` is retrieved AND scored, ordered by `llm_score` descending. `/search`
+  shows **every** scraped posting regardless of filter outcome, including unretrieved, unscored
+  and closed ones — that is the only view of what was actually collected. Adding a score filter
+  to `search_jobs` defeats its purpose; keep the distinction in
   the query layer, not just the UI.
 - **There is no score threshold, and re-adding one is a regression.** It hid postings the user had
   already paid to have scored, behind a number they had to guess — and guessing it low enough to
@@ -472,6 +475,18 @@ so the deployment has no LLM spend of its own and one user's exhausted budget ca
 - **The score is the first thing on a row and it is coloured** (`score_pill`, `.score.high/.mid/
   .low`). The band names in the macro and in `app.css` must match: they did not, and every score
   of 65 and over rendered with no colour at all for as long as that went unnoticed.
+- **Profile list fields are picked, not typed.** `work_modes`, `seniorities` and
+  `employment_types` are lists of enums, and `countries` is validated against what derivation
+  can produce (`COUNTRY_NAMES`, pinned to `vocab.COUNTRIES` by a test). Free text there once
+  saved `Remote` and then failed validation on every read: the Profile page and the match run
+  both 500ed for that user until someone edited the row. `profile_save` refuses an off-list value
+  with a 400; the form offers `unknown` as "not stated" because a hard filter drops every
+  posting whose facet is unstated the moment it is set, and that is how a user keeps them.
+- **`cities` is a reranker preference, never a hard filter.** Countries can be filtered because
+  derivation folds every spelling to one ISO code first; cities are stored as the source spelled
+  them, so `Wien` and `Vienna` coexist and a `f.cities && :cities` clause would silently lose
+  one of them, plus every suburb and every multi-site posting. The prompt carries them instead
+  and the system prompt says they are a preference. Do not "finish" the filter.
 - **Templates never re-derive.** Read stored facets. A template that parses a location or infers a
   work mode is a second implementation of a question `derive.py` already answered.
 - **The dashboard must surface what fails silently**: partition overflow, sweep completeness, the
@@ -538,7 +553,7 @@ so the deployment has no LLM spend of its own and one user's exhausted budget ca
 
 A test earns its place only if it can fail for a reason a reviewer would care about.
 
-**Write tests for:** parsing logic, derivation, the rules cut, retrieval fusion, dedupe/upsert
+**Write tests for:** parsing logic, derivation, retrieval fusion, dedupe/upsert
 behaviour, query shape, cost controls, and **every trap in this file**.
 **Do not write tests for:** getters, pydantic itself, SQLAlchemy itself, or mocks restating mocks.
 
@@ -603,15 +618,13 @@ still holds the old readings and no re-derive has been scheduled.
   - Work mode is never decided by description prose (company boilerplate, benefits lists).
   - `content_hash` is versioned and changes when a description arrives.
   - `%%` never survives SQL compilation.
-  - `search_jobs` carries no verdict or score filter.
+  - `search_jobs` carries no score filter.
   - German search finds `Wirtschaftsingenieur` when the user types `ingenieur`, and finds
     `München` when the user types `munchen` (both need the integration test).
   - Closing a posting deletes its embedding.
   - **Transliterated German country names resolve** (`OESTERREICH`, not only `Österreich`). The
     API transliterates umlauts; a vocabulary keyed only on the umlauted form silently gave every
     Austrian posting no country at all.
-  - **A staffing agency is rejected by the source's structured flag**, not by finding "Zeitarbeit"
-    in prose.
   - **The politeness budget is shared across a provider's tenant subdomains**, not one per host.
   - **An unknown Personio tenant is reported as a bad slug**, not retried as a 429.
   - **Workday never requests more than 20 a page**, terminates on an empty page rather than on
@@ -646,13 +659,9 @@ needles are planted whose relevance is known by construction.
 **What it can and cannot measure.** Recall is rigorous — a needle either came back or it did not.
 **Precision is not measurable**, because the haystack is real and an unplanted posting ranking
 highly is unjudged, not wrong. Reporting a precision number here would be inventing one. Planted
-negatives give the usable substitute: postings the deterministic pipeline must exclude, so "did
-anything that should have been filtered survive" is answerable without judging the haystack.
-
-**Score the rules cut on both sides, not just on negatives.** The cut is what stands between
-retrieval and the user, so a positive that is retrieved and then rejected by it is never seen —
-and recall at any depth still counts it as found. `cut_by_rules` reports those. Grading only the
-negatives measured half the pipeline and called a silent recall loss a success.
+negatives give the usable substitute: postings the hard filters must exclude, or that the
+reranker must rank below every positive, so "did anything that should have been kept out get
+through" is answerable without judging the haystack.
 
 **Record each needle's rank, not only whether it was found.** `found/total` at one depth
 saturates: at 29 of 30 needles found there is no headroom left and the number can only ever
@@ -668,7 +677,7 @@ answer the question worth asking — whether the hybrid earns its cost:
 | `T1` | shares the persona's vocabulary | lexical alone |
 | `T2` | same role, **no shared vocabulary** | dense only |
 | `T3` | adjacent role, different title, sometimes another language | dense + query expansion |
-| `N` | must be excluded by rules or hard filters | nothing — it should never survive |
+| `N` | must be excluded by hard filters, or outranked by every positive | nothing — it should never reach the top |
 
 The harness scores with the **deterministic** expansion only, so a run costs nothing and does not
 vary with a model. T3 is therefore currently measured without the LLM expansion its row names:

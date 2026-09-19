@@ -57,7 +57,8 @@ async def _public_id() -> str:
 
 @pytest.mark.parametrize(
     "path",
-    ["/recommendations", "/search", "/dashboard", "/profile", "/settings", "/admin"],
+    ["/recommendations", "/search", "/dashboard", "/profile", "/settings", "/admin",
+     "/how-it-works"],
 )
 async def test_page_renders(client, path):
     response = await client.get(path)
@@ -96,23 +97,20 @@ async def test_search_serves_a_fragment_to_htmx_and_a_page_to_a_browser(client):
     assert "<main>" not in fragment.text
 
 
-async def test_search_shows_a_posting_that_the_rules_rejected(client, seeded):
+async def test_search_shows_a_posting_the_user_never_retrieved(client, seeded):
     """Search is the only view of what was actually collected; recommendations is the strict page.
 
     Asserted here rather than only in the query layer because the distinction is easy to erase
     from a template, and erasing it makes the corpus invisible.
     """
+    from trouveur.db.schema import user_job_match
+
     async with connect() as conn:
-        job_id = (await conn.execute(sa.select(job.c.id).limit(1))).scalar()
-        await match_q.apply_rule_verdicts(
-            conn,
-            [{
-                "user_id": seeded["user_id"], "job_id": job_id,
-                "rule_verdict": "reject", "rule_reason": "deal-breaker",
-            }],
+        await conn.execute(
+            user_job_match.delete().where(user_job_match.c.user_id == seeded["user_id"])
         )
         title = (
-            await conn.execute(sa.select(job.c.title).where(job.c.id == job_id))
+            await conn.execute(sa.select(job.c.title).where(job.c.id == seeded["job_id"]))
         ).scalar()
 
     response = await client.get("/search")
@@ -163,12 +161,12 @@ async def test_recommendations_report_the_last_run_in_the_users_terms(client, se
         await admin_q.finish_run(
             conn, run_id, status=RunStatus.SUCCESS,
             report={"matches": [{
-                "user_id": seeded["user_id"], "retrieved": 450, "passed": 130, "scored": 120,
+                "user_id": seeded["user_id"], "retrieved": 450, "scored": 120,
                 "cost_usd": "0.0400", "stopped_on_budget": True,
             }]},
         )
     body = (await client.get("/recommendations")).text
-    assert "450 candidates, 130 passed your filters, 120 scored, $0.0400." in body
+    assert "450 candidates, 120 scored, $0.0400." in body
     assert "Stopped at your monthly ceiling." in body
     assert "retrieved</" not in body, "lifetime pipeline counts belong on the dashboard"
 
@@ -186,9 +184,9 @@ async def test_saving_a_scoring_field_bumps_the_profile_version(client, seeded):
 
     form = {
         "title": "Head of Operations", "years_experience": "9", "objectives": "",
-        "languages": "de", "must_have": "", "deal_breakers": "", "keywords": "lean",
-        "countries": "DE,AT", "cities": "", "work_modes": "", "seniorities": "",
-        "employment_types": "", "min_salary_eur_year": "60000",
+        "languages": "de", "must_have": "", "keywords": "lean",
+        "countries": "DE\nAT", "cities": "", "work_modes": ["remote", "hybrid"],
+        "min_salary_eur_year": "60000",
     }
     assert (await client.post("/profile", data=form)).status_code == 303
     async with connect() as conn:
@@ -213,18 +211,17 @@ async def test_a_scoring_change_forgets_verdicts_but_not_what_the_user_did(clien
         before = (await conn.execute(
             user_job_match.select().where(user_job_match.c.user_id == seeded["user_id"])
         )).one()
-    assert before.llm_score == 92 and before.rule_verdict == "pass"
+    assert before.llm_score == 92
 
-    form = {"title": "Something else entirely", "years_experience": "9", "countries": "DE,AT"}
+    form = {"title": "Something else entirely", "years_experience": "9", "countries": "DE\nAT"}
     assert (await client.post("/profile", data=form)).status_code == 303
 
     async with connect() as conn:
         after = (await conn.execute(
             user_job_match.select().where(user_job_match.c.user_id == seeded["user_id"])
         )).one()
-        pending = await match_q.pending_rules(conn, seeded["user_id"], 100)
+        pending = await match_q.pending_rerank(conn, seeded["user_id"], after.profile_version, 100)
     assert after.llm_score is None and after.llm_reason is None and after.scored_at is None
-    assert after.rule_verdict == "unknown"
     assert after.state == "saved", "a profile edit must not touch the user's own decisions"
     assert [row.job_id for row in pending] == [seeded["job_id"]]
     assert (await client.get("/recommendations")).status_code == 200
@@ -313,3 +310,26 @@ async def test_cancelling_a_queued_run_ends_it_immediately(client):
     async with connect() as conn:
         row = next(r for r in await admin_q.recent_runs(conn) if r.id == run_id)
     assert row.status == RunStatus.CANCELLED.value
+
+
+async def test_an_off_list_filter_value_is_refused_rather_than_saved(client, seeded):
+    """`work_modes` is a list of an enum. A free-text value that reached the table validated on
+    the next read instead, so the Profile page and the match run both failed for that user
+    from then on."""
+    form = {"title": "x", "work_modes": ["Remote"]}
+    assert (await client.post("/profile", data=form)).status_code == 400
+    assert (await client.get("/profile")).status_code == 200
+
+    form = {"title": "x", "countries": "Austria"}
+    assert (await client.post("/profile", data=form)).status_code == 400
+
+
+async def test_the_profile_form_offers_every_filter_value_including_not_stated(client, seeded):
+    """Each hard filter drops postings whose facet is unknown once it is set; offering `unknown`
+    as a choice is how a user keeps them, so it must not be filtered out of the options."""
+    body = (await client.get("/profile")).text
+    for name, value in (("work_modes", "unknown"), ("seniorities", "intern"),
+                        ("employment_types", "apprenticeship")):
+        assert f'name="{name}" value="{value}"' in body, (name, value)
+    assert '<option value="AT">Austria</option>' in body
+    assert '<option value="de">German</option>' in body
