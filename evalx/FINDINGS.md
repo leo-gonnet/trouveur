@@ -132,3 +132,90 @@ Judging needs `TROUVEUR_EVAL_LLM_KEY`. The whole evaluation above cost **$0.0122
 - Precision is pooled, so a posting no strategy retrieved is never judged.
 - The reranker is not reproducible run to run (harness note); the judged numbers are gaps between
   strategies measured against one shared judgement set, not absolute quality.
+
+---
+
+# Part two: the encoder, the fusion, and what I had not questioned
+
+The evaluation above varies how the query is phrased. That is, in the end, a way of working
+around the embedding model -- HyDE exists because a symmetric sentence encoder cannot match a
+three-word query to a 400-word advert. Part two measures the things part one assumed.
+
+## The encoder is the ceiling, by a wide margin
+
+Method: a fixed pool of 2,530 postings -- 1,548 of them the near-misses the live system actually
+returns for these personas, half drawn from the lexical arm which uses no encoder at all, plus
+random filler -- with the planted needles ranked inside it by **exact cosine**, not HNSW, so ANN
+recall is not a confound. Same pool, same queries, one variable.
+
+| model | doc text | queries | @10 | @50 | @250 | MRR | T1/T2/T3 @50 |
+|---|---|---|---|---|---|---|---|
+| MiniLM-L12-v2 (current) | current | `det` | 6/21 | 8/21 | 16/21 | 0.203 | 6/1/1 |
+| MiniLM-L12-v2 | title+desc | `det` | 7/21 | 10/21 | 16/21 | 0.146 | 6/2/2 |
+| MiniLM-L12-v2 | current | `det`+8 adverts | 4/21 | 12/21 | 18/21 | 0.188 | 6/1/5 |
+| **mpnet-base-v2** | current | `det` | **9/21** | **15/21** | **21/21** | **0.225** | 6/**4**/**5** |
+
+**paraphrase-multilingual-mpnet-base-v2 with plain deterministic queries beats the incumbent with
+eight synthetic adverts.** Every planted needle inside the top 250, against 16 of 21. Per tier
+inside the top 50, the two tiers the whole advert exercise existed to reach: same-role-different-
+words 1/6 -> 4/6, adjacent-role 1/6 -> 5/6.
+
+That is a larger gain than every query-side change in part one combined, and it reframes them:
+the adverts were compensating for the encoder, not extending it.
+
+What it costs, which is part of the verdict and not a footnote: 768 dimensions instead of 384,
+and ~2.5x the compute per document. This host embeds ~180 documents a minute, so the corpus is a
+21-hour backfill today and roughly 54 hours with mpnet, during which the new space is incomplete.
+That is why the storage change is two columns and two width settings rather than a truncate and
+a re-embed -- the dense arm keeps serving the old space until the new one is covered.
+
+Dropping company and location from the embedded text is a real trade rather than a free win:
+tier coverage improves (T2/T3 1/1 -> 2/2) and MRR falls (0.203 -> 0.146). Not changed.
+
+## A model that returned NaN, and seven hours spent on it
+
+`jinaai/jina-embeddings-v2-base-de` was the most promising candidate on paper: German/English
+bilingual, 8192-token context, small. It scored 0/21 with MRR 0.0011.
+
+It is not a bad model. **This ONNX build returns all-NaN vectors.** Cosine over NaN produces a
+ranking indistinguishable from random, so the failure arrives as a plausible, publishable-looking
+"this model is worse" rather than as an error. Seven hours of embedding went into it before the
+vectors themselves were looked at.
+
+Both the harness and the production provider now refuse non-finite vectors -- the production one
+matters more, because NaN would have flowed into halfvec and turned the ANN index into noise
+that looks exactly like a working search returning bad results.
+
+## The fusion rule did not kill the titles
+
+Thirty titles collapsed MRR from 0.184 to 0.044, diagnosed as RRF rewarding a posting for
+appearing mid-list in many correlated searches. Dropping titles on that basis abandons a query
+set for a defect in a different component, so the diagnosis was tested: same queries, four rules.
+
+| query set | rrf (production) | arm_max | weighted | arm_max_w |
+|---|---|---|---|---|
+| `det` | **0.184** | 0.059 | 0.184 | 0.083 |
+| `det_plus_ads8` | **0.188** | 0.112 | 0.187 | 0.149 |
+| `titles30` | 0.044 | 0.033 | **0.048** | 0.035 |
+| `full_proposal` | **0.109** | 0.036 | 0.106 | 0.039 |
+
+No rule rescues the titles. Production RRF wins outright everywhere else, so `fuse.py` is
+unchanged. `arm_max` is much worse because collapsing an arm discards the agreement between
+queries, which is the signal RRF reads. `weighted` being *identical* to `rrf` on `det` is the
+check that the weighting does nothing when every query is already the user's own.
+
+## An operational defect the migration found
+
+The production database container has Docker's default **64MB of /dev/shm**. A parallel HNSW
+build puts its working memory there, so raising `maintenance_work_mem` to anything appropriate
+for 200k vectors fails with `could not resize shared memory segment` -- which reads like a full
+disk and is not one. Fixed with `shm_size: 1gb` in compose.yaml.
+
+## What part two still does not answer
+
+- Only one stronger model was successfully measured. e5-large is ~10x the incumbent's compute
+  per document, which almost certainly rules it out on this host regardless of quality.
+- The hard pool's dense near-misses are chosen by the incumbent, which biases the comparison
+  towards a challenger. `--random-only` builds a neutral pool; a result that matters should be
+  confirmed on both.
+- Nothing here re-measures the reranker, which is the stage that decides what the user reads.

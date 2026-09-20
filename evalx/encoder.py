@@ -80,7 +80,7 @@ def compose(row, variant: str) -> str:
     raise ValueError(variant)
 
 
-async def build_pool(size: int) -> dict:
+async def build_pool(size: int, random_only: bool = False) -> dict:
     """A small, hard pool rather than a large, easy one.
 
     This box embeds ~180 documents a minute, so a pool big enough to be realistic by sheer size
@@ -99,7 +99,7 @@ async def build_pool(size: int) -> dict:
     needle_ids = sorted(planted.values())
     hard: set[int] = set()
     async with connect() as conn:
-        for persona in load_personas():
+        for persona in [] if random_only else load_personas():
             profile = await _ensure_persona(persona)
             qs = strategies.build("det", profile, persona["key"])
             arms = await strategies.retrieve_routed(conn, profile, qs)
@@ -117,7 +117,6 @@ async def build_pool(size: int) -> dict:
             "planted": planted, "hard": len(hard), "size": size,
             "tiers": {n["id"]: n["tier"] for n in needles},
             "persona_of": {n["id"]: n["persona"] for n in needles}}
-    POOL.write_text(json.dumps(pool), encoding="utf-8")
     return pool
 
 
@@ -213,16 +212,27 @@ async def main() -> None:
     ap.add_argument("--strategy", default="det")
     ap.add_argument("--size", type=int, default=8000)
     ap.add_argument("--rebuild-pool", action="store_true")
+    # The hard pool's near-misses are chosen by the incumbent encoder, so the incumbent competes
+    # against its own worst confusions while a challenger does not. That biases the comparison
+    # towards the challenger. A pool of purely random distractors is neutral between models, and
+    # a result that holds on both is not an artifact of how the pool was built.
+    ap.add_argument("--random-only", action="store_true")
+    ap.add_argument("--pool-file", default=str(POOL))
     args = ap.parse_args()
 
-    pool = (await build_pool(args.size)) if args.rebuild_pool or not POOL.exists() \
-        else json.loads(POOL.read_text())
+    pool_path = Path(args.pool_file)
+    if args.rebuild_pool or not pool_path.exists():
+        pool = await build_pool(args.size, args.random_only)
+        pool_path.write_text(json.dumps(pool), encoding="utf-8")
+    else:
+        pool = json.loads(pool_path.read_text())
     results = json.loads(OUT.read_text()) if OUT.exists() else []
     for model_name in args.models.split(","):
         r = await evaluate(model_name, args.variant, args.strategy, pool)
+        r["pool_file"] = pool_path.name
         results = [x for x in results if not (
             x["model"] == r["model"] and x["variant"] == r["variant"]
-            and x["strategy"] == r["strategy"])]
+            and x["strategy"] == r["strategy"] and x.get("pool_file") == r["pool_file"])]
         results.append(r)
         OUT.write_text(json.dumps(results, indent=1), encoding="utf-8")
         d = r["recall_at"]
