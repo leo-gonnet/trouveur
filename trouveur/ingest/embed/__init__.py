@@ -13,12 +13,13 @@ from functools import lru_cache
 from trouveur.config import get_settings
 from trouveur.ingest.embed.base import EMBEDDING_DIM, EmbeddingProvider, version_of
 from trouveur.ingest.embed.deterministic import DeterministicProvider
-from trouveur.ingest.embed.local import LocalOnnxProvider
+from trouveur.ingest.embed.local import LocalOnnxMpnetProvider, LocalOnnxProvider
 
 log = logging.getLogger(__name__)
 
 _PROVIDERS = {
     "local-onnx": LocalOnnxProvider,
+    "local-onnx-mpnet": LocalOnnxMpnetProvider,
     "deterministic": DeterministicProvider,
 }
 
@@ -34,10 +35,11 @@ def get_provider() -> EmbeddingProvider:
             f"Unknown embedding provider {name!r}; known providers are: {known}."
         ) from None
     provider = factory()
-    if provider.dim != EMBEDDING_DIM:
+    if provider.dim != get_settings().embedding_dim:
         raise RuntimeError(
             f"Provider {name!r} produces {provider.dim} dimensions but the embedding column is "
-            f"halfvec({EMBEDDING_DIM}); changing width is a migration, not a setting."
+            f"halfvec({get_settings().embedding_dim}); changing width is a migration paired with "
+            "EMBEDDING_DIM, not a setting edit on its own."
         )
     return provider
 
@@ -49,6 +51,7 @@ def embedding_version() -> str:
 __all__ = [
     "EMBEDDING_DIM",
     "DeterministicProvider",
+    "LocalOnnxMpnetProvider",
     "EmbeddingProvider",
     "LocalOnnxProvider",
     "embedding_version",
