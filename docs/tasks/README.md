@@ -59,3 +59,5 @@ Two invariants worth knowing before changing anything:
 | 08 | [Strengthen the evaluation](08-evaluation.md) | Everything above needs it to be trustworthy |
 | 09 | [Simplify what no longer earns its place](09-simplify.md) | Remove before adding |
 | 10 | [Operational hardening](10-operations.md) | Most findings took hours to see because nothing reports |
+
+Runbooks for work already in flight live in `docs/runbooks/`.
