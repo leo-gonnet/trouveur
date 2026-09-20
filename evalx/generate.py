@@ -131,7 +131,8 @@ async def main() -> None:
         )
         cost += usage.cost_usd
         got["phrases_production"] = phrases
-        print(f"{persona['key']:<22} {'phrases':<10} {len(phrases):>3} items  ${usage.cost_usd:.5f}")
+        print(f"{persona['key']:<22} {'phrases':<10} {len(phrases):>3} items  "
+              f"${usage.cost_usd:.5f}")
         out["personas"][persona["key"]] = got
 
     out["cost_usd"] = str(cost)

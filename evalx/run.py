@@ -91,6 +91,12 @@ async def run_persona(conn, persona: dict, needles, planted, strategy: str) -> d
     }
 
 
+def _arm_total(group: list[dict], arm: str) -> str:
+    found = sum(row["recall"][arm][t]["found"] for row in group for t in POSITIVE_TIERS)
+    total = sum(row["recall"][arm][t]["total"] for row in group for t in POSITIVE_TIERS)
+    return f"{found}/{total}"
+
+
 def summarise(rows: list[dict]) -> dict:
     by_strategy: dict[str, list[dict]] = {}
     for row in rows:
@@ -109,14 +115,8 @@ def summarise(rows: list[dict]) -> dict:
             "recall_at": {k: sum(1 for r in found if r <= k) for k in DEPTHS},
             "positives": total,
             "tiers_fused": tiers,
-            "dense_only": "%d/%d" % (
-                sum(row["recall"]["dense"][t]["found"] for row in group for t in POSITIVE_TIERS),
-                sum(row["recall"]["dense"][t]["total"] for row in group for t in POSITIVE_TIERS),
-            ),
-            "lexical_only": "%d/%d" % (
-                sum(row["recall"]["lexical"][t]["found"] for row in group for t in POSITIVE_TIERS),
-                sum(row["recall"]["lexical"][t]["total"] for row in group for t in POSITIVE_TIERS),
-            ),
+            "dense_only": _arm_total(group, "dense"),
+            "lexical_only": _arm_total(group, "lexical"),
             "mrr": round(sum(1 / r for r in found) / total, 4) if total else 0,
             "median_rank": sorted(found)[len(found) // 2] if found else None,
             "negatives_in_window": sum(row["negatives_in_window"] for row in group),

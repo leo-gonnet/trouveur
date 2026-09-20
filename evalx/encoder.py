@@ -58,18 +58,40 @@ def compose(row, variant: str) -> str:
 
 
 async def build_pool(size: int) -> dict:
+    """A small, hard pool rather than a large, easy one.
+
+    This box embeds ~180 documents a minute, so a pool big enough to be realistic by sheer size
+    is not affordable across several models. Difficulty is bought instead of volume: most of the
+    pool is the near-misses the current system actually returns for these personas, which is the
+    discrimination an encoder exists to make. A haystack of unrelated vacancies mostly measures
+    how well a model separates things nobody would confuse.
+
+    Half the hard set comes from the LEXICAL arm, which uses no encoder at all, so those
+    distractors cannot have been chosen to flatter or punish any model. The dense half is chosen
+    by the incumbent and does bias the pool towards its own confusions -- stated here rather than
+    hidden, and the reason the random share exists at all.
+    """
     needles = load_needles()
     planted = json.loads((HERE / "planted.json").read_text())
     needle_ids = sorted(planted.values())
+    hard: set[int] = set()
     async with connect() as conn:
+        for persona in load_personas():
+            profile = await _ensure_persona(persona)
+            qs = strategies.build("det", profile, persona["key"])
+            arms = await strategies.retrieve_routed(conn, profile, qs)
+            hard.update(strategies.fuse(strategies.Arms(lexical=arms.lexical), 300))
+            hard.update(strategies.fuse(strategies.Arms(dense=arms.dense), 300))
         rows = list(await conn.execute(sa.text(
             "SELECT j.id FROM job j JOIN job_embedding e ON e.job_id = j.id "
             "WHERE j.closed_at IS NULL AND j.description IS NOT NULL AND j.id <> ALL(:ex)"
         ), {"ex": needle_ids}))
+    hard -= set(needle_ids)
     random.Random(20260920).shuffle(rows)
-    distractors = [r.id for r in rows[:size]]
+    filler = [r.id for r in rows if r.id not in hard][: max(size - len(hard), 0)]
+    distractors = sorted(hard) + filler
     pool = {"needle_ids": needle_ids, "distractors": distractors,
-            "planted": planted, "size": size,
+            "planted": planted, "hard": len(hard), "size": size,
             "tiers": {n["id"]: n["tier"] for n in needles},
             "persona_of": {n["id"]: n["persona"] for n in needles}}
     POOL.write_text(json.dumps(pool), encoding="utf-8")
@@ -94,7 +116,19 @@ def embed(model_name: str, texts: list[str], prefix: str, batch: int = 64) -> np
     model = _model(model_name)
     vecs = list(model.embed([f"{prefix}{t}" for t in texts], batch_size=batch))
     arr = np.asarray(vecs, dtype=np.float32)
-    return arr / np.linalg.norm(arr, axis=1, keepdims=True)
+    # Checked every time, because the failure is silent and expensive: the ONNX build of
+    # jina-embeddings-v2-base-de returns all-NaN vectors here, which cosine turns into a ranking
+    # indistinguishable from random. Seven hours of embedding produced 0/21 and a plausible-
+    # looking "this model is worse" before the vectors themselves were inspected.
+    if not np.isfinite(arr).all():
+        raise RuntimeError(
+            f"{model_name} produced {int(np.isnan(arr).sum())} non-finite values of {arr.size}; "
+            "this build of the model is unusable, and any ranking from it would be noise."
+        )
+    norms = np.linalg.norm(arr, axis=1, keepdims=True)
+    if (norms == 0).any():
+        raise RuntimeError(f"{model_name} produced zero-length vectors; cosine is undefined.")
+    return arr / norms
 
 
 async def evaluate(model_name: str, variant: str, strategy: str, pool: dict) -> dict:
