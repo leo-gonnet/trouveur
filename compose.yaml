@@ -17,6 +17,11 @@ services:
       POSTGRES_USER: trouveur
       POSTGRES_DB: trouveur
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    # Docker gives a container 64MB of /dev/shm, and a parallel HNSW build puts its working
+    # memory there: raising maintenance_work_mem to something sensible for 200k+ vectors then
+    # fails with "could not resize shared memory segment", which reads like a full disk and is
+    # not one. Hit while building an index on the eval copy of this corpus.
+    shm_size: 1gb
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:

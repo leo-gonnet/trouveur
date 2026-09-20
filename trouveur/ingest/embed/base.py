@@ -40,3 +40,19 @@ class EmbeddingProvider(Protocol):
 
 def version_of(provider: EmbeddingProvider) -> str:
     return f"{provider.name}:{provider.model}:{provider.dim}"
+
+
+# Width -> the column holding that vector space. Two spaces coexist only while a model change is
+# being backfilled; see alembic 0008. Named in one place because the writer and the reader
+# disagreeing about it is a silent wrong-neighbours bug, not an error.
+_COLUMNS = {384: "embedding", 768: "embedding_768"}
+
+
+def column_for(dim: int) -> str:
+    try:
+        return _COLUMNS[dim]
+    except KeyError:
+        raise RuntimeError(
+            f"No embedding column is {dim} wide; known widths are "
+            f"{', '.join(str(d) for d in sorted(_COLUMNS))}. Adding one is a migration."
+        ) from None

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Sequence
+from functools import lru_cache
 from typing import Any
 
 import sqlalchemy as sa
@@ -40,15 +41,24 @@ _HARD_FILTERS = """
 # have any effect, which db.engine.connect() always provides.
 _EF_SEARCH_SQL = f"SET LOCAL hnsw.ef_search = {_EF_SEARCH}"
 
-_DENSE_SQL = f"""
+# Formatted with the column for the configured read width, which is not always the width the
+# embed worker is writing: a model change is backfilled over days, and the dense arm serves from
+# the old space until the new one is fully covered.
+_DENSE_SQL_TEMPLATE = f"""
 SELECT j.id AS job_id
 FROM job_embedding e
 JOIN job j ON j.id = e.job_id
 JOIN job_facet f ON f.job_id = j.id
 WHERE {_HARD_FILTERS}
-ORDER BY e.embedding <=> CAST(:vector AS halfvec)
+  AND e.{{column}} IS NOT NULL
+ORDER BY e.{{column}} <=> CAST(:vector AS halfvec)
 LIMIT :limit
 """
+
+
+@lru_cache(maxsize=4)
+def _dense_sql(column: str) -> str:
+    return _DENSE_SQL_TEMPLATE.format(column=column)
 
 # Two lexical paths in one query, because neither is sufficient on German text: the tsvector
 # stems and weights but cannot see 'Ingenieur' inside 'Wirtschaftsingenieur', and the unaccented
@@ -88,8 +98,13 @@ async def dense_candidates(
         "vector": "[" + ",".join(f"{value:.6f}" for value in vector) + "]",
         "limit": limit * _DENSE_OVERSAMPLE,
     }
+    from trouveur.config import get_settings
+    from trouveur.ingest.embed.base import column_for
+
     await conn.execute(sa.text(_EF_SEARCH_SQL))
-    rows = await conn.execute(sa.text(_DENSE_SQL), params)
+    rows = await conn.execute(
+        sa.text(_dense_sql(column_for(get_settings().embedding_read_dim))), params
+    )
     return [row.job_id for row in rows][:limit]
 
 
