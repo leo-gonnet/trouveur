@@ -223,5 +223,50 @@
    "T2": 0,
    "T3": 0
   }
+ },
+ {
+  "model": "sentence-transformers/paraphrase-multilingual-mpnet-base-v2",
+  "variant": "current",
+  "strategy": "det",
+  "pool": 2530,
+  "embed_seconds": 2204.6,
+  "dim": 768,
+  "ranks": {
+   "wing_t1_kreislauf": 1,
+   "wing_t1_referent": 46,
+   "wing_t2_ressourcen": 61,
+   "wing_t2_umweltstrategie": 25,
+   "wing_t3_green_transformation": 9,
+   "wing_t1_rare_iso": 93,
+   "wing_t3_circular_en": 7,
+   "java_t1a": 1,
+   "java_t1b": 6,
+   "java_t2a": 30,
+   "java_t2b": 121,
+   "java_t3b": 27,
+   "java_t1_rare_mongo": 144,
+   "java_t3_platform_en": 149,
+   "data_t1a": 2,
+   "data_t1b": 1,
+   "data_t2a": 16,
+   "data_t2b": 28,
+   "data_t3b": 3,
+   "data_t1_rare_pdm": 65,
+   "data_t3_industrial_ds_en": 6
+  },
+  "recall_at": {
+   "10": 9,
+   "25": 11,
+   "50": 15,
+   "100": 18,
+   "250": 21
+  },
+  "positives": 21,
+  "mrr": 0.2245,
+  "tier_at50": {
+   "T1": 6,
+   "T2": 4,
+   "T3": 5
+  }
  }
 ]

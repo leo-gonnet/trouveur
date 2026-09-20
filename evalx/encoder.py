@@ -44,6 +44,29 @@ PREFIXES = {
 }
 
 
+# How many vectors one posting gets. The encoder reads 128 tokens and the median posting needs
+# 309, so a single vector is a vector of the posting's first third. Chunking is the way to fix
+# that WITHOUT changing the model -- at the price of a proportionally larger index and backfill.
+CHUNKS = {"chunk2": 2, "chunk3": 3}
+_CHUNK_CHARS = 420  # ~128 tokens of German, measured at 2.42 tokens/word
+
+
+def compose_many(row, variant: str) -> list[str]:
+    """Every text this posting contributes. One per vector."""
+    n = CHUNKS.get(variant)
+    if n is None:
+        return [compose(row, variant)]
+    description = row.description or ""
+    parts = []
+    for i in range(n):
+        slice_ = description[i * _CHUNK_CHARS : (i + 1) * _CHUNK_CHARS]
+        # Every chunk carries the title: a middle slice of prose with no role in it is a vector
+        # of some responsibilities belonging to nobody. Short postings repeat their first chunk,
+        # which costs an embedding and changes no maximum.
+        parts.append("\n".join([row.title, slice_ or description[:_CHUNK_CHARS]]))
+    return parts
+
+
 def compose(row, variant: str) -> str:
     locations = [i.get("raw", "") for i in (row.locations or [])]
     if variant == "current":
@@ -98,12 +121,16 @@ async def build_pool(size: int) -> dict:
     return pool
 
 
-async def load_texts(ids: list[int], variant: str) -> tuple[list[int], list[str]]:
+async def load_texts(ids: list[int], variant: str) -> tuple[list[int], list[str], int]:
     async with connect() as conn:
         rows = list(await conn.execute(sa.text(
             "SELECT id, title, company, locations, description FROM job WHERE id = ANY(:ids)"
         ), {"ids": ids}))
-    return [r.id for r in rows], [compose(r, variant) for r in rows]
+    texts: list[str] = []
+    for row in rows:
+        texts.extend(compose_many(row, variant))
+    per_doc = CHUNKS.get(variant, 1)
+    return [r.id for r in rows], texts, per_doc
 
 
 @lru_cache(maxsize=2)
@@ -135,12 +162,13 @@ async def evaluate(model_name: str, variant: str, strategy: str, pool: dict) -> 
     qp, dp = PREFIXES.get(model_name, ("", ""))
     ids = pool["needle_ids"] + pool["distractors"]
     started = time.time()
-    job_ids, texts = await load_texts(ids, variant)
+    job_ids, texts, per_doc = await load_texts(ids, variant)
     doc = embed(model_name, texts, dp)
     embed_seconds = time.time() - started
 
     result = {"model": model_name, "variant": variant, "strategy": strategy,
-              "pool": len(job_ids), "embed_seconds": round(embed_seconds, 1),
+              "pool": len(job_ids), "vectors": len(doc),
+              "embed_seconds": round(embed_seconds, 1),
               "dim": int(doc.shape[1]), "ranks": {}}
     for persona in load_personas():
         profile = await _ensure_persona(persona)
@@ -150,7 +178,12 @@ async def evaluate(model_name: str, variant: str, strategy: str, pool: dict) -> 
         # One ranked list per query, fused exactly as production fuses: RRF over the dense arm.
         ranked_lists = []
         for row in qv:
-            order = np.argsort(-(doc @ row))
+            sims = doc @ row
+            if per_doc > 1:
+                # A posting is as close as its closest chunk. Summing or averaging would let a
+                # long advert dilute the one paragraph that actually matches the candidate.
+                sims = sims.reshape(len(job_ids), per_doc).max(axis=1)
+            order = np.argsort(-sims)
             ranked_lists.append([job_ids[i] for i in order[:2000]])
         fused = [j for j, _ in strategies.reciprocal_rank_fusion(ranked_lists)]
         rank_of = {j: i + 1 for i, j in enumerate(fused)}
