@@ -211,11 +211,53 @@ build puts its working memory there, so raising `maintenance_work_mem` to anythi
 for 200k vectors fails with `could not resize shared memory segment` -- which reads like a full
 disk and is not one. Fixed with `shm_size: 1gb` in compose.yaml.
 
+## The pool did not manufacture the result
+
+The hard pool's dense near-misses are chosen by the incumbent, so the incumbent competes against
+its own worst confusions and a challenger does not -- a bias towards the challenger, flagged when
+the pool was built. Settling it rather than caveating it: the same two models over a pool of
+2,530 purely random distractors, neutral between them.
+
+| model | pool | @10 | @50 | @250 | MRR | T1/T2/T3 @50 |
+|---|---|---|---|---|---|---|
+| MiniLM-L12-v2 | hard | 6/21 | 8/21 | 16/21 | 0.203 | 6/1/1 |
+| mpnet-base-v2 | hard | 9/21 | 15/21 | 21/21 | 0.225 | 6/4/5 |
+| MiniLM-L12-v2 | random | 9/21 | 16/21 | 21/21 | 0.238 | 6/4/6 |
+| **mpnet-base-v2** | random | **12/21** | **20/21** | 21/21 | **0.261** | **8/6/6** |
+
+mpnet wins on both, so the bias did not create the finding. The two pools also confirm each
+other's construction: the hard pool is genuinely harder for both models, which is what it was
+for.
+
+## Adverts and a better encoder are complementary
+
+| | @50 | @250 | MRR | T1/T2/T3 @50 |
+|---|---|---|---|---|
+| mpnet + `det` | 15/21 | 21/21 | 0.225 | 6/4/5 |
+| mpnet + `det` + 8 adverts | 16/21 | 20/21 | **0.252** | 5/5/6 |
+
+The best MRR measured anywhere. The advert work is not made redundant by switching model, so the
+two changes stack and neither has to wait for the other.
+
+## Chunked document vectors: measured, and worse
+
+The encoder reads 128 tokens and the median posting needs 309, so splitting a posting into two
+vectors and taking the best match is the obvious fix that needs no new model. It does not work:
+@50 7/21 against 8/21, MRR 0.128 against 0.203, and the same-role-different-words tier falls to
+0/6.
+
+Max-pooling lifts every long posting, because the second chunk is usually benefits and equal-
+opportunity boilerplate, and a spurious match there scores the whole posting. That flattens the
+discrimination instead of adding reach. Worth knowing before paying for a 2x index: as the
+obvious implementation, chunking is a regression. Title-prefixed semantic chunks might not be --
+untested.
+
 ## What part two still does not answer
 
-- Only one stronger model was successfully measured. e5-large is ~10x the incumbent's compute
-  per document, which almost certainly rules it out on this host regardless of quality.
-- The hard pool's dense near-misses are chosen by the incumbent, which biases the comparison
-  towards a challenger. `--random-only` builds a neutral pool; a result that matters should be
-  confirmed on both.
+- e5-large was started and deliberately stopped. At ~10x the incumbent's compute per document it
+  is not deployable on a four-core host whatever it scores, and the CPU was better spent
+  confirming the result actually being recommended.
 - Nothing here re-measures the reranker, which is the stage that decides what the user reads.
+- 21 positives and 3 personas throughout. A one-needle difference is 4.8 points, so close
+  strategies are not separable; the conclusions drawn are the ones where several metrics move
+  together and a mechanism explains them.
