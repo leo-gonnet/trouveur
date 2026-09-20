@@ -29,9 +29,25 @@ On branch `feat/retrieval-eval`:
 - Verified end to end at small scale: wide vectors written beside narrow ones, wide reads
   correctly restricted to rows that have a wide vector, narrow reads unaffected.
 
+## Rehearsed, with numbers
+
+The whole sequence below was run on a 25,021-posting copy of the production corpus on
+2026-09-21: refill, drain, coverage, and the harness on each space in turn. Result, through the
+real pipeline rather than a pool: fused recall 18/21 -> 21/21, recall@50 12/21 -> 18/21, and the
+three needles the old space missed are all found. Details and the two confounds that had to be
+removed first: `evalx/swap/README.md`. Order of operations for production:
+`docs/runbooks/encoder-swap.md`.
+
+Measured backfill rate on this host with nothing else competing: **77 documents a minute**, so
+the full corpus is roughly two days.
+
 ## What is left
 
-Run the backfill, verify the new space in situ, flip the read width, retire the old column.
+Production cannot start until this branch is merged and deployed: the running image has no mpnet
+provider, no wide column and no migration 0008. That deploy is a no-op by design -- new code,
+same vector space, same results -- and is the prerequisite for everything below.
+
+Then: run the backfill, verify the new space in situ, flip the read width, retire the old column.
 
 Proceed roughly like this:
 
