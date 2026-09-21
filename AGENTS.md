@@ -745,6 +745,7 @@ uv run trouveur eval --save-baseline         # record the result for future comp
 ```bash
 uv sync                                   # install/refresh dependencies
 uv sync --extra embeddings                # add the local ONNX embedding provider
+uv sync --extra archive                   # add the offsite corpus export (pyarrow)
 uv run pytest                             # unit only, unless TROUVEUR_TEST_DATABASE_URL is set
 uv run pytest tests/unit -q               # the fast gate
 uv run pytest tests/unit/test_golden.py --update-goldens   # regenerate, then read the diff

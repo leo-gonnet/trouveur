@@ -12,6 +12,9 @@ from datetime import date
 
 import pytest
 
+# The archive is an optional extra; a checkout without it should not fail the suite.
+pytest.importorskip("pyarrow")
+
 from trouveur.archive import streams
 from trouveur.db.queries import archive as archive_q
 

@@ -14,6 +14,9 @@ from datetime import UTC, datetime, timedelta
 import pyarrow.parquet as pq
 import pytest
 
+# The archive is an optional extra; a checkout without it should not fail the suite.
+pytest.importorskip("pyarrow")
+
 from trouveur.archive import export
 from trouveur.archive.hub import LocalDestination
 from trouveur.archive.streams import DOCUMENTS, JOBS, LIFECYCLE

@@ -14,7 +14,8 @@ jobs:
         with:
           enable-cache: true
 
-      - run: uv sync --frozen
+      # --extra archive because the image ships with it and the export is tested here.
+      - run: uv sync --frozen --extra archive
 
       - run: uv run ruff check .
 
@@ -46,7 +47,8 @@ jobs:
         with:
           enable-cache: true
 
-      - run: uv sync --frozen
+      # --extra archive because the image ships with it and the export is tested here.
+      - run: uv sync --frozen --extra archive
 
       - run: uv run alembic upgrade head
 
