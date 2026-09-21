@@ -11,7 +11,10 @@
   <p>Boards are swept by their own structure, never with a user's keywords, so a job the user
     would have wanted but never thought to type still arrives. Every derived table is a pure,
     versioned function of the raw archive: bump the version and every row is recomputed from it,
-    by the same worker that handles new postings.</p>
+    by the same worker that handles new postings. What can be recommended is bounded by age as
+    well as by whether the posting is still open: only the last seven days are embedded, kept in
+    the index and searched, so a vacancy that has gone cold leaves the index instead of competing
+    in it.</p>
   <figure class="diagram">
     <svg viewBox="0 0 960 410" role="img" aria-label="Ingest lane feeding a match lane">
       <defs><marker id="a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="arrowhead"/></marker></defs>
@@ -25,7 +28,7 @@
       <g class="node"><rect x="600" y="52" width="110" height="56" rx="4"/><text x="655" y="76">derive (v)</text><text x="655" y="93" class="sub">never guesses</text></g>
       <g class="node"><rect x="750" y="52" width="110" height="56" rx="4"/><text x="805" y="76">facets</text><text x="805" y="93" class="sub">what filters read</text></g>
       <g class="node"><rect x="600" y="124" width="110" height="56" rx="4"/><text x="655" y="148">embed (v)</text><text x="655" y="165" class="sub">local model</text></g>
-      <g class="node"><rect x="750" y="124" width="110" height="56" rx="4"/><text x="805" y="148">vector</text><text x="805" y="165" class="sub">open postings only</text></g>
+      <g class="node"><rect x="750" y="124" width="110" height="56" rx="4"/><text x="805" y="148">vector</text><text x="805" y="165" class="sub">open and recent</text></g>
       <g class="edge" marker-end="url(#a1)">
         <path d="M130 80H160"/><path d="M280 80H320"/><path d="M440 80H480"/><path d="M560 80H600"/><path d="M710 80H750"/>
         <path d="M710 152H750"/><path d="M520 108 V140 Q520 152 532 152 H600"/>
@@ -35,9 +38,10 @@
       <text x="20" y="172" class="note start">the ordinary worker recomputes them from the archive.</text>
 
       <rect x="4" y="214" width="952" height="192" rx="6" class="lane l2"/>
-      <text x="20" y="238" class="lane-title">MATCH — per user, on demand or after a sweep, free until the last step</text>
+      <text x="20" y="238" class="lane-title">MATCH — per user, on demand or after a sweep, paid only where marked</text>
       <g class="node"><rect x="20" y="284" width="80" height="56" rx="4"/><text x="60" y="308">profile</text><text x="60" y="325" class="sub">per user</text></g>
-      <g class="node"><rect x="144" y="284" width="90" height="56" rx="4"/><text x="189" y="308">queries</text><text x="189" y="325" class="sub">+ synonyms</text></g>
+      <g class="node"><rect x="144" y="262" width="90" height="44" rx="4"/><text x="189" y="281">queries</text><text x="189" y="297" class="sub">+ synonyms</text></g>
+      <g class="node paid"><rect x="144" y="318" width="90" height="44" rx="4"/><text x="189" y="337">adverts</text><text x="189" y="353" class="sub">dense arm only</text></g>
       <g class="node"><rect x="278" y="284" width="100" height="56" rx="4"/><text x="328" y="308">hard filters</text><text x="328" y="325" class="sub">in SQL, first</text></g>
       <g class="node"><rect x="422" y="262" width="120" height="44" rx="4"/><text x="482" y="281">meaning search</text><text x="482" y="297" class="sub">nearest vectors</text></g>
       <g class="node"><rect x="422" y="318" width="120" height="44" rx="4"/><text x="482" y="337">word search</text><text x="482" y="353" class="sub">full text + trigram</text></g>
@@ -45,22 +49,28 @@
       <g class="node paid"><rect x="710" y="284" width="110" height="56" rx="4"/><text x="765" y="308">LLM score</text><text x="765" y="325" class="sub">your key, cached</text></g>
       <g class="node"><rect x="864" y="284" width="80" height="56" rx="4"/><text x="904" y="308">page</text><text x="904" y="325" class="sub">digest</text></g>
       <g class="edge" marker-end="url(#a1)">
-        <path d="M100 312H144"/><path d="M234 312H278"/>
+        <path d="M100 312 C122 312 122 284 144 284"/><path d="M100 312 C122 312 122 340 144 340"/>
+        <path d="M234 284 C256 284 256 312 278 312"/><path d="M234 340 C256 340 256 312 278 312"/>
         <path d="M378 312 C400 312 400 284 422 284"/><path d="M378 312 C400 312 400 340 422 340"/>
         <path d="M542 284 C564 284 564 312 586 312"/><path d="M542 340 C564 340 564 312 586 312"/>
         <path d="M666 312H710"/><path d="M820 312H864"/>
       </g>
       <g class="edge dashed" marker-end="url(#a1)"><path d="M805 180 V240 Q805 252 793 252 H494 Q482 252 482 262"/></g>
-      <text x="765" y="380" class="note">the only</text>
-      <text x="765" y="394" class="note">paid step</text>
-      <text x="900" y="380" class="note">sorted by score,</text>
-      <text x="900" y="394" class="note">no threshold</text>
+      <text x="189" y="380" class="note">8 short ads,</text>
+      <text x="189" y="394" class="note">model-written</text>
+      <text x="765" y="380" class="note">paid, per</text>
+      <text x="765" y="394" class="note">posting scored</text>
+      <text x="900" y="380" class="note">an edition a day</text>
+      <text x="900" y="394" class="note">by score, no cut</text>
       <text x="328" y="380" class="note">country, mode, seniority,</text>
-      <text x="328" y="394" class="note">contract, salary floor</text>
+      <text x="328" y="394" class="note">contract, salary floor, age</text>
     </svg>
   </figure>
-  <p class="hint">Two processes share the database and nothing else: the web app reads and enqueues,
-    the runner sweeps, drains and matches. Either can be down without breaking the other.</p>
+  <p class="hint">A day's matching is published as an edition: one page per day, keyed on when a
+    posting became a recommendation for this user rather than on when it was posted, and never
+    rewritten afterwards. Two processes share the database and nothing else: the web app reads
+    and enqueues, the runner sweeps, drains and matches. Either can be down without breaking the
+    other.</p>
 </section>
 </div>
 {% endblock %}
