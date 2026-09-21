@@ -240,6 +240,9 @@ user_profile = sa.Table(
     sa.Column("title", sa.Text, nullable=False, server_default=""),
     sa.Column("years_experience", sa.Integer, nullable=False, server_default="0"),
     sa.Column("objectives", sa.Text, nullable=False, server_default=""),
+    # What the candidate has done, in their own words. A scoring field: it changes what a good
+    # match is, so editing it bumps the version and clears the cached scores.
+    sa.Column("background", sa.Text, nullable=False, server_default=""),
     sa.Column("languages", ARRAY(sa.Text), nullable=False, server_default="{}"),
     sa.Column("must_have", ARRAY(sa.Text), nullable=False, server_default="{}"),
     sa.Column("keywords", ARRAY(sa.Text), nullable=False, server_default="{}"),
@@ -336,6 +339,11 @@ user_query_expansion = sa.Table(
     sa.Column("queries", ARRAY(sa.Text), nullable=False, server_default="{}"),
     # Synthetic adverts, kept apart from the phrases because only the dense arm can use them.
     sa.Column("adverts", ARRAY(sa.Text), nullable=False, server_default="{}"),
+    # The profile's background distilled once per version. Here rather than on user_profile
+    # because it is derived under this row's key, not something the user typed: the reranker
+    # reads it on every batch, and paying for the distillation once per profile version is what
+    # keeps a pasted CV from being billed 150 times and from crowding out the objectives.
+    sa.Column("background_summary", sa.Text, nullable=False, server_default=""),
     sa.Column("created_at", sa.DateTime(timezone=True), nullable=False,
               server_default=sa.func.now()),
 )

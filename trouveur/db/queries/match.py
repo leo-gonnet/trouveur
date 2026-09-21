@@ -18,6 +18,7 @@ from trouveur.db.schema import (
     user_job_match,
     user_query_expansion,
 )
+from trouveur.models import Expansion
 
 # pgvector applies a WHERE clause AFTER the index walk, so a filtered ANN query can return far
 # fewer rows than asked for -- silently, as a short result rather than an error. Over-fetching and
@@ -505,8 +506,8 @@ async def mark_notified(conn: AsyncConnection, user_id: int, job_ids: Sequence[i
 
 async def get_query_expansion(
     conn: AsyncConnection, user_id: int, profile_version: int, expansion_version: int
-) -> tuple[list[str], list[str]] | None:
-    """The cached (queries, adverts) for this profile version, or None if it has none yet."""
+) -> Expansion | None:
+    """The cached artifacts for this profile version, or None if it has none yet."""
     row = (
         await conn.execute(
             user_query_expansion.select().where(
@@ -516,7 +517,13 @@ async def get_query_expansion(
             )
         )
     ).one_or_none()
-    return (list(row.queries), list(row.adverts or [])) if row else None
+    if row is None:
+        return None
+    return Expansion(
+        queries=list(row.queries),
+        adverts=list(row.adverts or []),
+        background_summary=row.background_summary or "",
+    )
 
 
 async def put_query_expansion(
@@ -524,15 +531,15 @@ async def put_query_expansion(
     user_id: int,
     profile_version: int,
     expansion_version: int,
-    queries: Sequence[str],
-    adverts: Sequence[str] = (),
+    expansion: Expansion,
 ) -> None:
     stmt = pg_insert(user_query_expansion).values(
         user_id=user_id,
         profile_version=profile_version,
         expansion_version=expansion_version,
-        queries=list(queries),
-        adverts=list(adverts),
+        queries=list(expansion.queries),
+        adverts=list(expansion.adverts),
+        background_summary=expansion.background_summary,
     )
     await conn.execute(
         stmt.on_conflict_do_update(
@@ -541,7 +548,11 @@ async def put_query_expansion(
                 user_query_expansion.c.profile_version,
                 user_query_expansion.c.expansion_version,
             ],
-            set_={"queries": stmt.excluded.queries, "adverts": stmt.excluded.adverts},
+            set_={
+                "queries": stmt.excluded.queries,
+                "adverts": stmt.excluded.adverts,
+                "background_summary": stmt.excluded.background_summary,
+            },
         )
     )
 

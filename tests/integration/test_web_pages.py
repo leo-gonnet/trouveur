@@ -326,6 +326,19 @@ async def test_an_off_list_filter_value_is_refused_rather_than_saved(client, see
     assert (await client.post("/profile", data=form)).status_code == 400
 
 
+async def test_an_over_long_background_is_refused_rather_than_truncated(client, seeded):
+    """The cap exists because both prompts that read this field have a finite attention budget.
+    Silently storing the first 4,000 characters would leave the user with half a sentence and no
+    way to know the rest never arrived."""
+    from trouveur.models import BACKGROUND_MAX_CHARS
+
+    form = {"title": "x", "background": "a" * (BACKGROUND_MAX_CHARS + 1)}
+    assert (await client.post("/profile", data=form)).status_code == 400
+
+    form = {"title": "x", "background": "a" * BACKGROUND_MAX_CHARS}
+    assert (await client.post("/profile", data=form)).status_code == 303
+
+
 async def test_the_profile_form_offers_every_filter_value_including_not_stated(client, seeded):
     """Each hard filter drops postings whose facet is unknown once it is set; offering `unknown`
     as a choice is how a user keeps them, so it must not be filtered out of the options."""

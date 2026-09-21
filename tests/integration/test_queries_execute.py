@@ -24,7 +24,7 @@ import pytest
 
 from trouveur.db.engine import connect
 from trouveur.db.queries import admin, archive, ingest, jobs, match, users
-from trouveur.models import DocumentKind, RawDocument, RunStatus, RunTrigger
+from trouveur.models import DocumentKind, Expansion, RawDocument, RunStatus, RunTrigger
 
 MODULES = {
     "admin": admin, "archive": archive, "ingest": ingest, "jobs": jobs,
@@ -170,7 +170,7 @@ def _arguments(ctx: dict) -> dict[str, dict]:
         },
         "match.put_query_expansion": {
             "user_id": user_id, "profile_version": 1, "expansion_version": 1,
-            "queries": ["ingenieur"],
+            "expansion": Expansion(queries=["ingenieur"]),
         },
         "match.match_stats": {"user_id": user_id},
         # users

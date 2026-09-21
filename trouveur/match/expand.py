@@ -1,4 +1,9 @@
-"""Profile -> retrieval queries.
+"""Profile -> the artifacts derived once per profile version.
+
+Two of them are retrieval queries -- short phrases and synthetic adverts. The third is the
+candidate's background distilled to a few lines, which retrieval never reads and the reranker
+reads on every batch. It is derived here anyway because it is the same kind of thing: a function
+of one profile version, cached under it, recomputed only when the profile changes.
 
 Expansion happens once per profile version, not once per job. That is what makes it affordable to
 use a model here at all: one call when a user edits their profile, reused by every retrieval that
@@ -23,6 +28,12 @@ log = logging.getLogger(__name__)
 
 MAX_QUERIES = 8
 _MAX_TOKENS = 400
+
+# What the reranker is allowed to read about the candidate's history. Small on purpose: this text
+# is re-sent with every batch of ten postings, so it is the one piece of the profile whose length
+# is multiplied by rerank_limit rather than paid once.
+SUMMARY_MAX_CHARS = 700
+_SUMMARY_MAX_TOKENS = 300
 
 # Synthetic adverts for the dense arm. Eight, because the evaluation found the gain flat from
 # five to eight and negative by fifteen: past that the adverts repeat each other, and RRF over
@@ -66,6 +77,20 @@ No company names, no locations, no salary, no seniority labels.
 Return ONLY a JSON array of 8 strings."""
 
 
+_SUMMARY_SYSTEM = """You compress a candidate's own account of their background into evidence a
+screener can use.
+
+Write at most 80 words, as compact clauses rather than sentences. Keep only what shows capability:
+domains worked in, the systems, tools, methods and standards actually used, the scale and kind of
+employer, qualifications, and languages of work. Keep the concrete nouns -- they are the whole
+point -- and keep them in the language they were written in.
+
+Drop aspiration, motivation, what the candidate is looking for, and every adjective that is not
+load-bearing. Do not infer or invent anything that is not in the text.
+
+Return ONLY the summary text, no preamble and no formatting."""
+
+
 def deterministic_queries(profile: UserProfile) -> list[str]:
     """Queries derivable from the profile alone, with no model and no network."""
     queries: list[str] = []
@@ -85,13 +110,32 @@ def deterministic_queries(profile: UserProfile) -> list[str]:
 
 
 def build_prompt(profile: UserProfile) -> str:
+    """What both generators see.
+
+    The background goes in whole. Expansion is billed once per profile version, so this is the
+    one place the full text is affordable -- and it is the place that needs it most: without
+    evidence of what the candidate has done, the model writes adverts for the role they already
+    have, which is precisely wrong for the career-change profiles adverts exist to serve.
+    """
     return (
         f"current title: {profile.title or 'unstated'}\n"
         f"years of experience: {profile.years_experience}\n"
         f"objectives: {profile.objectives or 'unstated'}\n"
+        f"background: {profile.background or 'unstated'}\n"
         f"must have: {'; '.join(profile.must_have) or 'none stated'}\n"
         f"keywords the candidate already uses: {', '.join(profile.keywords) or 'none'}"
     )
+
+
+def truncated_background(profile: UserProfile) -> str:
+    """The floor for the reranker when no summary could be generated.
+
+    Like the deterministic expansion, this is not a degraded fallback that should embarrass us --
+    a user with no API key gets no summary and no adverts, and the reranker they do not have is
+    not scoring anything either. It matters for the case that does happen: the summary call
+    failed, and the alternative to a truncated background is none at all.
+    """
+    return profile.background.strip()[:SUMMARY_MAX_CHARS]
 
 
 def _as_text(item: object) -> str:
@@ -167,6 +211,27 @@ async def expand_adverts(
     return parse_response(completion.text, limit=MAX_ADVERTS), completion.usage
 
 
+async def summarise_background(
+    settings: Settings, profile: UserProfile, *, api_key: str, model: str, provider_pin: str | None
+) -> tuple[str, llm.Usage]:
+    """The background as the reranker will see it, distilled once per profile version.
+
+    A third call rather than a third field in either of the others, for the reason the adverts
+    are already separate: these outputs fail independently, and losing the queries because a
+    summary would not parse would cost retrieval to buy nothing.
+    """
+    completion = await llm.complete(
+        api_key=api_key,
+        model=model,
+        provider_pin=provider_pin,
+        system=_SUMMARY_SYSTEM,
+        user=profile.background,
+        max_tokens=_SUMMARY_MAX_TOKENS,
+        timeout=settings.llm_timeout_seconds,
+    )
+    return completion.text.strip()[:SUMMARY_MAX_CHARS], completion.usage
+
+
 def combine(deterministic: list[str], expanded: list[str]) -> list[str]:
     """The user's own words first, then the model's additions.
 
@@ -187,10 +252,13 @@ __all__ = [
     "MAX_ADVERTS",
     "MAX_QUERIES",
     "QUERY_EXPANSION_VERSION",
+    "SUMMARY_MAX_CHARS",
     "build_prompt",
     "combine",
     "deterministic_queries",
     "expand_adverts",
     "expand_with_model",
     "parse_response",
+    "summarise_background",
+    "truncated_background",
 ]

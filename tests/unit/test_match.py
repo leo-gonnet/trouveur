@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+from trouveur.db.queries.users import SCORING_FIELDS
+from trouveur.match.expand import build_prompt as expand_prompt
 from trouveur.match.expand import combine, deterministic_queries, parse_response
 from trouveur.match.fuse import reciprocal_rank_fusion
+from trouveur.match.rerank import build_prompt as rerank_prompt
 from trouveur.match.rerank import parse_response as parse_scores
 from trouveur.match.rerank import would_exceed_budget
 from trouveur.models import UserProfile
@@ -81,3 +84,42 @@ def test_combine_deduplicates_case_insensitively_and_keeps_user_words_first():
     combined = combine(["Wirtschaftsingenieur"], ["wirtschaftsingenieur", "Industrial Engineer"])
     assert combined[0] == "Wirtschaftsingenieur"
     assert combined == ["Wirtschaftsingenieur", "Industrial Engineer"]
+
+
+def test_the_reranker_reads_the_summarised_background_not_the_raw_field():
+    """The cost design of the background field, in one assertion.
+
+    `background` is distilled once per profile version and passed in; the raw field on the
+    profile is never sent to this prompt. Reading `profile.background` here instead would look
+    identical in a diff and multiply a 4,000-character CV across every batch of ten postings --
+    fifteen times over at the default rerank_limit, on the user's own card.
+    """
+    profile = UserProfile(user_id=1, title="Wirtschaftsingenieur", background="RAW CV " * 500)
+    prompt = rerank_prompt(profile, [], background="LCA, ISO 14001, circular economy")
+
+    assert "LCA, ISO 14001, circular economy" in prompt
+    assert "RAW CV" not in prompt
+
+
+def test_the_rerank_prompt_says_unstated_rather_than_omitting_the_background():
+    """An empty line the model has to interpret is worse than a stated absence, and the rest of
+    the profile block already uses this word for it."""
+    prompt = rerank_prompt(UserProfile(user_id=1, title="x"), [])
+    assert "background: unstated" in prompt
+
+
+def test_expansion_shows_the_generators_the_whole_background():
+    """The opposite trade from the reranker's, and deliberately so: expansion is billed once per
+    profile version, and it is the stage that was measured writing adverts for the role the
+    candidate already has when it had nothing but a title to go on."""
+    profile = UserProfile(user_id=1, title="Wirtschaftsingenieur", background="Ökobilanzierung "
+                          "für Investitionsgüter, Traineeprogramm Bau, ISO 14040.")
+    prompt = expand_prompt(profile)
+    assert "ISO 14040" in prompt
+
+
+def test_the_background_is_a_scoring_field():
+    """Every field on the Profile page changes what a good match is. Leaving this one out of the
+    set would let a user rewrite their history and keep scores computed without it -- and the
+    page promises the opposite."""
+    assert "background" in SCORING_FIELDS
