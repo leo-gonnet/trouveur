@@ -66,10 +66,10 @@ def _arguments(ctx: dict) -> dict[str, dict]:
     )
     return {
         # archive -- the offsite export. `day` is today because the seeded corpus was
-        # written now; a span query on an empty table returns None rather than failing.
-        "archive.document_span": {},
-        "archive.job_span": {},
-        "archive.closure_span": {},
+        # written now; a counts query on an empty table returns {} rather than failing.
+        "archive.document_counts": {},
+        "archive.job_counts": {},
+        "archive.closure_counts": {},
         "archive.documents": {"day": _today(), "after": 0, "chunk": 10},
         "archive.jobs": {"day": _today(), "after": 0, "chunk": 10},
         "archive.closures": {"day": _today(), "after": 0, "chunk": 10},

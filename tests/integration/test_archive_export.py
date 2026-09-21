@@ -150,7 +150,7 @@ async def test_a_stream_with_a_lag_leaves_recent_days_alone(seeded, tmp_path):
     assert all(part.day <= cutoff for part in report.written)
 
 
-async def test_an_empty_day_is_not_uploaded_as_an_empty_file(seeded, tmp_path):
+async def test_an_empty_day_is_never_uploaded_as_an_empty_file(seeded, tmp_path):
     """A zero-row file asserts 'this day is done' about a day that may yet be backfilled."""
     destination = LocalDestination(tmp_path)
     report = await export(
@@ -159,3 +159,43 @@ async def test_an_empty_day_is_not_uploaded_as_an_empty_file(seeded, tmp_path):
     for path in tmp_path.rglob("*.parquet"):
         assert pq.read_table(path).num_rows > 0
     assert report.rows == sum(part.rows for part in report.written)
+
+
+async def test_a_dry_run_reports_the_rows_it_would_write(seeded, tmp_path):
+    """A dry run that reports every partition as zero rows tells the reader nothing.
+
+    This is what it did: the row count came from a placeholder rather than from the database, so
+    a full history of real data and an empty database produced identical output.
+    """
+    dry = await export(
+        destination=LocalDestination(tmp_path), today=_past_freeze(), dry_run=True
+    )
+    assert dry.written, "nothing was reported as pending"
+    assert dry.rows > 0, "a dry run reported zero rows over a seeded corpus"
+
+    real = await export(destination=LocalDestination(tmp_path), today=_past_freeze())
+    predicted = {(part.stream, part.day): part.rows for part in dry.written}
+    actual = {(part.stream, part.day): part.rows for part in real.written}
+    assert predicted == actual, "the dry run did not predict what the real run wrote"
+
+
+async def test_a_dry_run_writes_nothing(seeded, tmp_path):
+    report = await export(
+        destination=LocalDestination(tmp_path), today=_past_freeze(), dry_run=True
+    )
+    assert report.written
+    assert list(tmp_path.rglob("*")) == [], "a dry run left files behind"
+
+
+async def test_a_day_that_never_had_rows_is_not_probed_every_night(seeded, tmp_path):
+    """Days come from one aggregate per stream, so a day with nothing in it simply is not there.
+
+    The alternative -- walking min..max and querying each day -- re-checks every empty day for
+    the life of the installation, and grows a night's work by one query per day forever.
+    """
+    from trouveur.db.queries import archive as archive_q
+
+    async with connect() as conn:
+        counts = await archive_q.document_counts(conn)
+    assert counts, "the seeded corpus archived no payloads"
+    assert all(rows > 0 for rows in counts.values())

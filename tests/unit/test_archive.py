@@ -57,9 +57,9 @@ def test_the_export_never_reads_a_table_that_holds_personal_data():
         "documents": archive_q._DOCUMENTS,
         "jobs": archive_q._JOBS,
         "lifecycle": archive_q._CLOSURES,
-        "document span": archive_q._DOCUMENT_SPAN,
-        "job span": archive_q._JOB_SPAN,
-        "closure span": archive_q._CLOSURE_SPAN,
+        "document counts": archive_q._DOCUMENT_COUNTS,
+        "job counts": archive_q._JOB_COUNTS,
+        "closure counts": archive_q._CLOSURE_COUNTS,
     }
     for label, sql in queries.items():
         for table in private:
@@ -69,7 +69,7 @@ def test_the_export_never_reads_a_table_that_holds_personal_data():
 def test_the_export_only_ever_reads():
     """A nightly job with a write in it is a nightly job that can corrupt the thing it backs up."""
     for sql in (archive_q._DOCUMENTS, archive_q._JOBS, archive_q._CLOSURES,
-                archive_q._DOCUMENT_SPAN, archive_q._JOB_SPAN, archive_q._CLOSURE_SPAN):
+                archive_q._DOCUMENT_COUNTS, archive_q._JOB_COUNTS, archive_q._CLOSURE_COUNTS):
         # Word-bounded: `updated_at` is a column the export legitimately reads.
         found = re.findall(
             r"\b(INSERT|UPDATE|DELETE|TRUNCATE|DROP|ALTER)\b", sql, flags=re.IGNORECASE

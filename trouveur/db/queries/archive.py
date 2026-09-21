@@ -29,19 +29,22 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 #                            public job postings; none of this is, and a private repository is not
 #                            a reason to upload it.
 
-_DOCUMENT_SPAN = """
-SELECT min(fetched_at)::date AS first_day, max(fetched_at)::date AS last_day
-FROM source_document
+# How many rows each day holds, for every day the stream has any. One aggregate per stream
+# rather than a probe per day: it answers "which days exist" and "how big is each" at once, so a
+# day that never had anything in it is simply absent instead of being re-checked every night for
+# the rest of the installation's life. It is also what makes --dry-run worth running, since the
+# alternative is a dry run that reports every partition as zero rows.
+_DOCUMENT_COUNTS = """
+SELECT fetched_at::date AS day, count(*) AS rows FROM source_document GROUP BY 1
 """
 
-_JOB_SPAN = """
-SELECT min(first_seen_at)::date AS first_day, max(first_seen_at)::date AS last_day
-FROM job
+_JOB_COUNTS = """
+SELECT first_seen_at::date AS day, count(*) AS rows FROM job GROUP BY 1
 """
 
-_CLOSURE_SPAN = """
-SELECT min(closed_at)::date AS first_day, max(closed_at)::date AS last_day
-FROM job WHERE closed_at IS NOT NULL
+_CLOSURE_COUNTS = """
+SELECT closed_at::date AS day, count(*) AS rows FROM job
+WHERE closed_at IS NOT NULL GROUP BY 1
 """
 
 _DOCUMENTS = """
@@ -136,24 +139,21 @@ LIMIT :chunk
 """
 
 
-async def _span(conn: AsyncConnection, sql: str) -> tuple[date, date] | None:
-    row = (await conn.execute(sa.text(sql))).one()
-    if row.first_day is None:
-        return None
-    return row.first_day, row.last_day
+async def _counts(conn: AsyncConnection, sql: str) -> dict[date, int]:
+    return {row.day: row.rows for row in await conn.execute(sa.text(sql))}
 
 
-async def document_span(conn: AsyncConnection) -> tuple[date, date] | None:
-    """First and last day the archive holds a payload for, or None if it is empty."""
-    return await _span(conn, _DOCUMENT_SPAN)
+async def document_counts(conn: AsyncConnection) -> dict[date, int]:
+    """Payloads per day the archive was fetched on. Empty if the archive is."""
+    return await _counts(conn, _DOCUMENT_COUNTS)
 
 
-async def job_span(conn: AsyncConnection) -> tuple[date, date] | None:
-    return await _span(conn, _JOB_SPAN)
+async def job_counts(conn: AsyncConnection) -> dict[date, int]:
+    return await _counts(conn, _JOB_COUNTS)
 
 
-async def closure_span(conn: AsyncConnection) -> tuple[date, date] | None:
-    return await _span(conn, _CLOSURE_SPAN)
+async def closure_counts(conn: AsyncConnection) -> dict[date, int]:
+    return await _counts(conn, _CLOSURE_COUNTS)
 
 
 async def documents(
