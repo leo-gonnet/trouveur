@@ -19,7 +19,10 @@ from dataclasses import dataclass, field
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from trouveur import versions
+from trouveur.config import get_settings
+from trouveur.db.queries import freshness
 from trouveur.db.queries import ingest as q
+from trouveur.db.queries import jobs as jobs_q
 from trouveur.ingest.embed import embedding_version
 from trouveur.models import DocumentKind
 from trouveur.sources.registry import normalizer_for
@@ -115,5 +118,13 @@ async def persist(
     pending_detail = {job_ids[eid] for eid in result.needs_detail if eid in job_ids}
     embeddable = [job_id for job_id in result.changed if job_id not in pending_detail]
     if embeddable:
-        await enqueue(conn, WorkKind.EMBED, embeddable, embedding_version())
+        # And it waits for nothing that has aged out. A board that lists its whole backlog would
+        # otherwise have every months-old role embedded on discovery and pruned on the next
+        # sweep; the vector is never read either way, only the CPU is real.
+        fresh = await jobs_q.fresh_subset(
+            conn,
+            embeddable,
+            freshness.fresh_since(get_settings().retrieval_horizon_days),
+        )
+        await enqueue(conn, WorkKind.EMBED, fresh, embedding_version())
     return result

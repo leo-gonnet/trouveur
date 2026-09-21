@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -19,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from trouveur.config import Settings, get_settings
 from trouveur.crypto import CredentialError, decrypt
 from trouveur.db.engine import connect
+from trouveur.db.queries import freshness
 from trouveur.db.queries import match as match_q
 from trouveur.db.queries import users as users_q
 from trouveur.match import expand, llm, rerank, retrieve
@@ -91,8 +93,11 @@ async def run_for_user(user_id: int, settings: Settings | None = None) -> MatchR
         return report
     report.queries = len(queries) + len(adverts)
 
+    # One cutoff for the whole run, so the two arms cannot disagree about which postings are
+    # fresh -- see db/queries/freshness.py.
+    fresh_since = freshness.fresh_since(settings.retrieval_horizon_days)
     async with connect() as conn:
-        await _retrieve(conn, profile, queries, report, adverts)
+        await _retrieve(conn, profile, queries, report, adverts, fresh_since=fresh_since)
 
     if credential is not None:
         async with connect() as conn:
@@ -172,9 +177,13 @@ async def _retrieve(
     queries: list[str],
     report: MatchReport,
     adverts: list[str] | None = None,
+    *,
+    fresh_since: datetime,
 ) -> None:
     """Hybrid retrieval: dense searches per query and advert, lexical per query, fused by rank."""
-    arms = await retrieve.retrieve_arms(conn, profile, queries, adverts or [])
+    arms = await retrieve.retrieve_arms(
+        conn, profile, queries, adverts or [], fresh_since=fresh_since
+    )
     fused = retrieve.fuse(arms, retrieve.RETRIEVAL_LIMIT)
     dense_rank, lexical_rank = retrieve.ranks(arms)
 

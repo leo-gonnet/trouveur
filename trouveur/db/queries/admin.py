@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from datetime import datetime
 from typing import Any
 
 import sqlalchemy as sa
@@ -272,7 +273,7 @@ async def description_coverage(conn: AsyncConnection) -> int:
     )
 
 
-async def derived_coverage(conn: AsyncConnection) -> sa.Row:
+async def derived_coverage(conn: AsyncConnection, fresh_since: datetime) -> sa.Row:
     """How much of the open corpus is actually usable by retrieval.
 
     Facets and embeddings arrive asynchronously, so a job can be stored, searchable and still
@@ -285,6 +286,13 @@ async def derived_coverage(conn: AsyncConnection) -> sa.Row:
                 """
                 SELECT
                     (SELECT count(*) FROM job WHERE closed_at IS NULL) AS open_jobs,
+                    -- The denominator embedding coverage is actually measured against.
+                    -- job_embedding holds postings that are open AND inside the freshness
+                    -- horizon, so comparing it to open_jobs reports a permanent shortfall that
+                    -- is the policy working, not a backlog.
+                    (SELECT count(*) FROM job j
+                     WHERE j.closed_at IS NULL
+                       AND COALESCE(j.posted_at, j.first_seen_at) > :fresh_since) AS fresh_jobs,
                     (SELECT count(*) FROM job j JOIN job_facet f ON f.job_id = j.id
                      WHERE j.closed_at IS NULL AND f.derive_version > 0) AS derived,
                     (SELECT count(*) FROM job_embedding) AS embedded,
@@ -298,7 +306,8 @@ async def derived_coverage(conn: AsyncConnection) -> sa.Row:
                     (SELECT count(*) FROM job_embedding e JOIN job j ON j.id = e.job_id
                      WHERE j.closed_at IS NULL AND e.embedding_768 IS NOT NULL) AS embedded_768
                 """
-            )
+            ),
+            {"fresh_since": fresh_since},
         )
     ).one()
 

@@ -59,6 +59,13 @@ class Settings(BaseSettings):
     embedding_read_dim: int = 384
     embed_batch_size: int = 128
 
+    # How old a posting may be and still be recommended. A radar that surfaces a vacancy a
+    # fortnight late has, for anything competitive, found nothing. Measured steady-state
+    # discovery lag is under 1.3 days at the 99th percentile for every source that carries
+    # volume, so this is roughly five times the worst case -- it drops old inventory, never a
+    # posting we were merely slow to find. See trouveur/db/queries/freshness.py.
+    retrieval_horizon_days: int = 7
+
     # Arbeitsagentur only ever exposes a delta, so nothing it returns can prove a posting is gone.
     # Without an age cutoff its open set, and therefore the ANN index, would grow without bound.
     stale_close_days: int = 90

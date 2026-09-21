@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Sequence
+from datetime import datetime
 from functools import lru_cache
 from typing import Any
 
@@ -11,7 +12,12 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from trouveur.db.schema import llm_score_cache, user_job_match, user_query_expansion
+from trouveur.db.queries import freshness
+from trouveur.db.schema import (
+    llm_score_cache,
+    user_job_match,
+    user_query_expansion,
+)
 
 # pgvector applies a WHERE clause AFTER the index walk, so a filtered ANN query can return far
 # fewer rows than asked for -- silently, as a short result rather than an error. Over-fetching and
@@ -20,8 +26,9 @@ from trouveur.db.schema import llm_score_cache, user_job_match, user_query_expan
 _DENSE_OVERSAMPLE = 4
 _EF_SEARCH = 200
 
-_HARD_FILTERS = """
+_HARD_FILTERS = f"""
     j.closed_at IS NULL
+    AND {freshness.sql("j")}
     AND (cardinality(CAST(:countries AS text[])) = 0 OR f.countries && CAST(:countries AS text[]))
     AND (cardinality(CAST(:work_modes AS text[])) = 0
          OR f.work_mode::text = ANY(CAST(:work_modes AS text[])))
@@ -79,8 +86,9 @@ LIMIT :limit
 """
 
 
-def _filter_params(profile: Any) -> dict[str, Any]:
+def _filter_params(profile: Any, fresh_since: datetime) -> dict[str, Any]:
     return {
+        "fresh_since": fresh_since,
         "countries": list(profile.countries or []),
         "work_modes": [str(mode) for mode in (profile.work_modes or [])],
         "seniorities": [str(level) for level in (profile.seniorities or [])],
@@ -90,11 +98,15 @@ def _filter_params(profile: Any) -> dict[str, Any]:
 
 
 async def dense_candidates(
-    conn: AsyncConnection, profile: Any, vector: list[float], limit: int
+    conn: AsyncConnection,
+    profile: Any,
+    vector: list[float],
+    limit: int,
+    fresh_since: datetime,
 ) -> list[int]:
     """Nearest neighbours to one query vector, in rank order."""
     params = {
-        **_filter_params(profile),
+        **_filter_params(profile, fresh_since),
         "vector": "[" + ",".join(f"{value:.6f}" for value in vector) + "]",
         "limit": limit * _DENSE_OVERSAMPLE,
     }
@@ -109,10 +121,11 @@ async def dense_candidates(
 
 
 async def lexical_candidates(
-    conn: AsyncConnection, profile: Any, query: str, limit: int
+    conn: AsyncConnection, profile: Any, query: str, limit: int, fresh_since: datetime
 ) -> list[int]:
     rows = await conn.execute(
-        sa.text(_LEXICAL_SQL), {**_filter_params(profile), "query": query, "limit": limit}
+        sa.text(_LEXICAL_SQL),
+        {**_filter_params(profile, fresh_since), "query": query, "limit": limit},
     )
     return [row.job_id for row in rows]
 

@@ -32,6 +32,7 @@ import logging
 import os
 from collections import defaultdict
 from dataclasses import asdict, dataclass, field
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 
@@ -111,6 +112,14 @@ class Scorecard:
             "corpus_with_description": self.corpus_with_description,
             "personas": [asdict(p) for p in self.personas],
         }
+
+
+# The harness measures retrieval, not the freshness policy. Needles carry fixed dates in their
+# fixtures -- some are weeks old -- so applying the production horizon here would drop them from
+# the corpus and report a recall collapse that says nothing about retrieval. Pinned far enough
+# back that everything planted is eligible, and deliberately not read from settings: a number
+# that moved when an operator edited the horizon would make two runs incomparable.
+EVAL_FRESH_SINCE = datetime(2000, 1, 1, tzinfo=UTC)
 
 
 async def plant_needles(needles: list[dict]) -> dict[str, int]:
@@ -338,7 +347,9 @@ async def _evaluate_persona(
     result.queries = len(queries)
 
     async with connect() as conn:
-        arms = await retrieve.retrieve_arms(conn, profile, queries)
+        arms = await retrieve.retrieve_arms(
+            conn, profile, queries, fresh_since=EVAL_FRESH_SINCE
+        )
         fused = [job_id for job_id, _ in retrieve.fuse(arms, limit)]
 
         lexical_only = [

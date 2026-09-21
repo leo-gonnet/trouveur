@@ -29,6 +29,7 @@ from trouveur.config import get_settings
 from trouveur.crypto import encrypt, fingerprint
 from trouveur.db.engine import connect
 from trouveur.db.queries import admin as admin_q
+from trouveur.db.queries import freshness
 from trouveur.db.queries import match as match_q
 from trouveur.db.queries import users as users_q
 from trouveur.match.pipeline import profile_from_row
@@ -428,7 +429,9 @@ async def dashboard(request: Request):
     session = request.state.session
     async with connect() as conn:
         overview = await admin_q.corpus_overview(conn)
-        coverage = await admin_q.derived_coverage(conn)
+        coverage = await admin_q.derived_coverage(
+            conn, freshness.fresh_since(get_settings().retrieval_horizon_days)
+        )
         health = await admin_q.source_health(conn)
         queues = await admin_q.queue_depth(conn)
         countries = await admin_q.facet_breakdown(conn)

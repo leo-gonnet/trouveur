@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from trouveur.db.queries import match as match_q
+from trouveur.eval.harness import EVAL_FRESH_SINCE
 from trouveur.ingest.embed import get_provider
 from trouveur.match.expand import MAX_QUERIES, combine, deterministic_queries
 from trouveur.match.fuse import reciprocal_rank_fusion
@@ -71,14 +72,20 @@ async def retrieve_routed(conn, profile, qs: QuerySet) -> Arms:
             vectors = [pooled]
         per_query = qs.depth or max(RETRIEVAL_LIMIT // len(vectors), MIN_PER_QUERY)
         for vector in vectors:
-            dense_lists.append(await match_q.dense_candidates(conn, profile, vector, per_query))
+            dense_lists.append(
+                await match_q.dense_candidates(
+                    conn, profile, vector, per_query, EVAL_FRESH_SINCE
+                )
+            )
 
     lexical_lists: list[list[int]] = []
     if qs.lexical:
         per_query = qs.depth or max(RETRIEVAL_LIMIT // len(qs.lexical), MIN_PER_QUERY)
         for query in qs.lexical:
             lexical_lists.append(
-                await match_q.lexical_candidates(conn, profile, query, per_query)
+                await match_q.lexical_candidates(
+                    conn, profile, query, per_query, EVAL_FRESH_SINCE
+                )
             )
     return Arms(dense=dense_lists, lexical=lexical_lists)
 

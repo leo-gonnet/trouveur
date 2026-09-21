@@ -86,6 +86,9 @@ def test_encryption_refuses_the_development_default(monkeypatch):
     crypto._cipher.cache_clear()
 
 
+_CUTOFF = datetime(2026, 9, 14, tzinfo=UTC)
+
+
 def test_detail_work_is_never_refilled():
     """Only the source knows whether it has a detail phase.
 
@@ -93,12 +96,12 @@ def test_detail_work_is_never_refilled():
     exactly the leak the registry exists to prevent.
     """
     with pytest.raises(ValueError, match="never refilled"):
-        _stale_query(WorkKind.DETAIL, "1", 0, 10)
+        _stale_query(WorkKind.DETAIL, "1", 0, 10, _CUTOFF)
 
 
 def test_refill_queries_select_only_out_of_date_rows():
     for kind in (WorkKind.DERIVE, WorkKind.DEDUP, WorkKind.EMBED):
-        sql = str(_stale_query(kind, "2", 0, 10).compile())
+        sql = str(_stale_query(kind, "2", 0, 10, _CUTOFF).compile())
         assert "LIMIT" in sql
         # Keyset, not OFFSET: this runs over the whole corpus after a version bump, and OFFSET
         # would re-scan everything it had already skipped on every successive chunk.
@@ -106,8 +109,21 @@ def test_refill_queries_select_only_out_of_date_rows():
 
 
 def test_embed_refill_ignores_closed_postings():
-    sql = str(_stale_query(WorkKind.EMBED, "v", 0, 10).compile())
+    sql = str(_stale_query(WorkKind.EMBED, "v", 0, 10, _CUTOFF).compile())
     assert "closed_at IS NULL" in sql
+
+
+def test_embed_refill_ignores_postings_past_the_horizon():
+    """Without this the pruner and the refill chase each other: embed, prune, embed, prune."""
+    sql = str(_stale_query(WorkKind.EMBED, "v", 0, 10, _CUTOFF).compile())
+    assert "coalesce(job.posted_at, job.first_seen_at)" in sql.lower()
+
+
+def test_only_embedding_is_bounded_by_age():
+    """Derivation and dedup are facts about a posting, true however old it is."""
+    for kind in (WorkKind.DERIVE, WorkKind.DEDUP):
+        sql = str(_stale_query(kind, "2", 0, 10, _CUTOFF).compile()).lower()
+        assert "first_seen_at" not in sql
 
 
 def test_a_missed_schedule_slot_runs_once_when_the_runner_returns():
