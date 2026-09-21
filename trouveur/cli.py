@@ -129,6 +129,49 @@ def refill(kind: str, chunk: int) -> None:
     click.echo(f"queued {asyncio.run(_run())} item(s) for {kind} at version {target}")
 
 
+@main.command()
+@click.option(
+    "--to",
+    "target",
+    default=None,
+    help="Override ARCHIVE_REPO: a `<owner>/<name>` dataset repo, or `local:<path>`.",
+)
+@click.option(
+    "--stream",
+    "stream_names",
+    multiple=True,
+    help="Export only these streams (documents, jobs, lifecycle). Default: all three.",
+)
+@click.option("--dry-run", is_flag=True, help="Report the partitions that are missing; write none.")
+def export(target: str | None, stream_names: tuple[str, ...], dry_run: bool) -> None:
+    """Copy the corpus offsite, one immutable day-partition per stream.
+
+    Append-only and idempotent: a day already at the destination is skipped, so re-running costs
+    a listing, and a run interrupted halfway is resumed by the next one.
+    """
+    from trouveur.archive import export as run_export
+    from trouveur.archive import hub, streams
+
+    settings = get_settings()
+    repo = target or settings.archive_repo
+    if not repo:
+        raise click.ClickException(
+            "Nowhere to export to. Set ARCHIVE_REPO, or pass --to local:<path> to rehearse."
+        )
+    try:
+        chosen = streams.by_name(stream_names) if stream_names else streams.ALL
+        destination = hub.destination(repo, settings.archive_token)
+    except (ValueError, RuntimeError) as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    report = asyncio.run(
+        run_export(settings, destination=destination, streams=chosen, dry_run=dry_run)
+    )
+    for partition in report.written:
+        click.echo(f"  {partition}")
+    click.echo(report.summary())
+
+
 @main.command("eval")
 @click.option("--limit", "k", default=200, show_default=True, help="Retrieval depth to score at.")
 @click.option(

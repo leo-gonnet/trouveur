@@ -63,6 +63,14 @@ class Settings(BaseSettings):
     # Without an age cutoff its open set, and therefore the ANN index, would grow without bound.
     stale_close_days: int = 90
 
+    # Offsite copy of the corpus. The archive is the only input that cannot be recomputed and it
+    # lives on one disk; this is where a nightly copy of it goes. A `<owner>/<name>` Hugging Face
+    # dataset repository, or `local:<path>` to rehearse into a directory without a token.
+    archive_repo: str = ""
+    # Scope this to write on that one repository and nothing else. It is a credential for an
+    # account, not for a bucket: a broad token in a nightly cron is a standing offer.
+    archive_token: str | None = None
+
     http_timeout_seconds: float = 30.0
     request_delay_seconds: float = 1.0
 

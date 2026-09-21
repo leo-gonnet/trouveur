@@ -28,6 +28,9 @@ dependencies = [
 # Local ONNX embeddings. Pulls onnxruntime (~200MB) but not torch. Without it, set
 # TROUVEUR_EMBEDDING_PROVIDER to another provider or the embed worker refuses to start.
 embeddings = ["fastembed>=0.4"]
+# Offsite corpus export. pyarrow is the only genuinely new dependency: huggingface-hub already
+# arrives with fastembed, which uses it to fetch models.
+archive = ["pyarrow>=18", "huggingface-hub>=0.26"]
 
 [project.scripts]
 trouveur = "trouveur.cli:main"
