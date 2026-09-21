@@ -110,7 +110,11 @@ async def run(
     settings = settings or get_settings()
     async with connect() as conn:
         tenants = await admin_q.enabled_tenants(conn)
-    sources = build_sources(tenants=tenants, only=only_source)
+    sources = build_sources(
+        tenants=tenants,
+        only=only_source,
+        disabled=settings.disabled_sources.split(","),
+    )
 
     async with PoliteClient() as client:
         report = await sweep_sources(

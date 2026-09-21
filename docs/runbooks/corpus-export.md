@@ -96,6 +96,26 @@ thereafter, so a day that was exported before a deletion keeps the deleted rows 
 day that was not is simply gone. Check the destination holds every day in the range before
 removing a source's rows from the database.
 
+## Retiring a source without losing its data
+
+The archive is what makes deleting a source's rows survivable, so the order matters and it is
+not obvious:
+
+1. **Stop sweeping it** — `DISABLED_SOURCES=<name>` in `.env`, then recreate the containers. This
+   is reversible and keeps the adapter.
+2. **Wait for the export to freeze the last day it contributed to.** `documents` freezes a day
+   once that day is over, so the earliest safe moment is after the next nightly run. Until then
+   today's payloads for that source exist only in the database.
+3. **Check, do not assume.** Compare the per-day counts the dry run reports against
+   `SELECT fetched_at::date, count(*) FROM source_document GROUP BY 1`. They must match for
+   every day before today.
+4. **Then delete the rows.**
+
+Note that `jobs` lags three days behind `documents`, so a source deleted at step 4 will be
+missing from the most recent `jobs` partitions. That is recoverable in principle — postings are
+a pure function of the payloads — but no replay tool is built, so if the normalised rows matter
+to you, wait for the `jobs` partitions too.
+
 ## Known traps
 
 - **A partition is immutable, including a wrong one.** If a bug ships a bad partition, the fix is
