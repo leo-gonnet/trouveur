@@ -111,14 +111,14 @@ LIFECYCLE_SCHEMA = pa.schema(
 )
 
 Page = Callable[..., Awaitable[Sequence[sa.Row]]]
-Span = Callable[[AsyncConnection], Awaitable[tuple[date, date] | None]]
+Counts = Callable[[AsyncConnection], Awaitable[dict[date, int]]]
 
 
 @dataclass(frozen=True)
 class Stream:
     name: str
     schema: pa.Schema
-    span: Span
+    counts: Counts
     page: Page
     # The column the page query orders by and resumes from. Named, not inferred from the schema:
     # paging is keyset, so reading this off field order would make reordering a schema silently
@@ -137,7 +137,7 @@ class Stream:
 DOCUMENTS = Stream(
     name="documents",
     schema=DOCUMENT_SCHEMA,
-    span=archive_q.document_span,
+    counts=archive_q.document_counts,
     page=archive_q.documents,
     key="id",
     lag_days=0,
@@ -146,7 +146,7 @@ DOCUMENTS = Stream(
 JOBS = Stream(
     name="jobs",
     schema=JOB_SCHEMA,
-    span=archive_q.job_span,
+    counts=archive_q.job_counts,
     page=archive_q.jobs,
     key="id",
     lag_days=3,
@@ -155,7 +155,7 @@ JOBS = Stream(
 LIFECYCLE = Stream(
     name="lifecycle",
     schema=LIFECYCLE_SCHEMA,
-    span=archive_q.closure_span,
+    counts=archive_q.closure_counts,
     page=archive_q.closures,
     key="job_id",
     lag_days=0,

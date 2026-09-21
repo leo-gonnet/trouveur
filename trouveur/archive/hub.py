@@ -82,11 +82,16 @@ class LocalDestination:
 class HubDestination:
     """A private Hugging Face dataset repository."""
 
-    def __init__(self, repo_id: str, token: str) -> None:
+    def __init__(self, repo_id: str, token: str, *, read_only: bool = False) -> None:
         from huggingface_hub import HfApi
 
         self.repo_id = repo_id
         self._api = HfApi(token=token)
+        if read_only:
+            # A dry run must leave no trace. Creating the repository and writing the dataset
+            # card are both writes, and doing them here meant `--dry-run` silently created a
+            # repository on someone's account before reporting that it would change nothing.
+            return
         self._api.create_repo(
             repo_id, repo_type="dataset", private=True, exist_ok=True
         )
@@ -102,6 +107,8 @@ class HubDestination:
             )
 
     def existing(self) -> set[str]:
+        if not self._api.repo_exists(self.repo_id, repo_type="dataset"):
+            return set()
         return {
             name
             for name in self._api.list_repo_files(self.repo_id, repo_type="dataset")
@@ -121,7 +128,7 @@ class HubDestination:
         return f"hf://datasets/{self.repo_id}"
 
 
-def destination(target: str, token: str | None) -> Destination:
+def destination(target: str, token: str | None, *, read_only: bool = False) -> Destination:
     """Resolve a destination string: `local:<path>`, or a `<owner>/<name>` dataset repo."""
     if target.startswith("local:"):
         return LocalDestination(Path(target.removeprefix("local:")).expanduser())
@@ -130,4 +137,4 @@ def destination(target: str, token: str | None) -> Destination:
             "No Hugging Face token. Set ARCHIVE_TOKEN to a token with write access to "
             f"{target}, or export to `local:<path>` first to rehearse without one."
         )
-    return HubDestination(target, token)
+    return HubDestination(target, token, read_only=read_only)

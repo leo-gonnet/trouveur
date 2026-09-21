@@ -160,7 +160,7 @@ def export(target: str | None, stream_names: tuple[str, ...], dry_run: bool) -> 
         )
     try:
         chosen = streams.by_name(stream_names) if stream_names else streams.ALL
-        destination = hub.destination(repo, settings.archive_token)
+        destination = hub.destination(repo, settings.archive_token, read_only=dry_run)
     except (ValueError, RuntimeError) as exc:
         raise click.ClickException(str(exc)) from exc
 

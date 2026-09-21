@@ -43,7 +43,9 @@ class Partition:
     bytes: int
 
     def __str__(self) -> str:
-        return f"{self.stream}/{self.day} {self.rows} rows, {self.bytes / 1e6:.1f} MB"
+        rows = f"{self.stream}/{self.day} {self.rows} rows"
+        # Size is only known once the file exists, which on a dry run it does not.
+        return rows if self.bytes == 0 else f"{rows}, {self.bytes / 1e6:.1f} MB"
 
 
 @dataclass
@@ -51,7 +53,6 @@ class ExportReport:
     destination: str
     written: list[Partition] = field(default_factory=list)
     skipped: int = 0
-    empty: int = 0
     dry_run: bool = False
 
     @property
@@ -63,19 +64,16 @@ class ExportReport:
         return sum(part.bytes for part in self.written)
 
     def summary(self) -> str:
-        verb = "would write" if self.dry_run else "wrote"
+        if self.dry_run:
+            return (
+                f"would write {len(self.written)} partition(s), {self.rows} rows "
+                f"to {self.destination} ({self.skipped} already present)"
+            )
         return (
-            f"{verb} {len(self.written)} partition(s), {self.rows} rows, "
+            f"wrote {len(self.written)} partition(s), {self.rows} rows, "
             f"{self.bytes / 1e6:.1f} MB to {self.destination} "
-            f"({self.skipped} already present, {self.empty} empty)"
+            f"({self.skipped} already present)"
         )
-
-
-def _days(first: date, last: date):
-    day = first
-    while day <= last:
-        yield day
-        day += timedelta(days=1)
 
 
 async def _write_partition(stream: Stream, day: date, path: Path) -> int:
@@ -126,29 +124,28 @@ async def export(
 
     for stream in streams:
         async with connect() as conn:
-            span = await stream.span(conn)
-        if span is None:
-            continue
-        first, last = span
+            counts = await stream.counts(conn)
         # Never freeze a day that can still change: today is still being written to, and a
         # stream with a lag is still filling in days behind it.
         frozen = today - timedelta(days=1 + stream.lag_days)
-        for day in _days(first, min(last, frozen)):
+        for day in sorted(counts):
+            if day > frozen:
+                continue
             path_in_repo = stream.path(day)
             if path_in_repo in present:
                 report.skipped += 1
                 continue
             if dry_run:
-                report.written.append(Partition(stream.name, day, 0, 0))
+                report.written.append(Partition(stream.name, day, counts[day], 0))
                 continue
             with tempfile.TemporaryDirectory() as scratch:
                 local = Path(scratch) / f"{stream.name}-{day}.parquet"
                 rows = await _write_partition(stream, day, local)
                 if rows == 0:
-                    # Nothing happened that day. Do not upload a zero-row file: it would
-                    # assert "this day is done" about a day that may yet be backfilled, and
-                    # re-checking an empty day costs one indexed lookup.
-                    report.empty += 1
+                    # The count said there was something here and the page found nothing, so a
+                    # row went away between the two. Uploading an empty file would assert "this
+                    # day is done" about a day that is not.
+                    log.warning("%s for %s emptied while being read", stream.name, day)
                     continue
                 size = local.stat().st_size
                 destination.put(

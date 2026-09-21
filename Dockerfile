@@ -46,6 +46,16 @@ RUN apt-get update \
 WORKDIR /app
 COPY --from=build --chown=app:app /app /app
 
+# WORKDIR creates /app as root before the COPY lands, and `COPY --chown` only sets ownership on
+# what it copies -- so /app itself stays root-owned while its contents do not. $HOME is /app, so
+# anything that wants a cache under it fails at runtime as the app user. huggingface_hub's Xet
+# backend does exactly that, and the error it surfaces is a bare "Permission denied (os error
+# 13)" from inside a Rust extension, which names nothing and points at no path.
+#
+# Only the cache directory is made writable, not /app: the application's own code has no reason
+# to be writable by the user running it.
+RUN mkdir -p /app/.cache && chown app:app /app/.cache
+
 ENV PATH="/app/.venv/bin:$PATH" \
     FASTEMBED_CACHE_PATH=/app/.fastembed
 USER app
