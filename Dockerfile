@@ -13,11 +13,11 @@ WORKDIR /app
 # Dependencies first: they change far less often than the source.
 COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-install-project --no-dev --extra embeddings
+    uv sync --frozen --no-install-project --no-dev --extra embeddings --extra archive
 
 COPY . .
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --extra embeddings
+    uv sync --frozen --no-dev --extra embeddings --extra archive
 
 # Bake the embedding model into the image rather than fetching it on first use. A runtime download
 # would repeat on every container recreate, needs egress from the runner, and would make the first

@@ -23,10 +23,13 @@ from decimal import Decimal
 import pytest
 
 from trouveur.db.engine import connect
-from trouveur.db.queries import admin, ingest, jobs, match, users
+from trouveur.db.queries import admin, archive, ingest, jobs, match, users
 from trouveur.models import DocumentKind, RawDocument, RunStatus, RunTrigger
 
-MODULES = {"admin": admin, "ingest": ingest, "jobs": jobs, "match": match, "users": users}
+MODULES = {
+    "admin": admin, "archive": archive, "ingest": ingest, "jobs": jobs,
+    "match": match, "users": users,
+}
 
 
 def _public_queries() -> set[str]:
@@ -38,6 +41,10 @@ def _public_queries() -> set[str]:
         and not name.startswith("_")
         and value.__module__ == module.__name__
     }
+
+
+def _today():
+    return datetime.now(UTC).date()
 
 
 def _arguments(ctx: dict) -> dict[str, dict]:
@@ -53,6 +60,14 @@ def _arguments(ctx: dict) -> dict[str, dict]:
         source=source, external_id=external_id, kind=DocumentKind.LISTING, payload={"probe": 1}
     )
     return {
+        # archive -- the offsite export. `day` is today because the seeded corpus was
+        # written now; a span query on an empty table returns None rather than failing.
+        "archive.document_span": {},
+        "archive.job_span": {},
+        "archive.closure_span": {},
+        "archive.documents": {"day": _today(), "after": 0, "chunk": 10},
+        "archive.jobs": {"day": _today(), "after": 0, "chunk": 10},
+        "archive.closures": {"day": _today(), "after": 0, "chunk": 10},
         # admin
         "admin.enabled_tenants": {},
         "admin.list_tenants": {"source": source},
