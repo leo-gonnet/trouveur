@@ -59,6 +59,13 @@ class Settings(BaseSettings):
     embedding_read_dim: int = 384
     embed_batch_size: int = 128
 
+    # Sources to leave out of every sweep, comma separated. A source is retired by unsetting
+    # it here rather than by deleting its adapter: the adapter is months of accumulated knowledge
+    # about someone else's API, and the reason to stop sweeping is usually that the postings are
+    # not worth the request budget today -- which can change back. Tenant-scoped sources can also
+    # be emptied of tenants; this is the only way to stop one that is not.
+    disabled_sources: str = ""
+
     # How old a posting may be and still be recommended. A radar that surfaces a vacancy a
     # fortnight late has, for anything competitive, found nothing. Measured steady-state
     # discovery lag is under 1.3 days at the 99th percentile for every source that carries

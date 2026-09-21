@@ -391,3 +391,44 @@ def test_ashby_boards_may_be_named_after_a_domain():
     # The same string is still a mistake everywhere else.
     with pytest.raises(SourceError):
         clean_scope("greenhouse", "mistral.ai")
+
+
+# ---------- Disabling a source ----------
+
+def test_a_disabled_source_is_not_swept():
+    """Retiring a source must not mean deleting its adapter.
+
+    An adapter is months of accumulated knowledge about someone else's API, and the reason to
+    stop sweeping one is usually that its postings are not earning the request budget today --
+    which can change back.
+    """
+    from trouveur.sources.registry import build_sources
+
+    enabled = {source.name for source in build_sources(tenants={})}
+    assert "arbeitsagentur" in enabled
+
+    remaining = {source.name for source in build_sources(tenants={}, disabled=["arbeitsagentur"])}
+    assert "arbeitsagentur" not in remaining
+    assert remaining == enabled - {"arbeitsagentur"}
+
+
+def test_a_source_that_is_not_tenant_scoped_can_still_be_disabled():
+    """Arbeitsagentur has no tenant rows, so emptying its crawl set cannot switch it off."""
+    from trouveur.sources.registry import SOURCES
+
+    assert SOURCES["arbeitsagentur"].tenant_scoped is False
+
+
+def test_disabling_a_source_that_does_not_exist_is_refused():
+    """A typo would silently sweep a source the operator believes is off."""
+    from trouveur.sources.registry import SourceError, build_sources
+
+    with pytest.raises(SourceError, match="arbeitsagentr"):
+        build_sources(tenants={}, disabled=["arbeitsagentr"])
+
+
+def test_an_empty_disabled_setting_disables_nothing():
+    """`"".split(",")` is `[""]`, which must not be read as a source named empty string."""
+    from trouveur.sources.registry import build_sources
+
+    assert build_sources(tenants={}, disabled="".split(","))

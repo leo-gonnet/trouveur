@@ -12,7 +12,7 @@ a scope grammar, a delta window -- is added to the family.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
 from trouveur.models import CanonicalJob
@@ -173,7 +173,10 @@ def clean_scope(source: str, raw: str) -> str:
 
 
 def build_sources(
-    *, tenants: dict[str, list[str]] | None = None, only: str | None = None
+    *,
+    tenants: dict[str, list[str]] | None = None,
+    only: str | None = None,
+    disabled: Iterable[str] = (),
 ) -> list[Source]:
     """Assemble the sources for a run.
 
@@ -183,8 +186,21 @@ def build_sources(
 
     A tenant-scoped source with no tenants is dropped rather than run: sweeping it would make no
     requests, find nothing, and report a perfectly healthy empty sweep.
+
+    `disabled` is taken rather than read from settings, because assembling a run does no I/O and
+    reads no configuration -- that is what lets a sweep be exercised against a stub transport
+    with no database and no environment.
     """
     tenants = tenants or {}
+    disabled = {name.strip() for name in disabled if name.strip()}
+    unknown = disabled - set(SOURCES)
+    if unknown:
+        # A typo here silently sweeps a source the operator believes is off, which is the
+        # opposite of what they asked for and invisible until a bill or a rate limit arrives.
+        raise SourceError(
+            f"Cannot disable unknown source(s): {', '.join(sorted(unknown))}. "
+            f"Known sources are: {', '.join(sorted(SOURCES))}."
+        )
     if only is not None and only not in SOURCES:
         known = ", ".join(sorted(SOURCES))
         raise SourceError(f"Unknown source {only!r}; known sources are: {known}.")
@@ -192,6 +208,8 @@ def build_sources(
     sources: list[Source] = []
     for name, spec in SOURCES.items():
         if only is not None and name != only:
+            continue
+        if name in disabled:
             continue
         scopes = tenants.get(name, [])
         if spec.tenant_scoped and not scopes:
