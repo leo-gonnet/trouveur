@@ -29,3 +29,6 @@ build/
 *.swp
 *.log
 scratch/
+
+# Local model cache for the encoder bake-off (hundreds of MB, re-downloadable).
+.fastembed/

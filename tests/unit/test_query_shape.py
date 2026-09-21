@@ -137,14 +137,19 @@ def test_no_query_bundles_two_statements():
     the suite has none.
     """
     from trouveur.db.queries import jobs, match
+    from trouveur.ingest.embed.base import _COLUMNS, column_for
 
     statements = {
-        "dense": match._DENSE_SQL,
         "ef_search": match._EF_SEARCH_SQL,
         "lexical": match._LEXICAL_SQL,
         "search": match._SEARCH_SQL,
-        "write_embeddings": jobs._WRITE_EMBEDDINGS,
     }
+    # Both statements are templates now, one per vector space, so every width they can be
+    # rendered for is checked rather than the unrendered template that no database ever sees.
+    for dim in _COLUMNS:
+        column = column_for(dim)
+        statements[f"dense[{dim}]"] = match._dense_sql(column)
+        statements[f"write_embeddings[{dim}]"] = jobs._WRITE_EMBEDDINGS.format(column=column)
     for name, sql in statements.items():
         assert ";" not in sql.strip().rstrip(";"), f"{name} bundles more than one statement"
 

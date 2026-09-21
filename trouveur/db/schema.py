@@ -334,6 +334,8 @@ user_query_expansion = sa.Table(
     sa.Column("profile_version", sa.Integer, primary_key=True),
     sa.Column("expansion_version", sa.Integer, primary_key=True),
     sa.Column("queries", ARRAY(sa.Text), nullable=False, server_default="{}"),
+    # Synthetic adverts, kept apart from the phrases because only the dense arm can use them.
+    sa.Column("adverts", ARRAY(sa.Text), nullable=False, server_default="{}"),
     sa.Column("created_at", sa.DateTime(timezone=True), nullable=False,
               server_default=sa.func.now()),
 )

@@ -1,0 +1,27 @@
+corpus: 25,028 open postings, 100% with descriptions   k=200
+vectors: local-onnx-mpnet:sentence-transformers/paraphrase-multilingual-mpnet-base-v2:768
+
+baseline: not compared: the baseline was measured over 4,110 open postings and this run over 25,028. Recall across corpora of different size is not the same measurement; re-baseline before reading a delta.
+persona                 tier    lexical    dense    fused    baseline
+------------------------------------------------------------------------
+wing_nachhaltigkeit     T1          3/3      2/3      3/3   
+                        T2          0/2      2/2      2/2   
+                        T3          0/2      2/2      2/2   
+                        N        1 filtered   7 inversions
+
+backend_java            T1          3/3      3/3      3/3   
+                        T2          0/2      2/2      2/2   
+                        T3          0/2      2/2      2/2   
+                        N        2 filtered   5 inversions
+
+maschinenbau_zu_daten   T1          3/3      3/3      3/3   
+                        T2          0/2      2/2      2/2   
+                        T3          0/2      2/2      2/2   
+                        N        2 filtered   5 inversions
+
+overall recall   lexical 9/21   dense 20/21   fused 21/21
+recall@k (fused) k=10 7/21   k=25 12/21   k=50 18/21   k=100 21/21   k=200 21/21
+mean reciprocal rank   0.214
+
+recall regressed:
+  not compared: the baseline was measured over 4,110 open postings and this run over 25,028. Recall across corpora of different size is not the same measurement; re-baseline before reading a delta.

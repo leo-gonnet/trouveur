@@ -1,0 +1,30 @@
+corpus: 25,028 open postings, 100% with descriptions   k=200
+vectors: local-onnx:sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2:384
+
+baseline: not compared: the baseline was measured over 4,110 open postings and this run over 25,028. Recall across corpora of different size is not the same measurement; re-baseline before reading a delta.
+persona                 tier    lexical    dense    fused    baseline
+------------------------------------------------------------------------
+wing_nachhaltigkeit     T1          3/3      2/3      3/3   
+                        T2          0/2      2/2      1/2   
+                        T3          0/2      2/2      2/2   
+                        N        1 filtered   7 inversions
+                        missed: wing_t2_ressourcen
+
+backend_java            T1          3/3      3/3      3/3   
+                        T2          0/2      1/2      1/2   
+                        T3          0/2      2/2      2/2   
+                        N        1 filtered   4 inversions
+                        missed: java_t2b
+
+maschinenbau_zu_daten   T1          3/3      3/3      3/3   
+                        T2          0/2      1/2      1/2   
+                        T3          0/2      2/2      2/2   
+                        N        2 filtered   4 inversions
+                        missed: data_t2b
+
+overall recall   lexical 9/21   dense 18/21   fused 18/21
+recall@k (fused) k=10 5/21   k=25 10/21   k=50 12/21   k=100 17/21   k=200 18/21
+mean reciprocal rank   0.202
+
+recall regressed:
+  not compared: the baseline was measured over 4,110 open postings and this run over 25,028. Recall across corpora of different size is not the same measurement; re-baseline before reading a delta.

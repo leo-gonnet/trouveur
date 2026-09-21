@@ -288,7 +288,15 @@ async def derived_coverage(conn: AsyncConnection) -> sa.Row:
                     (SELECT count(*) FROM job j JOIN job_facet f ON f.job_id = j.id
                      WHERE j.closed_at IS NULL AND f.derive_version > 0) AS derived,
                     (SELECT count(*) FROM job_embedding) AS embedded,
-                    (SELECT count(DISTINCT embedding_version) FROM job_embedding) AS vector_spaces
+                    (SELECT count(DISTINCT embedding_version) FROM job_embedding) AS vector_spaces,
+                    -- Coverage per vector space, because a model change is backfilled over days
+                    -- and "how far along is it" is the question that decides when retrieval may
+                    -- start reading the new space. Guessing it from the embedded total hides the
+                    -- fact that the two spaces are covered to different depths.
+                    (SELECT count(*) FROM job_embedding e JOIN job j ON j.id = e.job_id
+                     WHERE j.closed_at IS NULL AND e.embedding IS NOT NULL) AS embedded_384,
+                    (SELECT count(*) FROM job_embedding e JOIN job j ON j.id = e.job_id
+                     WHERE j.closed_at IS NULL AND e.embedding_768 IS NOT NULL) AS embedded_768
                 """
             )
         )

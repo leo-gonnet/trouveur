@@ -7,6 +7,7 @@ retrieval return" and the number the harness reports is the number production pr
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -38,26 +39,41 @@ class Arms:
 
 
 async def retrieve_arms(
-    conn: AsyncConnection, profile: UserProfile, queries: list[str]
+    conn: AsyncConnection,
+    profile: UserProfile,
+    queries: list[str],
+    adverts: Sequence[str] = (),
 ) -> Arms:
-    """Run every retriever for every expanded query, without fusing.
+    """Run every retriever for the queries it can use, without fusing.
 
-    The per-query budget is the profile's limit spread across its queries, floored: a profile with
-    eight queries must not give each of them a slice so thin that a good match falls off the end.
+    Queries go to both arms. Adverts go to the dense arm ONLY, and this is not a tuning choice:
+    `websearch_to_tsquery` ANDs its terms, so a 69-word advert becomes a 65-term conjunction that
+    matches nothing. Measured over 224k postings, adverts through the lexical arm returned zero
+    rows on both the tsvector and the trigram path, every time -- sending them there spends half
+    the query budget on empty results.
+
+    Adverts are ADDED to the queries in the dense arm rather than replacing them. Substituting
+    them cost exactly the postings that share the profile's own vocabulary: one planted needle
+    fell from rank 31 to 341 when the user's words stopped being searched for directly.
+
+    The per-query budget is the retrieval limit spread across each arm's queries, floored: an arm
+    with many queries must not give each a slice so thin that a good match falls off the end.
     """
-    if not queries:
+    if not queries and not adverts:
         return Arms()
     provider = get_provider()
-    vectors = await provider.embed_queries(queries)
-    per_query = max(RETRIEVAL_LIMIT // len(queries), MIN_PER_QUERY)
+    dense_queries = [*queries, *adverts]
+    vectors = await provider.embed_queries(dense_queries) if dense_queries else []
+    dense_budget = max(RETRIEVAL_LIMIT // max(len(dense_queries), 1), MIN_PER_QUERY)
+    lexical_budget = max(RETRIEVAL_LIMIT // max(len(queries), 1), MIN_PER_QUERY)
 
     return Arms(
         dense=[
-            await match_q.dense_candidates(conn, profile, vector, per_query)
+            await match_q.dense_candidates(conn, profile, vector, dense_budget)
             for vector in vectors
         ],
         lexical=[
-            await match_q.lexical_candidates(conn, profile, query, per_query)
+            await match_q.lexical_candidates(conn, profile, query, lexical_budget)
             for query in queries
         ],
     )

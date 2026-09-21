@@ -47,6 +47,16 @@ class Settings(BaseSettings):
     # "local-onnx" needs `uv sync --extra embeddings`. "deterministic" produces reproducible but
     # meaningless vectors; it exists for tests and stamps its rows so its use is visible in data.
     embedding_provider: str = "local-onnx"
+    # Width of the embedding column, which a migration owns. It lives here so the provider guard
+    # can compare against what the database actually holds: a provider whose width differs must
+    # be rejected loudly, because a vector of the wrong shape is either an error at insert or,
+    # worse, a silently meaningless neighbour.
+    embedding_dim: int = 384
+    # Which vector space retrieval READS. Separate from the width above, which is what the embed
+    # worker WRITES, because a model change is a backfill that takes days: throughout it the
+    # worker fills the new space while the dense arm keeps serving from the old one. They differ
+    # only between the start of a backfill and the moment its coverage is complete.
+    embedding_read_dim: int = 384
     embed_batch_size: int = 128
 
     # Arbeitsagentur only ever exposes a delta, so nothing it returns can prove a posting is gone.

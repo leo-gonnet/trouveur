@@ -44,8 +44,30 @@ class LocalOnnxProvider:
                     "`uv sync --extra embeddings`, or set TROUVEUR_EMBEDDING_PROVIDER to another "
                     "provider."
                 ) from exc
-            self._model = TextEmbedding(model_name=MODEL)
+            model = TextEmbedding(model_name=self.model)
+            # Probed once, at load, not per batch: the cost is one embedding for the life of the
+            # process.
+            self._check(model)
+            self._model = model
         return self._model
+
+    @staticmethod
+    def _check(model: Any) -> None:
+        """Refuse a model build that cannot produce a usable vector.
+
+        Not paranoia: the ONNX build of jina-embeddings-v2-base-de returns all-NaN vectors
+        through this exact path. NaN does not raise -- it flows into the column, and cosine
+        turns the whole ANN index into noise that looks like a working search returning bad
+        results. One probe at load is cheaper than discovering that from a user's digest.
+        """
+        import math
+
+        probe = next(iter(model.embed(["Backend Engineer"])), None)
+        if probe is None or not all(math.isfinite(float(value)) for value in probe):
+            raise RuntimeError(
+                "This build of the embedding model returns non-finite vectors; refusing to "
+                "write them, because cosine over NaN is silent nonsense rather than an error."
+            )
 
     document_prefix = DOCUMENT_PREFIX
     query_prefix = QUERY_PREFIX
@@ -73,3 +95,21 @@ class LocalOnnxProvider:
                     f"halfvec({self.dim}); changing model width is a migration."
                 )
         return vectors
+
+
+class LocalOnnxMpnetProvider(LocalOnnxProvider):
+    """The same local path with a stronger multilingual model, at 768 dimensions.
+
+    Measured against the incumbent over an identical pool of 2,530 postings, the planted needles
+    whose adverts use different words for the same role went from 1 of 6 inside the top 50 to 4
+    of 6, and the adjacent-role ones from 1 of 6 to 5 of 6 -- a larger gain than any query-side
+    change produced, with the plain deterministic queries and no adverts at all.
+
+    It costs roughly two and a half times the compute per document, so switching is a backfill
+    measured in days on a four-core host, and it needs the 768-wide column: get_provider refuses
+    a width the column cannot hold rather than truncating to fit.
+    """
+
+    name = "local-onnx-mpnet"
+    model = "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
+    dim = 768

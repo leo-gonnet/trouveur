@@ -51,18 +51,31 @@
       <tr><td>Open postings</td><td class="num">{{ '{:,}'.format(coverage.open_jobs) }}</td></tr>
       <tr><td>With facets derived</td><td class="num">{{ '{:,}'.format(coverage.derived) }}</td></tr>
       <tr><td>With embeddings</td><td class="num">{{ '{:,}'.format(coverage.embedded) }}</td></tr>
+      <tr><td>&nbsp;&nbsp;in the 384 space</td>
+          <td class="num">{{ '{:,}'.format(coverage.embedded_384) }}</td></tr>
+      <tr><td>&nbsp;&nbsp;in the 768 space</td>
+          <td class="num">{{ '{:,}'.format(coverage.embedded_768) }}</td></tr>
       <tr>
         <td>Vector spaces in use</td>
         <td class="num">
           {% if coverage.vector_spaces > 1 %}
-            <span class="pill bad">{{ coverage.vector_spaces }}</span>
+            <span class="pill">{{ coverage.vector_spaces }}</span>
           {% else %}{{ coverage.vector_spaces }}{% endif %}
         </td>
       </tr>
     </table>
-    {% if coverage.vector_spaces > 1 %}
-      <p class="notice bad">More than one embedding version is present. Similarity across
-        different vector spaces returns confident nonsense — refill the embed queue to converge.</p>
+    {% if coverage.embedded_384 and coverage.embedded_768 %}
+      {# Two spaces at once is what a model change looks like while it is being backfilled, so
+         this reports progress rather than an alarm. It only becomes a problem if it never
+         finishes, or if retrieval is pointed at a space before its coverage is complete. #}
+      <p class="notice">A second vector space is being filled:
+        {{ '{:,}'.format(coverage.embedded_768) }} of {{ '{:,}'.format(coverage.open_jobs) }}
+        open postings ({{ (100 * coverage.embedded_768 / coverage.open_jobs) | round(1) }}%).
+        Retrieval keeps reading the space it was pointed at until this is complete.</p>
+    {% elif coverage.vector_spaces > 1 %}
+      <p class="notice bad">More than one embedding version is present with no backfill in
+        progress. Similarity across different vector spaces returns confident nonsense — refill
+        the embed queue to converge.</p>
     {% endif %}
   </section>
 
