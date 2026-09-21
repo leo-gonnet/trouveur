@@ -271,6 +271,17 @@ form.inline { display: inline; }
          border-top: 1px solid var(--border); }
 .description { white-space: pre-wrap; line-height: 1.65; max-width: 80ch; }
 
+/* ---------- Editions ---------- */
+/* Recommendations are published one day at a time. This is how a reader moves between days;
+   the middle select carries the whole run of them so navigating back years is not 700 clicks. */
+.editions { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3);
+            padding: var(--space-3) 0; margin-bottom: var(--space-3);
+            border-bottom: 1px solid var(--border); }
+.editions select { flex: 1; max-width: 26rem; }
+.editions .muted { color: var(--fg-muted); }
+/* The age of the advert, not of the edition: the two differ and the card has to say so. */
+.age { white-space: nowrap; }
+
 /* ---------- Login ---------- */
 .login { max-width: 24rem; margin: 12vh auto var(--space-7); display: grid; gap: var(--space-4); padding: var(--space-6);
          background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }

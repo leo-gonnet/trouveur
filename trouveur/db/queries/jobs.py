@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from datetime import datetime
 
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from trouveur.db.queries import freshness
 from trouveur.db.schema import job, job_facet
 
 
@@ -138,3 +140,50 @@ async def detail_targets(conn: AsyncConnection, job_ids: Sequence[int]) -> list[
             sa.select(job.c.id, job.c.source, job.c.external_id).where(job.c.id.in_(list(job_ids)))
         )
     )
+
+
+async def fresh_subset(
+    conn: AsyncConnection, job_ids: Sequence[int], fresh_since: datetime
+) -> list[int]:
+    """Narrow a set of postings to those still inside the freshness horizon.
+
+    Used before queueing embedding work. A source that lists its whole backlog -- Greenhouse
+    boards carry roles open for months -- would otherwise have every one of them embedded at the
+    moment of discovery and pruned again on the next sweep. The vector is never read either way;
+    only the CPU is real.
+    """
+    if not job_ids:
+        return []
+    rows = await conn.execute(
+        sa.select(job.c.id).where(job.c.id.in_(list(job_ids)), freshness.clause(fresh_since))
+    )
+    return [row.id for row in rows]
+
+
+# Closing a posting already drops its vector, keeping job_embedding an index of the live set.
+# This extends the same invariant along the other axis the recommender cares about: the set is
+# open AND recent, so the ANN index stays proportional to what a user could actually apply to
+# rather than to everything that has ever been open.
+#
+# Batched, because an unbounded DELETE on a table under an HNSW index is a long lock on the one
+# table retrieval cannot do without.
+_PRUNE_STALE = """
+WITH stale AS (
+    SELECT e.job_id
+    FROM job_embedding e
+    JOIN job j ON j.id = e.job_id
+    WHERE COALESCE(j.posted_at, j.first_seen_at) <= :fresh_since
+    LIMIT :chunk
+)
+DELETE FROM job_embedding WHERE job_id IN (SELECT job_id FROM stale)
+"""
+
+
+async def prune_stale_embeddings(
+    conn: AsyncConnection, fresh_since: datetime, *, chunk: int = 5000
+) -> int:
+    """Drop one chunk of vectors for postings that have aged out. Returns rows removed."""
+    result = await conn.execute(
+        sa.text(_PRUNE_STALE), {"fresh_since": fresh_since, "chunk": chunk}
+    )
+    return result.rowcount or 0

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from datetime import datetime
 
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -43,6 +44,8 @@ async def retrieve_arms(
     profile: UserProfile,
     queries: list[str],
     adverts: Sequence[str] = (),
+    *,
+    fresh_since: datetime,
 ) -> Arms:
     """Run every retriever for the queries it can use, without fusing.
 
@@ -58,6 +61,11 @@ async def retrieve_arms(
 
     The per-query budget is the retrieval limit spread across each arm's queries, floored: an arm
     with many queries must not give each a slice so thin that a good match falls off the end.
+
+    `fresh_since` bounds the corpus by age and has no default on purpose. Production reads it
+    from the horizon setting; the evaluation harness plants needles with fixed dates and passes
+    its own, so that a retrieval number stays a retrieval number and does not quietly become a
+    measurement of the freshness policy instead.
     """
     if not queries and not adverts:
         return Arms()
@@ -69,11 +77,11 @@ async def retrieve_arms(
 
     return Arms(
         dense=[
-            await match_q.dense_candidates(conn, profile, vector, dense_budget)
+            await match_q.dense_candidates(conn, profile, vector, dense_budget, fresh_since)
             for vector in vectors
         ],
         lexical=[
-            await match_q.lexical_candidates(conn, profile, query, lexical_budget)
+            await match_q.lexical_candidates(conn, profile, query, lexical_budget, fresh_since)
             for query in queries
         ],
     )

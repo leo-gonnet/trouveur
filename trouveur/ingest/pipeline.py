@@ -18,7 +18,9 @@ from datetime import timedelta
 from trouveur.config import Settings, get_settings
 from trouveur.db.engine import connect
 from trouveur.db.queries import admin as admin_q
+from trouveur.db.queries import freshness
 from trouveur.db.queries import ingest as q
+from trouveur.db.queries import jobs as jobs_q
 from trouveur.ingest.persist import persist
 from trouveur.models import RawDocument
 from trouveur.sources import build_sources
@@ -77,6 +79,7 @@ class IngestReport:
     # Sources never reached because the run was cancelled. Named rather than counted so the
     # difference between "found nothing" and "never asked" survives into the report.
     skipped: list[str] = field(default_factory=list)
+    pruned: int = 0
 
     @property
     def cancelled(self) -> bool:
@@ -90,6 +93,8 @@ class IngestReport:
                 f"{name}[{state}] docs={report.documents} new/changed={report.changed} "
                 f"closed={report.closed}"
             )
+        if self.pruned:
+            parts.append(f"pruned {self.pruned} aged-out vector(s)")
         if self.skipped:
             parts.append(f"cancelled before {', '.join(self.skipped)}")
         return " | ".join(parts) or "nothing ran"
@@ -108,9 +113,16 @@ async def run(
     sources = build_sources(tenants=tenants, only=only_source)
 
     async with PoliteClient() as client:
-        return await sweep_sources(
+        report = await sweep_sources(
             client, sources, settings=settings, backfill=backfill, control=control
         )
+
+    # Here rather than in sweep_sources, which stays pure orchestration over a list of sources so
+    # the evaluation harness can reuse it. Unconditional, including after a cancelled run: unlike
+    # retirement, which needs a sweep to have seen a scope in full before absence means anything,
+    # age is known without asking any source.
+    report.pruned = await _prune_aged_out(settings)
+    return report
 
 
 async def sweep_sources(
@@ -146,6 +158,23 @@ async def sweep_sources(
 
     log.info("ingest complete: %s", report.summary())
     return report
+
+
+async def _prune_aged_out(settings: Settings) -> int:
+    """Drop vectors for postings past the horizon, in chunks, until none are left.
+
+    `job_embedding` holds postings that are open AND recent. Closing already drops a vector; this
+    is the other axis, and it is what keeps the ANN index proportional to what a user could
+    actually still apply to rather than to everything that has ever been open.
+    """
+    cutoff = freshness.fresh_since(settings.retrieval_horizon_days)
+    total = 0
+    while True:
+        async with connect() as conn:
+            removed = await jobs_q.prune_stale_embeddings(conn, cutoff)
+        total += removed
+        if removed == 0:
+            return total
 
 
 async def _sweep_source(

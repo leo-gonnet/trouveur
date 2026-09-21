@@ -17,6 +17,11 @@ collect_ignore_glob = [] if TEST_DB else ["test_*.py"]
 if TEST_DB:
     os.environ["DATABASE_URL"] = TEST_DB
     os.environ.setdefault("EMBEDDING_PROVIDER", "deterministic")
+    # Fixtures carry fixed publication dates and only get older. Left at the production horizon,
+    # the seeded corpus would fall out of the embeddable set and most of these tests would pass
+    # over nothing at all -- which is how a corpus that embeds no rows looks like a corpus that
+    # embeds every row. The horizon is tested on its own terms in test_freshness_horizon.py.
+    os.environ.setdefault("RETRIEVAL_HORIZON_DAYS", "36500")
     os.environ.setdefault("ENCRYPTION_KEY", "integration-test-encryption-key")
     # The session cookie is Secure in production, and an HTTP client will not send a Secure cookie
     # back over plain http. Opting out here rather than weakening the default, which is the

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Sequence
+from datetime import date, datetime
 from functools import lru_cache
 from typing import Any
 
@@ -11,7 +12,12 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from trouveur.db.schema import llm_score_cache, user_job_match, user_query_expansion
+from trouveur.db.queries import freshness
+from trouveur.db.schema import (
+    llm_score_cache,
+    user_job_match,
+    user_query_expansion,
+)
 
 # pgvector applies a WHERE clause AFTER the index walk, so a filtered ANN query can return far
 # fewer rows than asked for -- silently, as a short result rather than an error. Over-fetching and
@@ -20,8 +26,9 @@ from trouveur.db.schema import llm_score_cache, user_job_match, user_query_expan
 _DENSE_OVERSAMPLE = 4
 _EF_SEARCH = 200
 
-_HARD_FILTERS = """
+_HARD_FILTERS = f"""
     j.closed_at IS NULL
+    AND {freshness.sql("j")}
     AND (cardinality(CAST(:countries AS text[])) = 0 OR f.countries && CAST(:countries AS text[]))
     AND (cardinality(CAST(:work_modes AS text[])) = 0
          OR f.work_mode::text = ANY(CAST(:work_modes AS text[])))
@@ -79,8 +86,9 @@ LIMIT :limit
 """
 
 
-def _filter_params(profile: Any) -> dict[str, Any]:
+def _filter_params(profile: Any, fresh_since: datetime) -> dict[str, Any]:
     return {
+        "fresh_since": fresh_since,
         "countries": list(profile.countries or []),
         "work_modes": [str(mode) for mode in (profile.work_modes or [])],
         "seniorities": [str(level) for level in (profile.seniorities or [])],
@@ -90,11 +98,15 @@ def _filter_params(profile: Any) -> dict[str, Any]:
 
 
 async def dense_candidates(
-    conn: AsyncConnection, profile: Any, vector: list[float], limit: int
+    conn: AsyncConnection,
+    profile: Any,
+    vector: list[float],
+    limit: int,
+    fresh_since: datetime,
 ) -> list[int]:
     """Nearest neighbours to one query vector, in rank order."""
     params = {
-        **_filter_params(profile),
+        **_filter_params(profile, fresh_since),
         "vector": "[" + ",".join(f"{value:.6f}" for value in vector) + "]",
         "limit": limit * _DENSE_OVERSAMPLE,
     }
@@ -109,10 +121,11 @@ async def dense_candidates(
 
 
 async def lexical_candidates(
-    conn: AsyncConnection, profile: Any, query: str, limit: int
+    conn: AsyncConnection, profile: Any, query: str, limit: int, fresh_since: datetime
 ) -> list[int]:
     rows = await conn.execute(
-        sa.text(_LEXICAL_SQL), {**_filter_params(profile), "query": query, "limit": limit}
+        sa.text(_LEXICAL_SQL),
+        {**_filter_params(profile, fresh_since), "query": query, "limit": limit},
     )
     return [row.job_id for row in rows]
 
@@ -277,42 +290,86 @@ async def apply_scores(conn: AsyncConnection, user_id: int, rows: Sequence[dict]
     )
 
 
-async def recommendations(
-    conn: AsyncConnection, user_id: int, limit: int = 1000
-) -> list[sa.Row]:
-    """Everything the reranker scored for this user, best first.
+# An edition is one day's recommendations, and the day it is keyed on is `scored_at` -- when a
+# posting became a recommendation for this user -- not `posted_at`.
+#
+# Keying on publication date would be the obvious reading of "today's jobs" and it silently loses
+# postings. Discovery lag is under 1.3 days at p99 for the sources that carry volume, but
+# Greenhouse's p90 is 146 days: a posting published in April and found in September would belong
+# to an edition that was published five months ago, so it would appear in none at all.
+#
+# `scored_at` also makes an edition self-healing. Retrieval is cumulative and rerank_limit caps
+# how much is scored per run, so a posting retrieved on Monday at rank 400 may only be scored on
+# Friday -- and it is a recommendation on Friday, which is the edition it belongs in. A runner
+# that missed a day produces no hole for the same reason.
+_EDITION_COLUMNS = """
+    j.id, j.public_id, j.url, j.title, j.company, j.posted_at, j.source,
+    j.closed_at, j.locations, f.countries, f.cities,
+    f.work_mode::text AS work_mode,
+    f.salary_min_eur_year, f.salary_max_eur_year, f.skills,
+    m.llm_score, m.llm_reason, m.llm_red_flags, m.state::text AS state
+"""
 
-    There is deliberately no score cut. A threshold hid good postings behind a number the user had
-    to guess, and guessing it low enough to see them made it meaningless; how much gets scored is
-    already decided by `rerank_limit`, which is the knob that costs money. So the page shows what
-    was paid for, ordered by the score, and the reader draws their own line.
+_EDITION_FILTER = """
+    m.user_id = :user_id
+    AND m.llm_score IS NOT NULL
+    AND m.scored_at IS NOT NULL
+    AND m.state <> 'dismissed'
+    AND j.closed_at IS NULL
+"""
 
-    Still not a filtered view of the corpus: this is the set that was scored.
-    Search is where everything else stays visible -- keep the two apart, and keep the distinction
-    here in the query rather than in a template, where the next page to be written will quietly
-    get it wrong.
+
+async def editions(conn: AsyncConnection, user_id: int) -> list[sa.Row]:
+    """Every day this user has recommendations for, newest first.
+
+    Carries the profile version each edition was scored under, because an edition is a one-time
+    publication: editing a profile does not rewrite what Monday recommended, and a reader looking
+    at Monday is entitled to know it was produced by a profile they have since changed.
     """
     return list(
         await conn.execute(
             sa.text(
+                f"""
+                SELECT m.scored_at::date AS day,
+                       count(*) AS postings,
+                       max(m.llm_score) AS best_score,
+                       min(m.profile_version) AS profile_version,
+                       max(m.profile_version) AS profile_version_max
+                FROM user_job_match m
+                JOIN job j ON j.id = m.job_id
+                WHERE {_EDITION_FILTER}
+                GROUP BY 1
+                ORDER BY 1 DESC
                 """
-                SELECT j.id, j.public_id, j.url, j.title, j.company, j.posted_at, j.source,
-                       j.closed_at, j.locations, f.countries, f.cities,
-                       f.work_mode::text AS work_mode,
-                       f.salary_min_eur_year, f.salary_max_eur_year, f.skills,
-                       m.llm_score, m.llm_reason, m.llm_red_flags, m.state::text AS state
+            ),
+            {"user_id": user_id},
+        )
+    )
+
+
+async def edition(
+    conn: AsyncConnection, user_id: int, day: date, limit: int = 1000
+) -> list[sa.Row]:
+    """One day's recommendations, best first.
+
+    No score cut inside an edition, for the same reason the page never had one: a threshold hid
+    good postings behind a number the reader had to guess. The day is the cut.
+    """
+    return list(
+        await conn.execute(
+            sa.text(
+                f"""
+                SELECT {_EDITION_COLUMNS}
                 FROM user_job_match m
                 JOIN job j ON j.id = m.job_id
                 JOIN job_facet f ON f.job_id = j.id
-                WHERE m.user_id = :user_id
-                  AND m.llm_score IS NOT NULL
-                  AND m.state <> 'dismissed'
-                  AND j.closed_at IS NULL
+                WHERE {_EDITION_FILTER}
+                  AND m.scored_at::date = CAST(:day AS date)
                 ORDER BY m.llm_score DESC, j.posted_at DESC NULLS LAST
                 LIMIT :limit
                 """
             ),
-            {"user_id": user_id, "limit": limit},
+            {"user_id": user_id, "day": day, "limit": limit},
         )
     )
 

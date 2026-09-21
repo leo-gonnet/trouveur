@@ -12,6 +12,10 @@ from decimal import Decimal
 
 from tests.integration.seed import seed_corpus, seed_user
 
+# The integration conftest neutralises the horizon so fixtures with fixed dates stay usable.
+# Where a test is about retrieval rather than about freshness, it says so by passing this.
+_ANY_AGE = datetime(2000, 1, 1, tzinfo=UTC)
+
 
 async def test_german_search_finds_a_compound_and_folds_umlauts(
     clean_db, gh_board, aa_listing, aa_detail
@@ -30,8 +34,8 @@ async def test_german_search_finds_a_compound_and_folds_umlauts(
     user_id, profile = await seed_user(title="Process Engineer")
 
     async with connect() as conn:
-        assert await mq.lexical_candidates(conn, profile, "ingenieur", 10)
-        assert await mq.lexical_candidates(conn, profile, "munchen", 10)
+        assert await mq.lexical_candidates(conn, profile, "ingenieur", 10, _ANY_AGE)
+        assert await mq.lexical_candidates(conn, profile, "munchen", 10, _ANY_AGE)
         assert await mq.search_jobs(conn, user_id, query="ingenieur")
         assert await mq.search_jobs(conn, user_id, query="munchen")
 
@@ -47,7 +51,7 @@ async def test_dense_retrieval_runs(clean_db, gh_board, aa_listing, aa_detail):
     vector = (await get_provider().embed_queries(["Prozessoptimierung"]))[0]
 
     async with connect() as conn:
-        assert await mq.dense_candidates(conn, profile, vector, 10)
+        assert await mq.dense_candidates(conn, profile, vector, 10, _ANY_AGE)
 
 
 async def test_detail_arrival_changes_the_hash_and_a_replay_changes_nothing(
@@ -155,7 +159,11 @@ async def test_scores_are_cached_and_spend_accumulates(
             conn, user_id, tokens_in=100, tokens_out=20, cost_usd=Decimal("0.02")
         )
         assert total == Decimal("0.03")
-        assert len(await mq.recommendations(conn, user_id, 70)) == len(to_score)
+        # Everything scored in one call lands in one edition, since scored_at is set by the
+        # same statement that writes the score.
+        days = await mq.editions(conn, user_id)
+        assert len(days) == 1
+        assert len(await mq.edition(conn, user_id, days[0].day, 70)) == len(to_score)
 
 
 async def test_bumping_a_version_refills_the_queue(clean_db, gh_board, aa_listing, aa_detail):

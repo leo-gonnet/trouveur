@@ -23,6 +23,8 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from trouveur.config import get_settings
+from trouveur.db.queries import freshness
 from trouveur.db.schema import job, job_embedding, job_facet, work_item
 
 log = logging.getLogger(__name__)
@@ -147,7 +149,9 @@ async def release_stale(conn: AsyncConnection, older_than: timedelta = STALE_CLA
     return result.rowcount or 0
 
 
-def _stale_query(kind: WorkKind, target_version: str, after_job_id: int, limit: int):
+def _stale_query(
+    kind: WorkKind, target_version: str, after_job_id: int, limit: int, fresh_since: datetime
+):
     """Rows whose derived output is below `target_version`, in keyset order.
 
     Keyset, not OFFSET: this is the query that runs over the whole corpus after a version bump,
@@ -179,11 +183,15 @@ def _stale_query(kind: WorkKind, target_version: str, after_job_id: int, limit: 
             .limit(limit)
         )
     # Embeddings exist for open postings only, so a missing row is work and a closed job is not.
+    # And for recent ones: without the horizon here, every posting the pruner drops for being
+    # stale is immediately found again by this query and re-embedded -- a loop that never
+    # terminates and never produces a vector anyone reads.
     return (
         sa.select(job.c.id.label("job_id"))
         .select_from(job.outerjoin(job_embedding, job_embedding.c.job_id == job.c.id))
         .where(
             job.c.closed_at.is_(None),
+            freshness.clause(fresh_since),
             job.c.id > after_job_id,
             sa.or_(
                 job_embedding.c.job_id.is_(None),
@@ -209,7 +217,12 @@ async def refill(
     over millions of rows must be something you can interrupt without a second thought, not a job
     you are afraid to touch once it has started.
     """
-    rows = list(await conn.execute(_stale_query(kind, target_version, after_job_id, chunk_size)))
+    fresh_since = freshness.fresh_since(get_settings().retrieval_horizon_days)
+    rows = list(
+        await conn.execute(
+            _stale_query(kind, target_version, after_job_id, chunk_size, fresh_since)
+        )
+    )
     if not rows:
         return 0, None
     job_ids = [row.job_id for row in rows]

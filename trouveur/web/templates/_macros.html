@@ -42,7 +42,8 @@
       {{ places(job) }} ·
       {% if job.work_mode and job.work_mode != 'unknown' %}{{ job.work_mode }} · {% endif %}
       {{ salary(job) }} ·
-      {{ job.source }}
+      {{ job.source }} ·
+      <span class="age">{{ job.posted_at | posted_age }}</span>
       {% if job.closed_at %} · <span class="pill bad">closed</span>{% endif %}
     </p>
     {% if job.llm_reason %}<p class="reason">{{ job.llm_reason }}</p>{% endif %}

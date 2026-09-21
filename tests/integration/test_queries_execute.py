@@ -47,6 +47,11 @@ def _today():
     return datetime.now(UTC).date()
 
 
+def _cutoff():
+    """Permissive, like the horizon the integration conftest sets: these check SQL runs."""
+    return datetime(2000, 1, 1, tzinfo=UTC)
+
+
 def _arguments(ctx: dict) -> dict[str, dict]:
     """Plausible arguments for every query, keyed `module.function`.
 
@@ -80,7 +85,7 @@ def _arguments(ctx: dict) -> dict[str, dict]:
         "admin.recent_sweeps": {},
         "admin.source_health": {},
         "admin.corpus_overview": {},
-        "admin.derived_coverage": {},
+        "admin.derived_coverage": {"fresh_since": _cutoff()},
         "admin.description_coverage": {},
         "admin.ensure_schedule": {},
         "admin.get_schedule": {},
@@ -133,11 +138,19 @@ def _arguments(ctx: dict) -> dict[str, dict]:
         "jobs.load_for_dedup": {"job_ids": [job_id]},
         "jobs.write_dedup_markers": {"rows": [(job_id, b"probe-group")], "dedup_version": 1},
         "jobs.detail_targets": {"job_ids": [job_id]},
+        "jobs.fresh_subset": {"job_ids": [job_id], "fresh_since": _cutoff()},
+        "jobs.prune_stale_embeddings": {"fresh_since": _cutoff()},
         # match
         "match.dense_candidates": {
             "profile": ctx["profile"], "vector": [0.01] * 384, "limit": 5,
+            "fresh_since": _cutoff(),
         },
-        "match.lexical_candidates": {"profile": ctx["profile"], "query": "ingenieur", "limit": 5},
+        "match.lexical_candidates": {
+            "profile": ctx["profile"], "query": "ingenieur", "limit": 5,
+            "fresh_since": _cutoff(),
+        },
+        "match.editions": {"user_id": user_id},
+        "match.edition": {"user_id": user_id, "day": _today(), "limit": 5},
         "match.upsert_matches": {"rows": [ctx["match_row"]]},
         "match.pending_rerank": {"user_id": user_id, "profile_version": 1, "limit": 5},
         "match.count_pending_rerank": {"user_id": user_id, "profile_version": 1},
@@ -147,7 +160,6 @@ def _arguments(ctx: dict) -> dict[str, dict]:
         },
         "match.put_cached_scores": {"rows": [ctx["cache_row"]]},
         "match.apply_scores": {"user_id": user_id, "rows": [ctx["score_row"]]},
-        "match.recommendations": {"user_id": user_id},
         "match.search_jobs": {"user_id": user_id, "query": "ingenieur", "country": "DE"},
         "match.get_job": {"user_id": user_id, "public_id": ctx["public_id"]},
         "match.set_state": {"user_id": user_id, "job_id": job_id, "state": "saved"},
