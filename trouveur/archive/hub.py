@@ -90,18 +90,23 @@ class HubDestination:
         self._api.create_repo(
             repo_id, repo_type="dataset", private=True, exist_ok=True
         )
-
-    def existing(self) -> set[str]:
-        files = set(self._api.list_repo_files(self.repo_id, repo_type="dataset"))
-        if "README.md" not in files:
+        # Written once, on the repository's first night. Here rather than in `existing()`,
+        # which callers are entitled to assume does not write anything.
+        if not self._api.file_exists(repo_id, "README.md", repo_type="dataset"):
             self._api.upload_file(
                 path_or_fileobj=CARD.encode(),
                 path_in_repo="README.md",
-                repo_id=self.repo_id,
+                repo_id=repo_id,
                 repo_type="dataset",
                 commit_message="describe the archive",
             )
-        return {name for name in files if name.endswith(".parquet")}
+
+    def existing(self) -> set[str]:
+        return {
+            name
+            for name in self._api.list_repo_files(self.repo_id, repo_type="dataset")
+            if name.endswith(".parquet")
+        }
 
     def put(self, local: Path, path_in_repo: str, message: str) -> None:
         self._api.upload_file(
