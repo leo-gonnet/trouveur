@@ -14,7 +14,7 @@ from __future__ import annotations
 import importlib.metadata
 import logging
 from collections.abc import Iterable
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Annotated
@@ -57,6 +57,26 @@ app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")
 templates = Jinja2Templates(directory=BASE / "templates")
 templates.env.undefined = StrictUndefined
 templates.env.globals["version"] = importlib.metadata.version("trouveur")
+
+
+def _posted_age(value) -> str:
+    """How old a posting is, in words.
+
+    On every card, because an edition is keyed on the day a posting became a recommendation and
+    not on the day it was published -- the two differ, and a reader who assumes otherwise will
+    eventually be surprised by a three-day-old advert in today's edition.
+    """
+    if value is None:
+        return "date not stated"
+    days = (datetime.now(UTC) - value).days
+    if days <= 0:
+        return "posted today"
+    if days == 1:
+        return "posted yesterday"
+    return f"posted {days} days ago"
+
+
+templates.env.filters["posted_age"] = _posted_age
 
 
 def _lines(raw: str) -> list[str]:
@@ -158,28 +178,67 @@ async def logout():
 
 
 @app.get("/recommendations", response_class=HTMLResponse)
-async def recommendations(request: Request):
+async def recommendations(request: Request, edition: str = ""):
+    """One day's recommendations. The latest by default; older ones stay reachable.
+
+    A day, rather than a single growing list, because the list had no time axis: a strong posting
+    from three weeks ago outranked everything that arrived this morning and stayed pinned there
+    until it was dismissed. `?edition=` is a date, and an edition is immutable -- it is what was
+    recommended that day, under the profile in force that day.
+    """
     session = request.state.session
     async with connect() as conn:
         profile_row = await users_q.get_profile(conn, session["uid"])
         # Everything that was reranked is shown, so the page is exactly as long as the user's
         # rerank budget -- the one number they already set, rather than a second one to tune.
         limit = profile_row.rerank_limit if profile_row else 150
-        jobs = await match_q.recommendations(conn, session["uid"], limit)
+        available = await match_q.editions(conn, session["uid"])
+        chosen = _chosen_edition(edition, available)
+        jobs = (
+            await match_q.edition(conn, session["uid"], chosen.day, limit) if chosen else []
+        )
         pending_run = await admin_q.pending_match_run(conn, session["uid"])
         last_match = await admin_q.last_match_for_user(conn, session["uid"])
+    days = [row.day for row in available]
+    index = days.index(chosen.day) if chosen else -1
     return templates.TemplateResponse(
         request,
         "recommendations.html",
         {
             "active": "recommendations",
             "jobs": jobs,
+            "editions": available,
+            "edition": chosen,
+            # Editions are newest first, so "older" is the next index along.
+            "older": days[index + 1] if 0 <= index < len(days) - 1 else None,
+            "newer": days[index - 1] if index > 0 else None,
+            "is_latest": index == 0,
             "paused": limit == 0,
             "pending_run": pending_run,
             "last_match": last_match,
             "username": session["u"],
+            "today": datetime.now(UTC).date(),
         },
     )
+
+
+def _chosen_edition(requested: str, available: list):
+    """The requested edition, or the latest. An unknown date falls back rather than 404s.
+
+    A stale bookmark is not an error worth a page of its own: the useful answer to "that edition
+    is gone" is the current one.
+    """
+    if not available:
+        return None
+    if requested:
+        try:
+            wanted = date.fromisoformat(requested)
+        except ValueError:
+            return available[0]
+        for row in available:
+            if row.day == wanted:
+                return row
+    return available[0]
 
 
 @app.post("/recommendations/run")

@@ -12,7 +12,7 @@ import re
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
-from trouveur.db.queries.match import _LEXICAL_SQL, _SEARCH_SQL, recommendations
+from trouveur.db.queries.match import _LEXICAL_SQL, _SEARCH_SQL, edition, editions
 
 DIALECT = postgresql.asyncpg.dialect()
 
@@ -66,27 +66,48 @@ def test_search_left_joins_match_state_so_unmatched_jobs_still_appear():
     assert re.search(r"LEFT JOIN job_facet", _SEARCH_SQL)
 
 
-def test_recommendations_shows_everything_that_was_scored():
-    """Still narrower than Search -- scored only -- but with no cut-off inside that.
+def test_an_edition_shows_everything_that_was_scored_that_day():
+    """Still narrower than Search -- scored only -- but with no cut-off inside the day.
 
     A threshold hid postings the user had already paid to have scored, behind a number they had
-    to guess. Re-adding one would do it again, silently.
+    to guess. The day is the cut; re-adding a score one would do it again, silently.
     """
     import inspect
 
-    body = inspect.getsource(recommendations)
-    assert "m.llm_score IS NOT NULL" in body
-    # Closed postings must never be recommended, whatever they once scored.
-    assert "j.closed_at IS NULL" in body
+    body = inspect.getsource(edition)
+    assert "m.llm_score IS NOT NULL" in body or "_EDITION_FILTER" in body
     assert ":threshold" not in body
     assert "llm_score >=" not in body
 
 
-def test_recommendations_are_ordered_by_score_descending():
-    """The page is a ranking now, not a filtered set, so the order is the whole product."""
+def test_an_edition_is_keyed_on_when_a_posting_became_a_recommendation():
+    """Not on when it was published.
+
+    Keying on posted_at loses postings outright: Greenhouse's p90 discovery lag is 146 days, so
+    a posting published in April and found in September would belong to an edition published
+    five months earlier -- and would therefore appear in none at all.
+    """
     import inspect
 
-    assert re.search(r"ORDER BY\s+m\.llm_score DESC", inspect.getsource(recommendations))
+    for query in (edition, editions):
+        body = inspect.getsource(query)
+        assert "m.scored_at" in body, f"{query.__name__} does not key on scored_at"
+        assert not re.search(r"WHERE[^;]*j\.posted_at::date", body), (
+            f"{query.__name__} buckets by publication date"
+        )
+
+
+def test_a_closed_posting_is_never_recommended_whatever_it_once_scored():
+    from trouveur.db.queries.match import _EDITION_FILTER
+
+    assert "j.closed_at IS NULL" in _EDITION_FILTER
+
+
+def test_an_edition_is_ordered_by_score_descending():
+    """Within a day the page is a ranking, and the order is the whole product."""
+    import inspect
+
+    assert re.search(r"ORDER BY\s+m\.llm_score DESC", inspect.getsource(edition))
 
 
 def test_the_digest_is_bounded_by_count_and_not_by_score():

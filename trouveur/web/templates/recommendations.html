@@ -3,10 +3,22 @@
 {% block content %}
 <div class="page-head">
   <h1>Recommendations</h1>
-  <p class="hint">
-    Everything that was scored, best first. How many there are is set in
-    <a href="/settings">Settings</a>; <a href="/search">Search</a> shows everything collected.
-  </p>
+  {% if edition %}
+    <p class="hint">
+      {# The distinction the whole page rests on: an edition is what became a recommendation
+         that day, not what was published that day. The age on each card is the other half. #}
+      Postings that became recommendations for you on
+      <strong>{{ edition.day.strftime('%A %d %B %Y') }}</strong>{% if is_latest %}
+      <span class="pill live">latest edition</span>{% endif %}.
+      Best first. An advert may have been published earlier — each card says how old it is.
+    </p>
+    <p class="hint">
+      {{ edition.postings }} posting{{ '' if edition.postings == 1 else 's' }}, scored under
+      profile v{{ edition.profile_version }}{% if edition.profile_version_max != edition.profile_version %}–v{{ edition.profile_version_max }}{% endif %}.
+      An edition is published once: changing your profile shapes the next one and leaves this one
+      as it was.
+    </p>
+  {% endif %}
   <p class="hint">
     {% if last_match %}
       {%- set r = last_match.match %}
@@ -35,16 +47,37 @@
   <a href="/settings">Settings</a>. Nothing is spent and this page stays as it is.</p>
 {% endif %}
 
+{% if editions %}
+<nav class="editions">
+  {% if newer %}<a href="/recommendations?edition={{ newer }}">← {{ newer.strftime('%d %b') }}</a>
+  {% else %}<span class="muted">← newer</span>{% endif %}
+  <select onchange="location = '/recommendations?edition=' + this.value">
+    {% for row in editions %}
+      <option value="{{ row.day }}" {% if edition and row.day == edition.day %}selected{% endif %}>
+        {{ row.day.strftime('%a %d %b %Y') }} — {{ row.postings }} posting{{ '' if row.postings == 1 else 's' }}
+      </option>
+    {% endfor %}
+  </select>
+  {% if older %}<a href="/recommendations?edition={{ older }}">{{ older.strftime('%d %b') }} →</a>
+  {% else %}<span class="muted">older →</span>{% endif %}
+</nav>
+{% endif %}
+
 {% if jobs %}
   <div class="results">
     {% for job in jobs %}{{ m.job_card(job) }}{% endfor %}
   </div>
+{% elif editions %}
+<p class="empty">
+  Nothing in this edition. Nothing is lost — pick another day above, or
+  <a href="/search">Search</a> shows everything collected.
+</p>
 {% else %}
 <p class="empty">
-  Nothing scored yet for your current profile. Matching runs after every scan, or now with the
-  button above. Retrieval is free and runs without a key; scoring needs an
-  OpenRouter key in <a href="/settings">Settings</a>. Meanwhile <a href="/search">Search</a> shows
-  everything collected.
+  No editions yet. Matching runs after every scan, or now with the button above. Retrieval is
+  free and runs without a key; scoring needs an OpenRouter key in
+  <a href="/settings">Settings</a>. Meanwhile <a href="/search">Search</a> shows everything
+  collected.
 </p>
 {% endif %}
 {% endblock %}

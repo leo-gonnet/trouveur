@@ -11,12 +11,14 @@ reaches the same code a browser would for a fraction of the maintenance.
 
 from __future__ import annotations
 
+from datetime import date
 from decimal import Decimal
 
 import httpx
 import pytest
 import sqlalchemy as sa
 
+from tests.integration.test_editions import _all_match_ids, _rescore_on
 from trouveur.db.engine import connect
 from trouveur.db.queries import match as match_q
 from trouveur.db.queries import users as users_q
@@ -333,3 +335,49 @@ async def test_the_profile_form_offers_every_filter_value_including_not_stated(c
         assert f'name="{name}" value="{value}"' in body, (name, value)
     assert '<option value="AT">Austria</option>' in body
     assert '<option value="de">German</option>' in body
+
+
+# ---------- Editions ----------
+# These live here rather than beside the other edition tests because the logged-in `client`
+# fixture does, and the page is the half of an edition a person actually touches.
+
+async def test_the_page_defaults_to_the_latest_edition(client, seeded):
+    user_id = seeded["user_id"]
+    ids = await _all_match_ids(user_id)
+    await _rescore_on(user_id, ids[:1], date(2026, 9, 14))
+    await _rescore_on(user_id, ids[1:], date(2026, 9, 15))
+
+    body = (await client.get("/recommendations")).text
+    assert "15 September 2026" in body
+    assert "latest edition" in body
+
+
+async def test_an_older_edition_is_reachable_by_date(client, seeded):
+    user_id = seeded["user_id"]
+    ids = await _all_match_ids(user_id)
+    await _rescore_on(user_id, ids[:1], date(2026, 9, 14))
+    await _rescore_on(user_id, ids[1:], date(2026, 9, 15))
+
+    body = (await client.get("/recommendations?edition=2026-09-14")).text
+    assert "14 September 2026" in body
+
+
+async def test_an_unknown_or_malformed_edition_falls_back_to_the_latest(client, seeded):
+    """A stale bookmark deserves the current edition, not an error page."""
+    user_id = seeded["user_id"]
+    await _rescore_on(user_id, await _all_match_ids(user_id), date(2026, 9, 15))
+
+    for query in ("?edition=1999-01-01", "?edition=not-a-date", "?edition="):
+        response = await client.get(f"/recommendations{query}")
+        assert response.status_code == 200
+        assert "15 September 2026" in response.text
+
+
+async def test_the_card_states_how_old_the_advert_is(client, seeded):
+    """An edition is keyed on discovery, so the card has to say when it was published."""
+    user_id = seeded["user_id"]
+    await _rescore_on(user_id, await _all_match_ids(user_id), date(2026, 9, 15))
+    async with connect() as conn:
+        await conn.exec_driver_sql("UPDATE job SET posted_at = now() - interval '3 days'")
+    body = (await client.get("/recommendations")).text
+    assert "posted 3 days ago" in body
