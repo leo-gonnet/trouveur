@@ -53,7 +53,7 @@ Two invariants worth knowing before changing anything:
 | 02 | [Measure and improve the reranker](02-reranker.md) | Decides the final order; currently unmeasured |
 | 03 | [Close the feedback loop](03-feedback-loop.md) | The only change that improves the product weekly |
 | 04 | [Enrich the profile input](04-profile-background.md) | Cheap; improves expansion and reranking at once |
-| 05 | [Fix the freshness economics](05-freshness.md) | A radar that is three days late has found nothing |
+| 05 | [Fix the freshness economics](05-freshness.md) | Horizon and editions done; the request budget is not |
 | 06 | [Reshape how results are presented](06-presentation.md) | 150 undifferentiated rows is not a result |
 | 07 | [Correct the profile-edit message](07-profile-edit-cost.md) | Small, and currently misleading |
 | 08 | [Strengthen the evaluation](08-evaluation.md) | Everything above needs it to be trustworthy |
