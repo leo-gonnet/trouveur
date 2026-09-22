@@ -746,9 +746,18 @@ reason precision is not measurable at retrieval.
   database and are entered through the web UI; this harness must not become a second way in.
 - It reuses `rerank.score_batch`, so the prompt, model and provider pin are the ones production
   sends. A copy of the prompt here would grade something no user ever runs.
-- **Rerank numbers are noisier than retrieval numbers.** Measured 2026-09-11 at `temperature=0`
-  with the provider pinned, one needle scored 45 on one run and above 70 on the next. Treat a
-  single run's `lost` list as a signal, not a result, and re-run before acting on a small change.
+- **Rerank numbers are noisier than retrieval numbers, and the noise has a cause.** Measured
+  2026-09-22 over 150 real postings per persona: at a fixed position a score moves 5 points
+  across five identical runs, but **slot 0 of a batch scores 8-15 points above slot 9**, and the
+  same posting scored beside nine weak ones rather than nine strong ones moves 8-39 points. Both
+  of the large effects are artifacts of putting ten postings in one prompt, and neither washes
+  out, because batches are filled in retrieval order. `BATCH_SIZE` is therefore a *quality*
+  setting, not only a cost one -- scoring one posting per call measured +0.07 to +0.09 nDCG@20
+  against a judged reference set, for a third of a US cent more per run. Treat a single run as a
+  signal, not a result. Evidence: `evalx/FINDINGS-RERANKER.md`.
+- **A judged reference set already exists; do not pay for relevance opinions twice.**
+  `evalx/reference.json` holds 792 postings graded 0-3 against the three personas, and
+  `evalx/rerank_lab.py` scores a configuration against it. Add to it rather than starting over.
 
 ```bash
 export TROUVEUR_EVAL_DATABASE_URL=postgresql+asyncpg://trouveur:x@127.0.0.1:55433/trouveur

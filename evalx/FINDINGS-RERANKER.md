@@ -113,6 +113,149 @@ budget, not a cost budget or a quality threshold**, and the evaluation cannot pi
 user. What it can say is that the two candidate reasons to lower it both fail. Quality has not run
 out at 150, and the money is not the constraint.
 
+## Stability: the page is stable, the top of the page is not
+
+The same 150 postings, scored five times, same model, same provider pin, `temperature: 0`,
+nothing changed between runs.
+
+| persona | mean SD | median range | moved >10 | moved >20 | Spearman | top-20 overlap |
+|---|---|---|---|---|---|---|
+| `wing_nachhaltigkeit` | 2.8 | 5 | 23/150 | 8/150 | 0.957 | **0.77** |
+| `backend_java` | 3.7 | 5 | 35/150 | 15/150 | 0.946 | **0.64** |
+| `maschinenbau_zu_daten` | 3.2 | 5 | 38/150 | 5/150 | 0.967 | **0.70** |
+
+Read the last two columns together, because they disagree and the disagreement is the finding.
+A Spearman of 0.95 says the ranking as a whole is reproducible — which is the number you would
+report if you wanted this to look fine. But the top-20 Jaccard says that **between a quarter and
+a third of the first twenty postings differ between two identical runs.** Nobody reads a
+correlation coefficient; they read the top of the page, and the top of the page is where the
+score distribution is thinnest and a three-point wobble reorders everything.
+
+The 2026-09-11 note in `AGENTS.md` — one needle at 45 on one run and above 70 on the next — is
+the tail of this, not an anomaly: 5 to 15 postings per persona move more than 20 points.
+
+## Position inside a batch is worth about ten points
+
+Ten postings, scored ten times, rotated one slot each time so every posting visits every
+position. Nothing else changes.
+
+| persona | slot 0 | slot 1 | slot 4 | slot 9 | slot 0 − slot 9 | median swing per posting |
+|---|---|---|---|---|---|---|
+| `wing_nachhaltigkeit` | 48.5 | 41.0 | 40.0 | 38.0 | **+10.5** | 22.5 |
+| `backend_java` | 51.0 | 44.5 | 44.5 | 42.5 | **+8.5** | 27.5 |
+| `maschinenbau_zu_daten` | 74.0 | 66.5 | 63.0 | 59.0 | **+15.0** | 20.0 |
+
+**Going first in a batch of ten is worth eight to fifteen points**, consistently across all three
+personas, with most of the drop happening immediately after slot 0. And the same posting, in the
+same batch, with the same ten adverts around it, swings 20 to 27 points depending only on where
+it was printed.
+
+Put that beside the stability table: at a fixed position the median posting moves 5 points across
+five runs; moved through the ten positions it moves 20 to 27. **Position is the larger effect by a
+factor of four or five, and it is not noise — it is a bias with a direction.**
+
+It is also not randomly distributed over the page. Batches are filled in retrieval order, so
+retrieval ranks 1, 11, 21, 31 … land in slot 0 and collect the bonus, every run, systematically.
+The page is ordered by a score that partly encodes `rank mod 10`.
+
+## Contamination: the score is relative to the batch, not to the candidate
+
+Six middling postings per persona — ones the judge graded 1, where the placement is genuinely in
+question — each scored three times: alone, then first in a batch with nine postings the reference
+set grades 2 or 3, then first in a batch with nine it grades 0. The subject sits in slot 0 every
+time, so position is held constant and only the company changes.
+
+| persona | alone | among nine strong | among nine weak | weak − strong |
+|---|---|---|---|---|
+| `wing_nachhaltigkeit` | 20.8 | 17.5 | 33.3 | **+15.8** |
+| `backend_java` | 18.3 | 14.2 | 22.5 | **+8.3** |
+| `maschinenbau_zu_daten` | 29.2 | 20.8 | 60.0 | **+39.2** |
+
+**The prompt asks for an absolute score and gets a relative one.** The same posting is worth 29
+on its own and 60 in bad company. Nothing about the candidate changed, nothing about the advert
+changed, and the instruction to score 0–100 against the profile was identical in all three calls.
+
+The direction makes this worse than a wash. Batches are filled in retrieval order, so the weak
+company is concentrated *deep* in the ranking and the strong company *shallow*. A mediocre
+posting at rank 140 is graded against its mediocre neighbours and inflated; a genuinely good
+posting at rank 5 is graded against other good ones and deflated. The effect systematically
+compresses the page toward the middle and can lift a deep posting above a shallow one that
+deserves the slot.
+
+## What the three effects add up to
+
+| effect | size, in points | direction |
+|---|---|---|
+| run-to-run noise, position fixed | 5 (median range over 5 runs) | none |
+| position within the batch | 8–15 (slot 0 vs slot 9) | favours `rank mod 10 == 0` |
+| company within the batch | 8–39 | inflates deep, deflates shallow |
+
+Only the first is noise. The other two are biases with a direction, both larger, and **both are
+artifacts of batching ten postings into one prompt** — neither can exist at a batch size of one.
+That reframes brief 02's question. The instability is not mainly the model being flaky about
+absolute numbers; it is that the unit of judgement is the batch rather than the posting.
+
+## Batch size: one posting per call, and it is not close
+
+The same 150 postings, the same prompt, scored against the reference set at four batch sizes.
+
+| batch | `wing` | `backend` | `maschinenbau` | mean nDCG@20 |
+|---|---|---|---|---|
+| **1** | **0.962** | **0.927** | **0.954** | **0.947** |
+| 5 | 0.898 | 0.840 | 0.831 | 0.856 |
+| 10 (production) | 0.871 | 0.806 | 0.957 | 0.878 |
+| 20 | 0.819 | 0.859 | 0.930 | 0.869 |
+
+**Batch size 1 wins on every persona.** Between 5, 10 and 20 the ordering is not monotonic and the
+differences are inside what three personas can resolve — so the honest statement is not "smaller
+batches are better", it is "**scoring one posting at a time is better than scoring several, and
+the rest is noise**". That is what the mechanism predicts: position bias and contamination are
+both properties of putting more than one posting in a prompt, and neither can exist at a batch of
+one. The effects measured directly and the ranking quality they produce agree.
+
+Replicated in a second run, this time metering the money — because "one call per posting" is the
+expensive-sounding recommendation and it needs its price attached:
+
+| batch | mean nDCG@20 | cost per user per run of 150 | postings lost to a malformed response |
+|---|---|---|---|
+| **1** | **0.937** | **$0.00997** | 1–2 of 150 |
+| 10 | 0.849 | $0.00694 | 3–6 of 150 |
+
+**The cost objection does not survive contact with the number.** Batch 1 is 44% more expensive in
+relative terms and *one third of a US cent* more in absolute terms, for +0.088 nDCG@20. It also
+loses fewer postings, because `rerank.parse_response` discards a whole batch when the JSON is bad
+— at a batch of ten that is ten postings the user never sees, at a batch of one it is one.
+
+**The one real obstacle is latency, not money.** `match/pipeline.py` sends batches sequentially so
+the ceiling can be checked before each one, and 150 sequential calls is 12 to 35 minutes per user
+against 2 to 4 today. Adopting this means making the paid loop concurrent while keeping the
+pre-flight budget check — with a bounded semaphore the overshoot is at most a few in-flight calls,
+which at these prices is a fraction of a cent. That is a design change to the most
+safety-critical loop in the system, so it is written down here as the recommendation and left for
+its own piece of work rather than bundled into this one.
+
+## Scoring form: absolute against banded is a wash
+
+Four bands with ties broken by retrieval rank, against the production 0–100, both at batch 10,
+each run twice so the repeat overlap is measurable.
+
+| persona | absolute nDCG@20 | banded nDCG@20 | absolute repeat overlap | banded repeat overlap |
+|---|---|---|---|---|
+| `wing_nachhaltigkeit` | 0.857 | 0.907 | 0.74 | 0.82 |
+| `backend_java` | 0.805 | 0.768 | 0.60 | 0.54 |
+| `maschinenbau_zu_daten` | 0.947 | 0.929 | 0.60 | 0.74 |
+| **mean** | **0.870** | **0.868** | **0.65** | **0.70** |
+
+Banded is better on one persona, worse on another, and its slightly higher repeat overlap does not
+hold across all three. **Change nothing here.**
+
+The brief's hypothesis was that absolute 0–100 scoring is what drifts. The evidence says it is
+not. The form makes no reliable difference; the model already compresses 0–100 into 14 to 20
+distinct values by itself, with the largest single tie covering 18 to 50 of 150 postings, so the
+scale is banded in practice whatever the prompt asks for; and two strong judges scoring *one
+posting at a time* agreed within one band 99% of the time. The instability lives in the batch,
+not in the scale.
+
 ## The background field, at the retrieval stage: no
 
 Brief 04's premise is that expansion has to invent a plausible next role from a job title, and
@@ -150,6 +293,64 @@ expected: `combine()` caps the query list at `MAX_QUERIES = 8`, and these person
 queries already fill seven of those eight slots. Whatever the background does to the generated
 *phrases* is almost entirely truncated away before retrieval sees it. Only the adverts carry it,
 and those are what moved.
+
+## The background field, at the paid stage: it depends on the objectives
+
+Same candidate set for both arms — the `nobg` pool — so this isolates what the background does to
+the *scoring*, with the retrieval difference held out. Three repeats per arm, because a single
+run's nDCG@20 sits inside the noise floor measured above.
+
+| objectives the profile carries | mean Δ nDCG@20 from adding the background | run-to-run SD |
+|---|---|---|
+| **full**, as the personas were written | **+0.003** | 0.016 |
+| **thin**, cut to the clauses stating a wish | **+0.051** | 0.031 |
+
+| persona | thin, without | thin, with | Δ |
+|---|---|---|---|
+| `wing_nachhaltigkeit` | 0.912 | 0.908 | −0.005 |
+| `backend_java` | 0.609 | 0.713 | **+0.103** |
+| `maschinenbau_zu_daten` | 0.872 | 0.925 | **+0.053** |
+
+**The first row is a confounded test and the second is the real one.** These personas' objectives
+paragraphs double as potted CVs — *"I build backend services in Java with Spring Boot and
+MongoDB… I want a small product company"* — so adding a background to them adds almost nothing
+that was not already there, and measures almost nothing. Cut the objectives back to the wish and
+the picture changes: `backend_java` collapses from 0.829 to 0.609 without capability evidence and
+recovers most of the way, to 0.713, once the background supplies it.
+
+So the field earns its place, but not for the reason brief 04 gave. It does nothing for a user
+who has already written their history into the objectives box, and it does real work for one who
+has written only what they want — which is what that box actually invites, and what a career
+changer is most likely to type.
+
+## What to change, and what to leave alone
+
+| brief 02 asked | answer | evidence |
+|---|---|---|
+| Is the score stable? | **No, where it matters.** The ranking correlates at 0.95 between identical runs, but a quarter to a third of the top 20 — the part anyone reads — differs. | 5 repeats × 150 postings × 3 personas |
+| Scoring form? | **Leave it.** Absolute 0–100 and four bands are indistinguishable, and the model already bands its own answers into ~15 values. | 0.870 vs 0.868 mean nDCG@20 |
+| Batch size? | **Change it to 1.** +0.07 to +0.09 nDCG@20, one third of a cent per run, fewer postings lost to bad JSON, and it is the only setting where the two biases cannot exist. | 4 sizes, replicated, plus the two bias experiments |
+| `rerank_limit`? | **Leave it at 150, and stop calling it a cost setting.** Quality has not run out at 150 and the money is not the constraint; it is a reading budget. | judged grades along the retrieval ranking to depth 200 |
+
+The single sentence: **the reranker's instability is not the model being vague about numbers, it
+is that the unit of judgement is the batch rather than the posting.** Position within a batch is
+worth 8–15 points and the company a posting keeps is worth 8–39, against 5 points of genuine
+run-to-run noise — and both of the large effects are artifacts of the batch, and both correlate
+with retrieval rank rather than washing out, because batches are filled in retrieval order.
+
+The counter-evidence that makes this more than a story: two strong models from different families,
+each scoring **one posting per call**, agreed within one band on 99% of 279 postings. The task is
+not ambiguous when the unit is a posting.
+
+| brief 04 asked | answer |
+|---|---|
+| Does the background help expansion? | **No.** Identical needle-tier coverage, MRR 0.160 → 0.151, and judged precision flat to slightly worse. `MAX_QUERIES = 8` truncates most of its effect away before retrieval sees it. |
+| Does it help reranking? | **Only when the objectives do not already contain it** — +0.003 with the personas' CV-like objectives, +0.051 when they are cut to the wish. |
+| Should the field ship? | **Yes**, on the strength of the second row, and because a real user's objectives box is far likelier to hold aspiration than a career summary. Its cost is one call per profile version and ~150 tokens per batch. |
+
+What would change these answers: three personas is a small sample, and every number here is a gap
+between configurations measured against one judge's opinion, not against a user's. The judged set
+is stored and reusable, so the next change to this stage costs nothing to evaluate.
 
 ## Reproducing
 

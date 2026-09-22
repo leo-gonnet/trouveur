@@ -289,13 +289,19 @@ async def experiment_contamination(conn, settings, key, model, spend, args) -> d
 async def _graded_run(conn, settings, key, model, spend, args, persona, **kwargs) -> dict:
     store = load_store()
     profile = await _ensure_persona(persona)
+    if kwargs.pop("thin", False):
+        profile = profile.model_copy(update={"objectives": thin_objectives(profile.objectives)})
     grades = {int(j): g for j, g in store["grades"][args.judge][persona["key"]].items()}
     rows = await _shortlist(conn, persona["key"], kwargs.pop("variant", "nobg"), args.limit)
+    before = spend.total
     scores = await score_all(settings, profile, rows, key=key, model=model, spend=spend, **kwargs)
     order = order_of(scores, [row.job_id for row in rows])
     judged = {job: grades[job] for job in order if job in grades}
     return {
         "scored": len(scores),
+        # What this configuration cost for one shortlist. The recommendation that comes out of
+        # the batch experiment is the expensive-sounding one, so the number has to be here.
+        "cost_usd": f"{spend.total - before:.5f}",
         "ndcg@20": ndcg(order, judged, 20),
         "ndcg@50": ndcg(order, judged, 50),
         "good@20": sum(1 for job in order[:20] if grades.get(job, 0) >= GOOD),
@@ -314,7 +320,7 @@ async def _graded_run(conn, settings, key, model, spend, args, persona, **kwargs
 
 async def experiment_batch(conn, settings, key, model, spend, args) -> dict:
     out: dict[str, dict] = {}
-    for size in (1, 5, 10, 20):
+    for size in args.batch_sizes:
         out[str(size)] = {}
         for persona in load_personas():
             out[str(size)][persona["key"]] = await _graded_run(
@@ -349,6 +355,19 @@ async def experiment_form(conn, settings, key, model, spend, args) -> dict:
     return out
 
 
+# Only the clauses that state an intention. The personas' objectives paragraphs double as
+# potted CVs -- "I build backend services in Java with Spring Boot... I want a small product
+# company" -- so comparing a profile with a background against the same profile without one
+# compares two descriptions that both already carry the capability evidence, and measures almost
+# nothing. Cutting the objectives down to the wish isolates what the background actually adds.
+_INTENT = ("möchte", "suche", "want", "looking", "ziel")
+
+
+def thin_objectives(text: str) -> str:
+    kept = [part for part in text.split(". ") if any(word in part.lower() for word in _INTENT)]
+    return ". ".join(kept).strip() or text
+
+
 async def experiment_background(conn, settings, key, model, spend, args) -> dict:
     """Brief 04 at the paid stage: the same candidates, one line of prompt different.
 
@@ -361,10 +380,10 @@ async def experiment_background(conn, settings, key, model, spend, args) -> dict
     for persona in load_personas():
         summary = artifacts[f"{persona['key']}:bg"].summary
         out["without"][persona["key"]] = await _graded_run(
-            conn, settings, key, model, spend, args, persona, background=""
+            conn, settings, key, model, spend, args, persona, background="", thin=args.thin
         )
         out["with"][persona["key"]] = await _graded_run(
-            conn, settings, key, model, spend, args, persona, background=summary
+            conn, settings, key, model, spend, args, persona, background=summary, thin=args.thin
         )
         for name in ("without", "with"):
             row = out[name][persona["key"]]
@@ -416,6 +435,11 @@ async def main() -> None:
     ap.add_argument("--repeats", type=int, default=5)
     ap.add_argument("--subjects", type=int, default=6)
     ap.add_argument("--max-usd", type=Decimal, default=Decimal("0.50"))
+    ap.add_argument("--batch-sizes", type=lambda v: [int(x) for x in v.split(",")],
+                    default=[1, 5, 10, 20])
+    ap.add_argument("--thin", action="store_true",
+                    help="cut the objectives down to the wish, so the background is the only "
+                         "place capability evidence appears")
     args = ap.parse_args()
 
     key = os.environ["TROUVEUR_EVAL_LLM_KEY"]

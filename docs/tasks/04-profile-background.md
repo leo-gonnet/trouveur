@@ -1,5 +1,12 @@
 # 04 — Enrich the profile input
 
+> **Built and measured 2026-09-22** — see [`evalx/FINDINGS-RERANKER.md`](../../evalx/FINDINGS-RERANKER.md).
+> The field exists end to end and both prompts use it: expansion sees it whole, the reranker sees
+> a distillation cached per profile version. It does **not** help expansion (needle tiers
+> unchanged, MRR 0.160 -> 0.151), largely because `MAX_QUERIES = 8` truncates its effect away. It
+> helps reranking **only when the objectives do not already contain a career summary**: +0.003
+> with the personas as written, +0.051 with their objectives cut back to the wish.
+
 ## The problem
 
 A profile is a current title, years of experience, a free-text objectives paragraph, languages,
