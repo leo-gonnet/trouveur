@@ -86,6 +86,7 @@ class WorkdaySource:
 
         seen = 0
         offset = 0
+        seen_paths: set[str] = set()
         while offset < MAX_OFFSET:
             payload = await self._page(client, url, scope, offset)
             rows = payload.get("jobPostings")
@@ -93,6 +94,17 @@ class WorkdaySource:
             # The only reliable end of the walk. `total` contradicts itself across pages.
             if not rows:
                 return seen, False
+
+            # Past its last posting Workday clamps the offset instead of running out: probed live
+            # on 2026-09-22, offset=2000 and offset=9980 returned the identical page. So the empty
+            # page above never arrives for most boards and the walk grinds to MAX_OFFSET against
+            # one repeating page -- 500 requests for a 2,000-posting board, at 1 req/s shared
+            # across every tenant. A page carrying nothing new is that clamp, and it is a real end:
+            # everything behind it has already been sinked, so the board stays closable.
+            paths = {path for row in rows if (path := _external_path(row))}
+            if paths and paths <= seen_paths:
+                return seen, False
+            seen_paths |= paths
 
             for start in range(0, len(rows), BATCH):
                 documents = [
@@ -135,13 +147,19 @@ class WorkdaySource:
     async def fetch_detail(
         self, client: PoliteClient, external_id: str
     ) -> RawDocument | None:
-        scope, _, path = external_id.partition(":")
-        if not scope or not path:
+        # `scoped_id` joins the three-part scope to the externalPath, so the id is
+        # `tenant:instance:site:/job/...` -- four fields. Partitioning on the first colon yields
+        # the tenant alone, which `split_workday_scope` then rejects with a bare ValueError that
+        # `drain_detail` does not catch, taking the whole runner tick down with it.
+        tenant, _, rest = external_id.partition(":")
+        instance, _, rest = rest.partition(":")
+        site, _, path = rest.partition(":")
+        if not (tenant and instance and site and path):
             raise FetchError(
-                f"Workday external id {external_id!r} is not 'scope:externalPath'; it cannot "
-                "address a detail request."
+                f"Workday external id {external_id!r} is not 'tenant:instance:site:externalPath'; "
+                "it cannot address a detail request."
             )
-        tenant, instance, site = split_workday_scope(scope)
+        scope = f"{tenant}:{instance}:{site}"
         base = _JOBS_URL.format(tenant=tenant, instance=instance, site=site).removesuffix("/jobs")
         response = await client.get(f"{base}{path}")
         # A retired posting 404s. That is the normal end of a listing's life, not a failure.
