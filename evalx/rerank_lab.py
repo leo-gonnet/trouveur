@@ -300,6 +300,14 @@ async def _graded_run(conn, settings, key, model, spend, args, persona, **kwargs
         "ndcg@50": ndcg(order, judged, 50),
         "good@20": sum(1 for job in order[:20] if grades.get(job, 0) >= GOOD),
         "good@50": sum(1 for job in order[:50] if grades.get(job, 0) >= GOOD),
+        # How much ordering the scorer actually did. A form with four bands hands the ordering
+        # inside a band back to retrieval, so its nDCG is partly retrieval's number and reading
+        # it as a scoring result would be a mistake.
+        "distinct_values": len(set(scores.values())),
+        "largest_tie": max(
+            (sum(1 for v in scores.values() if v == value) for value in set(scores.values())),
+            default=0,
+        ),
         "order": order,
     }
 

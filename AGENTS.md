@@ -422,6 +422,14 @@ so the deployment has no LLM spend of its own and one user's exhausted budget ca
   in — an EUR column would put a stale exchange rate between the meter and the cap.
 - **Bump `profile.version` only for fields that change what a good match is** (`SCORING_FIELDS`). A
   volume setting such as `rerank_limit` must not invalidate a cache and bill a re-score.
+- **Text the reranker reads is multiplied by `rerank_limit`; text expansion reads is not.** This
+  is why `profile.background` reaches the two stages differently: expansion sees the whole field,
+  because that call is billed once per profile version, while the reranker sees a distillation
+  derived by the same cached, versioned stage (`user_query_expansion.background_summary`).
+  `rerank.build_prompt` takes the summary as an **argument** and must never read
+  `profile.background` itself -- the two look identical in a diff, and the second one bills a
+  4,000-character CV fifteen times per run on the user's own card, besides burying the objectives
+  under it. Guarded by a test.
 - **Query expansion costs one call per profile version, not per job**, and is cached. The
   deterministic expansion is the floor, not a degraded fallback: retrieval must work fully with no
   key at all.
@@ -712,6 +720,16 @@ Other rules the harness depends on:
   number noise, so the harness warns rather than letting you read it as a result.
 - **`TROUVEUR_EVAL_DATABASE_URL` is required and must be a scratch database.** The harness plants
   fake postings and overwrites personas' profiles.
+- **Check how much of the scratch corpus is *open* before believing a number from it.**
+  `job_embedding` holds open postings only, so a copy that has been narrowed -- the encoder-swap
+  rehearsal left one at 25,028 open postings against production's 240,000 -- retrieves over a
+  tenth of what production does, and reports it as a quality result rather than as a corpus
+  difference. `select count(*) from job where closed_at is null` is the check.
+- **Restoring such a copy is a chunked UPDATE, never one statement.** `job` is over 2 GB, and
+  `closed_at` is indexed so the update cannot be HOT: re-opening 215,000 rows in one statement
+  doubles the table before anything can be vacuumed, on a disk production shares. Chunk it and
+  `VACUUM` between chunks. Because `job_embedding` holds open postings only, that one table
+  carries both the vectors and the set of postings to re-open.
 
 ### Scoring the reranker
 

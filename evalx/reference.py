@@ -195,8 +195,17 @@ async def main() -> None:
                 next(p for p in load_personas() if p["key"] == persona_key)
             )
             mine = graded.setdefault(persona_key, {})
-            todo = sorted({j for ids in variants.values() for j in ids} - {int(j) for j in mine})
-            rows = await match_q.scoreable_rows(conn, todo)
+            # Shallow ranks first, so that stopping on the cap leaves the top of the ranking
+            # completely judged rather than a scatter of holes through it. The depth curve is
+            # read off contiguous coverage; a gap at rank 30 would be indistinguishable from a
+            # posting nobody thought worth anything.
+            best: dict[int, int] = {}
+            for ids in variants.values():
+                for rank, job_id in enumerate(ids):
+                    best[job_id] = min(best.get(job_id, rank), rank)
+            todo = sorted(set(best) - {int(j) for j in mine}, key=lambda job: best[job])
+            by_id = {row.job_id: row for row in await match_q.scoreable_rows(conn, todo)}
+            rows = [by_id[job_id] for job_id in todo if job_id in by_id]
             print(f"{persona_key}: {len(todo)} of {len(rows) + len(mine)} left to judge",
                   flush=True)
 
