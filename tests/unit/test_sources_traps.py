@@ -185,6 +185,69 @@ def test_workday_pagination_stops_on_an_empty_page_not_on_total():
     assert outcome.closable_scopes == ["acme:wd5:Careers"]
 
 
+def test_workday_pagination_stops_when_the_clamped_page_repeats():
+    """Past its last posting Workday clamps the offset and serves the final page forever.
+
+    Probed live on 2026-09-22: offset=2000 and offset=9980 returned the identical row. The empty
+    page the walk terminates on therefore never arrives, and without this guard a 2,000-posting
+    board costs the full MAX_OFFSET/PAGE_SIZE = 500 requests at 1 req/s shared across every
+    tenant. Observed in production as a sweep that ran 8.4 hours and re-fetched one page.
+    """
+    from trouveur.sources.workday import WorkdaySource
+
+    url = "https://acme.wd5.myworkdayjobs.com/wday/cxs/acme/Careers/jobs"
+    real = [{"externalPath": "/job/a", "title": "A"}, {"externalPath": "/job/b", "title": "B"}]
+
+    def respond(_params, body):
+        # Every offset past the first page returns the last page again, never an empty one.
+        page = real[: body["limit"]] if body["offset"] == 0 else real[-1:]
+        return (200, {"total": 2000, "jobPostings": page})
+
+    client = StubClient({url: respond})
+    outcome, seen = asyncio.run(collect(WorkdaySource(boards=["acme:wd5:Careers"]), client))
+
+    assert len(client.requested) == 2, (
+        f"clamped page was re-fetched {len(client.requested)} times; the guard did not fire"
+    )
+    assert [document.external_id for document in seen] == [
+        "acme:wd5:Careers:/job/a",
+        "acme:wd5:Careers:/job/b",
+    ]
+    # The clamp is a real end of the board: everything behind it was seen, so it stays closable.
+    assert outcome.closable_scopes == ["acme:wd5:Careers"]
+
+
+def test_workday_detail_id_carries_a_three_part_scope():
+    """`scoped_id` joins a three-part scope to the path, so the id has four fields, not two.
+
+    Splitting it on the first colon yields the tenant alone and the scope parser then raises a
+    bare ValueError -- which `drain_detail` does not catch, so it took down the whole runner tick
+    and with it the derive, dedup and embed stages. Workday detail fetching had never once run.
+    """
+    from trouveur.sources.workday import WorkdaySource
+
+    external_id = "acme:wd5:Careers:/job/Atessa/Manager-Operations_R4482"
+    detail_url = (
+        "https://acme.wd5.myworkdayjobs.com/wday/cxs/acme/Careers"
+        "/job/Atessa/Manager-Operations_R4482"
+    )
+    client = StubClient({detail_url: (200, {"jobPostingInfo": {"title": "Manager"}})})
+
+    document = asyncio.run(WorkdaySource().fetch_detail(client, external_id))
+
+    assert document is not None, "the detail request did not reach the stubbed URL"
+    assert document.external_id == external_id
+    assert document.scope == "acme:wd5:Careers"
+
+
+def test_workday_detail_id_without_a_path_is_refused_as_a_source_error():
+    """Must raise SourceError, which the drain catches -- not ValueError, which it does not."""
+    from trouveur.sources.workday import WorkdaySource
+
+    with pytest.raises(SourceError):
+        asyncio.run(WorkdaySource().fetch_detail(StubClient(), "acme:wd5:Careers"))
+
+
 def test_workday_relative_posted_on_never_becomes_a_date():
     """`postedOn` is prose ("Posted Today"). The detail's startDate is the only real date."""
     from trouveur.sources.workday import normalize
@@ -327,9 +390,7 @@ def test_a_capped_feed_is_never_closable_even_on_a_backfill():
     """Jobicy serves one capped page; treating it as the corpus would retire everything else."""
     from trouveur.sources.jobicy import JobicySource
 
-    client = StubClient(
-        default=(200, {"jobs": [{"id": 1, "jobTitle": "A"}], "jobCount": 1})
-    )
+    client = StubClient(default=(200, {"jobs": [{"id": 1, "jobTitle": "A"}], "jobCount": 1}))
 
     async def run():
         seen = []
@@ -394,6 +455,7 @@ def test_ashby_boards_may_be_named_after_a_domain():
 
 
 # ---------- Disabling a source ----------
+
 
 def test_a_disabled_source_is_not_swept():
     """Retiring a source must not mean deleting its adapter.
