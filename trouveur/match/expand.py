@@ -92,7 +92,13 @@ Return ONLY the summary text, no preamble and no formatting."""
 
 
 def deterministic_queries(profile: UserProfile) -> list[str]:
-    """Queries derivable from the profile alone, with no model and no network."""
+    """Queries derivable from the profile alone, with no model and no network.
+
+    The background is deliberately not among them. `websearch_to_tsquery` ANDs its terms, so a
+    paragraph of prose becomes a conjunction of a hundred terms and matches nothing -- measured
+    over 224k postings, on both the tsvector and the trigram path. The background reaches
+    retrieval through the generators above, which turn it into phrases the corpus contains.
+    """
     queries: list[str] = []
     if profile.title:
         queries.append(profile.title)

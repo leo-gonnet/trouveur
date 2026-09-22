@@ -97,13 +97,19 @@ def ndcg(order: list[int], grades: dict[int, int], k: int) -> float:
     return round(dcg(actual) / ideal, 4) if ideal else 0.0
 
 
-def spearman(left: dict[int, int], right: dict[int, int]) -> float:
-    """Rank correlation between two runs' orderings, over the postings both scored."""
-    shared = sorted(set(left) & set(right))
+def spearman(left: dict[int, int], right: dict[int, int], fallback: list[int]) -> float:
+    """Rank correlation between the two page orders these runs would produce.
+
+    Ties are broken by retrieval rank, exactly as `order_of` does, because the question is
+    whether the reader sees the same page twice -- not whether two score vectors correlate. A
+    scorer that returned identical scores both times would be perfectly stable by this measure,
+    which is the right answer.
+    """
+    shared = set(left) & set(right)
     if len(shared) < 3:
         return 0.0
     def ranked(scores):
-        order = sorted(shared, key=lambda job: -scores[job])
+        order = order_of({job: scores[job] for job in shared}, fallback)
         return {job: index for index, job in enumerate(order)}
     a, b = ranked(left), ranked(right)
     n = len(shared)
@@ -195,7 +201,7 @@ async def experiment_stability(conn, settings, key, model, spend, args) -> dict:
             "moved_over_10": sum(1 for value in ranges if value > 10),
             "moved_over_20": sum(1 for value in ranges if value > 20),
             "spearman": round(statistics.mean(
-                spearman(runs[i], runs[j]) for i, j in pairs), 4),
+                spearman(runs[i], runs[j], [row.job_id for row in rows]) for i, j in pairs), 4),
             "top20_jaccard": round(statistics.mean(
                 jaccard(orders[i][:20], orders[j][:20]) for i, j in pairs), 4),
         }
