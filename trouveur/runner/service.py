@@ -65,26 +65,49 @@ async def _maybe_enqueue_scheduled(conn) -> None:
 
 
 async def drain_queues(settings: Settings) -> dict[str, int]:
-    """Work the deferred stages. Bounded per tick so no single kind starves the others."""
+    """Work the deferred stages. Bounded per tick so no single kind starves the others.
+
+    Detail runs *alongside* the derive -> dedup -> embed chain rather than in front of it. It is
+    network-bound and spends nearly all of its budget asleep on the shared per-provider interval,
+    so in series it left the cores idle for that whole stretch: with Workday's queue full, a
+    measured tick was 135s of which 40s was detail doing nothing but wait. Embedding hands its
+    work to a thread, so the loop is free to run the fetches while a batch encodes.
+
+    The chain itself stays ordered -- embedding is last because it is the most expensive stage and
+    depends on the other two having landed -- and every stage takes its own connection, so the two
+    halves never share one.
+
+    The halves also fail independently. A detail fetch that raised took all four stages down with
+    it for hours before anyone noticed, because one exception escaping here stops the whole tick.
+    Isolating them means a broken source can no longer stop embedding.
+    """
     done = {"detail": 0, "derive": 0, "embed": 0, "dedup": 0}
 
     async with connect() as conn:
         tenants = await admin_q.enabled_tenants(conn)
     sources = {source.name: source for source in build_sources(tenants=tenants)}
 
-    async with PoliteClient() as client:
-        async with connect() as conn:
-            done["detail"] = await workers.drain_detail(
-                conn, client, sources, limit=_DETAIL_PER_TICK
-            )
+    async def fetch_details() -> None:
+        async with PoliteClient() as client:
+            async with connect() as conn:
+                done["detail"] = await workers.drain_detail(
+                    conn, client, sources, limit=_DETAIL_PER_TICK
+                )
 
-    async with connect() as conn:
-        done["derive"] = await workers.drain_derive(conn)
-    async with connect() as conn:
-        done["dedup"] = await workers.drain_dedup(conn)
-    # Embedding last: it is the most expensive stage and depends on the other two having landed.
-    async with connect() as conn:
-        done["embed"] = await workers.drain_embed(conn, limit=settings.embed_batch_size)
+    async def derive_and_embed() -> None:
+        async with connect() as conn:
+            done["derive"] = await workers.drain_derive(conn)
+        async with connect() as conn:
+            done["dedup"] = await workers.drain_dedup(conn)
+        async with connect() as conn:
+            done["embed"] = await workers.drain_embed(conn, limit=settings.embed_batch_size)
+
+    halves = await asyncio.gather(
+        fetch_details(), derive_and_embed(), return_exceptions=True
+    )
+    for name, outcome in zip(("detail", "derive/dedup/embed"), halves, strict=True):
+        if isinstance(outcome, BaseException):
+            log.error("queue half %r failed this tick", name, exc_info=outcome)
     return done
 
 
