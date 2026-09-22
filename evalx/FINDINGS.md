@@ -1,5 +1,9 @@
 # Evaluating the synthetic-advert expansion proposal
 
+> This file measures **retrieval**. The stage after it is measured in
+> [FINDINGS-RERANKER.md](FINDINGS-RERANKER.md): score stability, position bias and contamination
+> inside a batch, batch size, scoring form, and what `rerank_limit` should be.
+
 Run 2026-09-19 against `origin/main` (17c8ae0, the deployed code), over a read-only copy of the
 production corpus: **225,524 postings, 223,944 vectors, 223,949 open**. Production was not
 touched: `pg_dump` from `trouveur-db-1`, restored into a standalone `trouveur-eval-db` on :55433.
