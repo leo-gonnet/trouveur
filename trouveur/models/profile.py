@@ -37,6 +37,12 @@ LANGUAGES: dict[str, str] = {
 }
 
 
+# How much background text the form accepts. Roughly a dense page -- enough for a career in
+# summary, short of a pasted CV. Measured against the prompts that read it: the expansion prompt
+# sees it whole once per profile version, and the reranker sees a distillation of it.
+BACKGROUND_MAX_CHARS = 4000
+
+
 class UserProfile(BaseModel):
     user_id: int
     version: int = 1
@@ -44,6 +50,11 @@ class UserProfile(BaseModel):
     title: str = ""
     years_experience: int = 0
     objectives: str = ""
+    # What the candidate has done, as a CV summary in their own words. Capped because both
+    # prompts that read it have a finite attention budget: a CV pasted wholesale buries the
+    # objectives it is meant to support. The cap is enforced by the form, not here, so an
+    # over-long row already in the database still loads.
+    background: str = ""
     languages: list[str] = Field(default_factory=list)
     must_have: list[str] = Field(default_factory=list)
     keywords: list[str] = Field(default_factory=list)

@@ -230,7 +230,7 @@ async def _rerank_needles(
     Reuses `rerank.score_batch`, so the prompt, the model and the provider pin are the ones
     production sends. A copy of the prompt here would grade something the user never runs.
     """
-    from trouveur.match import llm, rerank
+    from trouveur.match import expand, llm, rerank
 
     api_key = os.environ.get(EVAL_LLM_KEY_VAR)
     if not api_key:
@@ -257,6 +257,11 @@ async def _rerank_needles(
                 settings, profile, batch,
                 api_key=api_key, model=model,
                 provider_pin=settings.default_llm_provider,
+                # The truncated background rather than the distilled one. Production distils
+                # once per profile version and caches it; there is no expansion row here, and
+                # spending a model call to build one would make this grading depend on a second
+                # model's output. This is the same floor the pipeline falls back to.
+                background=expand.truncated_background(profile),
             )
         except llm.LlmError as exc:
             errors.append(str(exc))

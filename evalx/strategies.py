@@ -30,6 +30,12 @@ FIXTURES = json.loads((Path(__file__).parent / "expansions.json").read_text(enco
 _LLM_PATH = Path(__file__).parent / "expansions_llm.json"
 LLM = json.loads(_LLM_PATH.read_text(encoding="utf-8")) if _LLM_PATH.exists() else None
 
+# What the deployed prompts produce today, for a profile with a background and without one --
+# written by evalx/live.py rather than frozen here, because the point of these two is to compare
+# the current code against itself.
+_LIVE_PATH = Path(__file__).parent / "live_expansions.json"
+LIVE = json.loads(_LIVE_PATH.read_text(encoding="utf-8")) if _LIVE_PATH.exists() else None
+
 
 @dataclass
 class QuerySet:
@@ -173,6 +179,12 @@ def build(name: str, profile, persona_key: str) -> QuerySet:
             return QuerySet(dense=titles, lexical=titles, depth=200)
         case "full_proposal_deep":
             return QuerySet(dense=[*ads, *titles], lexical=[*titles, *tokens], depth=200)
+        case "live_nobg" | "live_bg":
+            # Production's own routing: queries to both arms, adverts to the dense arm only.
+            found = LIVE[f"{persona_key}:{name.removeprefix('live_')}"]
+            return QuerySet(
+                dense=[*found["queries"], *found["adverts"]], lexical=found["queries"]
+            )
         case _ if name.startswith("llm_"):
             return _build_llm(name, det, persona_key)
         case _:
@@ -235,6 +247,8 @@ TUNED_STRATEGIES = [
     "det_plus_ads5_tokens_or", "det_plus_ads5_titles_or",
 ]
 DEPTH_STRATEGIES = ["det_deep", "ads5_deep", "titles30_deep", "full_proposal_deep"]
+# Brief 04: does a background paragraph make expansion find the adjacent roles it exists to find?
+BACKGROUND_STRATEGIES = ["live_nobg", "live_bg"]
 LLM_STRATEGIES = [
     "llm_phrases", "llm_ads_short", "llm_ads_long", "llm_ads_short_pooled", "llm_titles30_or",
     "llm_tokens_lex", "llm_full_proposal", "llm_routed_tuned",

@@ -31,8 +31,10 @@
       {{ tags('languages', profile.languages, options=language_names, placeholder='Pick a language…',
               hint='Told to the reranker; not a filter.') }}
     </div>
-    <label>Objectives <span class="hint">free text; used to expand your search queries</span>
+    <label>Objectives <span class="hint">free text; what you want next, and used to expand your search queries</span>
       <textarea name="objectives" rows="4">{{ profile.objectives }}</textarea></label>
+    <label>Background <span class="hint">free text, up to {{ background_max_chars }} characters; what you have actually done, in your own words. Read by both the search expansion and the scorer, so a summary beats a pasted CV.</span>
+      <textarea name="background" rows="8" maxlength="{{ background_max_chars }}">{{ profile.background }}</textarea></label>
   </section>
 
   <section class="section">

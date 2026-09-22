@@ -24,7 +24,7 @@ from trouveur.db.schema import (
 # bump the version. Getting this wrong is not a crash, it is a surprise invoice.
 SCORING_FIELDS = frozenset(
     {
-        "title", "years_experience", "objectives", "languages", "must_have",
+        "title", "years_experience", "objectives", "background", "languages", "must_have",
         "keywords", "countries", "cities", "work_modes",
         "seniorities", "employment_types", "min_salary_eur_year",
     }

@@ -24,7 +24,7 @@ from trouveur.db.queries import freshness
 from trouveur.db.queries import match as match_q
 from trouveur.db.queries import users as users_q
 from trouveur.match import expand, llm, rerank, retrieve
-from trouveur.models import UserProfile
+from trouveur.models import Expansion, UserProfile
 from trouveur.versions import QUERY_EXPANSION_VERSION
 
 log = logging.getLogger(__name__)
@@ -84,8 +84,9 @@ async def run_for_user(user_id: int, settings: Settings | None = None) -> MatchR
             return report
         profile = profile_from_row(profile_row)
         credential = await users_q.get_credential(conn, user_id)
-        queries, adverts = await _queries(conn, settings, profile, credential, report)
+        expansion = await _queries(conn, settings, profile, credential, report)
 
+    queries, adverts = expansion.queries, expansion.adverts
     if not queries:
         report.errors.append(
             "This profile yields no search queries; set at least a title or some keywords."
@@ -101,19 +102,23 @@ async def run_for_user(user_id: int, settings: Settings | None = None) -> MatchR
 
     if credential is not None:
         async with connect() as conn:
-            await _rerank(conn, settings, profile, credential, report)
+            await _rerank(
+                conn, settings, profile, credential, report,
+                background=expansion.background_summary or expand.truncated_background(profile),
+            )
     log.info("match complete: %s", report.summary())
     return report
 
 
 async def _queries(
     conn: AsyncConnection, settings: Settings, profile: UserProfile, credential, report
-) -> tuple[list[str], list[str]]:
+) -> Expansion:
     """The expansion for this profile version, computed at most once per version.
 
-    Returns (queries, adverts). Queries run through both retrieval arms; adverts run through the
-    dense arm only -- see retrieve.retrieve_arms for why that is a constraint rather than a
-    preference.
+    Queries run through both retrieval arms; adverts run through the dense arm only -- see
+    retrieve.retrieve_arms for why that is a constraint rather than a preference. The background
+    summary is not a query at all: it is derived here because it shares this cache key, and it is
+    read by the reranker.
     """
     cached = await match_q.get_query_expansion(
         conn, profile.user_id, profile.version, QUERY_EXPANSION_VERSION
@@ -124,6 +129,7 @@ async def _queries(
     deterministic = expand.deterministic_queries(profile)
     generated: list[str] = []
     adverts: list[str] = []
+    summary = ""
     if credential is not None and deterministic:
         try:
             generated, usage = await expand.expand_with_model(
@@ -163,12 +169,34 @@ async def _queries(
             log.info("advert expansion unavailable for user %s: %s", profile.user_id, exc)
             report.errors.append(f"Advert expansion skipped: {exc}")
 
+        # A third independently survivable call. Distilling here rather than sending the raw
+        # field with every batch is what keeps this one cost per profile version instead of one
+        # per ten postings -- and keeps a long CV from crowding out the objectives.
+        if profile.background.strip():
+            try:
+                summary, summary_usage = await expand.summarise_background(
+                    settings,
+                    profile,
+                    api_key=decrypt(credential.api_key_encrypted),
+                    model=settings.default_llm_model,
+                    provider_pin=settings.default_llm_provider,
+                )
+                await users_q.add_spend(
+                    conn, profile.user_id, tokens_in=summary_usage.tokens_in,
+                    tokens_out=summary_usage.tokens_out, cost_usd=summary_usage.cost_usd,
+                )
+                report.cost_usd += summary_usage.cost_usd
+            except (llm.LlmError, CredentialError) as exc:
+                log.info("background summary unavailable for user %s: %s", profile.user_id, exc)
+                report.errors.append(f"Background summary skipped: {exc}")
+
     combined = expand.combine(deterministic, generated)
+    expansion = Expansion(queries=combined, adverts=adverts, background_summary=summary)
     if combined:
         await match_q.put_query_expansion(
-            conn, profile.user_id, profile.version, QUERY_EXPANSION_VERSION, combined, adverts
+            conn, profile.user_id, profile.version, QUERY_EXPANSION_VERSION, expansion
         )
-    return combined, adverts
+    return expansion
 
 
 async def _retrieve(
@@ -203,7 +231,13 @@ async def _retrieve(
 
 
 async def _rerank(
-    conn: AsyncConnection, settings: Settings, profile: UserProfile, credential, report
+    conn: AsyncConnection,
+    settings: Settings,
+    profile: UserProfile,
+    credential,
+    report,
+    *,
+    background: str = "",
 ) -> None:
     pending = await match_q.pending_rerank(
         conn, profile.user_id, profile.version, profile.rerank_limit
@@ -262,6 +296,7 @@ async def _rerank(
                 settings, profile, batch,
                 api_key=api_key, model=settings.default_llm_model,
                 provider_pin=settings.default_llm_provider,
+                background=background,
             )
         except llm.LlmError as exc:
             report.errors.append(str(exc))

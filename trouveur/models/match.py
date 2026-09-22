@@ -19,6 +19,19 @@ class UserState(StrEnum):
     DISMISSED = "dismissed"
 
 
+class Expansion(BaseModel):
+    """Everything derived from one profile version, in one place.
+
+    The three artifacts are produced by three separate model calls and fail independently, so any
+    of them can be empty while the others are not. They travel together because they share a
+    cache key -- (user, profile version, expansion version) -- and are recomputed as a set.
+    """
+
+    queries: list[str] = Field(default_factory=list)
+    adverts: list[str] = Field(default_factory=list)
+    background_summary: str = ""
+
+
 class RerankResult(BaseModel):
     job_id: int
     score: int = Field(ge=0, le=100)

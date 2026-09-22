@@ -6,6 +6,7 @@
       "title": "Wirtschaftsingenieur",
       "years_experience": 3,
       "objectives": "Nach dem M.Sc. Wirtschaftsingenieurwesen arbeite ich als wissenschaftlicher Assistent an nachhaltigen Produkt-Ökosystemen: Ökobilanzierung, Kreislaufwirtschaft und Wiederverwendungskonzepte für langlebige Investitionsgüter. Davor ein Traineeprogramm bei einem Bauunternehmen. Ich suche eine Position, die technisches Verständnis mit Nachhaltigkeitsstrategie verbindet, gern an der Schnittstelle zwischen Entwicklung und Management.",
+      "background": "M.Sc. Wirtschaftsingenieurwesen mit Schwerpunkt Produktionstechnik; Masterarbeit zur Materialflusssimulation. Seit drei Jahren wissenschaftlicher Assistent an einem Institut für Produktentwicklung: Aufbau von Ökobilanzen nach ISO 14040/14044 mit GaBi und openLCA, Product Carbon Footprints für Maschinenbaukunden, Bewertung von Remanufacturing- und Pfandmodellen für langlebige Investitionsgüter. Ein Drittmittelprojekt mit zwei Industriepartnern von der Antragstellung bis zum Abschlussbericht geführt, Budget rund 300 k€; fünf Abschlussarbeiten betreut; ein Konferenzbeitrag. Davor 18 Monate Traineeprogramm bei einem mittelständischen Bauunternehmen mit Stationen in Kalkulation, Arbeitsvorbereitung und Nachhaltigkeitsmanagement, inklusive Mitarbeit an der ersten DGNB-Zertifizierung des Hauses und an der CSRD-Vorbereitung. Werkzeuge: Excel und VBA, Python zur Datenaufbereitung, SAP MM aus dem Traineeship. Deutsch Muttersprache, Englisch verhandlungssicher.",
       "languages": [
         "de",
         "en"
@@ -36,6 +37,7 @@
       "title": "Backend Software Engineer",
       "years_experience": 5,
       "objectives": "I build backend services in Java with Spring Boot and MongoDB, plus some Kotlin. I want a small product company or startup where I own services end to end, rather than a large enterprise with heavy process. Comfortable with Docker, Kubernetes and event-driven architectures.",
+      "background": "Five years of backend work, all at companies under 200 people. Currently at a B2B SaaS company of about 60 engineers, owning three Java 21 and Spring Boot services end to end: a billing service, an event ingestion path taking roughly 4,000 messages a second off Kafka, and an internal API gateway. MongoDB as the primary store, Postgres for the billing ledger, Redis for caching. Led the move off a Jenkins pipeline to GitHub Actions and onto Kubernetes with Helm and ArgoCD; in the on-call rotation and wrote most of the runbooks. Kotlin for two newer services and for test code. Before that, three years at a logistics startup: Spring Boot REST APIs, RabbitMQ, Docker Compose everywhere, and the first Terraform anyone there had written. Day to day also OpenTelemetry, Grafana, JUnit 5 and Testcontainers. English at work; German at B2 and improving.",
       "languages": [
         "en",
         "de"
@@ -63,6 +65,7 @@
       "title": "Maschinenbauingenieur",
       "years_experience": 6,
       "objectives": "Ich bin Maschinenbauingenieur in der Instandhaltung und habe mich über Jahre zur Datenanalyse hin entwickelt: Auswertung von Sensordaten, Predictive Maintenance, Python und SQL. Ich möchte vollständig in eine datengetriebene Rolle wechseln, idealerweise im industriellen Umfeld, wo mein Maschinenverständnis noch zählt.",
+      "background": "Dipl.-Ing. Maschinenbau (TU), Vertiefung Antriebstechnik. Sechs Jahre bei einem Hersteller von Verpackungsmaschinen, zuletzt als Gruppenleiter Instandhaltung mit vier Technikern und Verantwortung für rund 120 Anlagen an zwei Standorten. In den letzten drei Jahren schrittweise von der klassischen Instandhaltung in die Auswertung gewechselt: Aufbau eines Schwingungs- und Temperaturmonitorings an kritischen Antrieben, Anbindung der SPS-Daten (Siemens S7) über OPC UA an eine TimescaleDB, Auswertung mit Python (pandas, scikit-learn) und SQL, Dashboards in Grafana. Ein Modell zur Restlebensdauerschätzung von Wälzlagern in den Produktivbetrieb gebracht; ungeplante Stillstände an der betreuten Linie um etwa ein Drittel gesenkt. Nebenberuflich zwei Data-Science-Zertifikate abgeschlossen, Abschlussprojekt zur Zeitreihenprognose. Ausserdem SAP PM, Git und Docker. Deutsch Muttersprache, Englisch B2.",
       "languages": [
         "de",
         "en"

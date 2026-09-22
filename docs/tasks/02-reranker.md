@@ -1,5 +1,13 @@
 # 02 — Measure and improve the reranker
 
+> **Answered 2026-09-22** — see [`evalx/FINDINGS-RERANKER.md`](../../evalx/FINDINGS-RERANKER.md).
+> A judged reference set of 792 postings exists and is reusable. The instability is real but is
+> an artifact of **batching**, not of the scoring form: position within a batch is worth 8-15
+> points and the company a posting keeps 8-39, against 5 points of run-to-run noise. Verdicts:
+> batch size **1** (not 10), scoring form **unchanged**, `rerank_limit` **unchanged at 150** and
+> reclassified as a reading budget. The batch change needs the paid loop made concurrent first,
+> which is left as its own piece of work.
+
 ## The problem
 
 The reranker decides what the user actually reads: everything it scores is shown, ordered by that

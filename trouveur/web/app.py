@@ -34,6 +34,7 @@ from trouveur.db.queries import match as match_q
 from trouveur.db.queries import users as users_q
 from trouveur.match.pipeline import profile_from_row
 from trouveur.models import (
+    BACKGROUND_MAX_CHARS,
     COUNTRY_NAMES,
     LANGUAGES,
     EmploymentType,
@@ -85,6 +86,23 @@ def _lines(raw: str) -> list[str]:
 
 class UnknownChoice(ValueError):
     pass
+
+
+class FieldTooLong(ValueError):
+    pass
+
+
+def _capped(raw: str, limit: int, what: str) -> str:
+    """Refuse an over-long free-text field rather than truncating it.
+
+    Truncating would store half a sentence and tell the user nothing, and this text is read by
+    two prompts whose attention budget is the reason the cap exists. The form carries the same
+    limit as a `maxlength`, so reaching this is a hand-crafted request.
+    """
+    value = raw.strip()
+    if len(value) > limit:
+        raise FieldTooLong(f"{what} is limited to {limit} characters; this one is {len(value)}.")
+    return value
 
 
 def _choices(raw: list[str], allowed: Iterable[str], what: str) -> list[str]:
@@ -349,6 +367,7 @@ async def profile_form(request: Request):
             "username": session["u"],
             "country_names": COUNTRY_NAMES,
             "language_names": LANGUAGES,
+            "background_max_chars": BACKGROUND_MAX_CHARS,
             "work_mode_options": _OPTIONS[WorkMode],
             "seniority_options": _OPTIONS[Seniority],
             "employment_type_options": _OPTIONS[EmploymentType],
@@ -362,6 +381,7 @@ async def profile_save(
     title: str = Form(""),
     years_experience: int = Form(0),
     objectives: str = Form(""),
+    background: str = Form(""),
     languages: str = Form(""),
     must_have: str = Form(""),
     keywords: str = Form(""),
@@ -378,6 +398,7 @@ async def profile_save(
             "title": title.strip(),
             "years_experience": max(0, years_experience),
             "objectives": objectives.strip(),
+            "background": _capped(background, BACKGROUND_MAX_CHARS, "Background"),
             "languages": _choices(_lines(languages), LANGUAGES, "language"),
             "must_have": _lines(must_have),
             "keywords": _lines(keywords),
@@ -390,7 +411,7 @@ async def profile_save(
             ),
             "min_salary_eur_year": _decimal(min_salary_eur_year, Decimal(0)),
         }
-    except UnknownChoice as exc:
+    except (UnknownChoice, FieldTooLong) as exc:
         return HTMLResponse(str(exc), status_code=400)
     async with connect() as conn:
         version, rescore = await users_q.save_profile(conn, session["uid"], values)

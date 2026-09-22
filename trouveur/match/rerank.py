@@ -41,6 +41,11 @@ Score each job 0-100 for how well it matches the candidate's profile and objecti
   40-69   plausible but compromised on an important dimension
   0-39    poor fit
 
+Where a background is given, it is evidence of what the candidate can already do and the
+objectives are what they want next. Weigh both: a role the background qualifies them for but the
+objectives reject is a poor fit, and so is one the objectives ask for but nothing in the
+background supports.
+
 Judge the substance of the role, not the polish of the advert. German and English adverts are
 equally valid and neither is preferred. Penalise heavily: staffing agencies, disguised sales
 roles, internships and working-student roles, and roles far junior or far senior to the
@@ -70,7 +75,14 @@ class RerankReport:
     errors: list[str] = field(default_factory=list)
 
 
-def build_prompt(profile: UserProfile, candidates: list) -> str:
+def build_prompt(profile: UserProfile, candidates: list, *, background: str = "") -> str:
+    """The profile block, then the batch.
+
+    `background` is the distilled summary from the expansion stage, not the raw field on the
+    profile. It arrives as an argument rather than being read off `profile` because it is derived
+    per profile version and cached there, and because the difference matters to the bill: this
+    block is re-sent with every batch, so what goes in it is multiplied by rerank_limit.
+    """
     listing = []
     for row in candidates:
         locations = ", ".join(
@@ -97,6 +109,7 @@ def build_prompt(profile: UserProfile, candidates: list) -> str:
         f"languages: {', '.join(profile.languages) or 'unstated'}\n"
         f"preferred cities: {', '.join(profile.cities) or 'none stated'}\n"
         f"objectives: {profile.objectives or 'unstated'}\n"
+        f"background: {background or 'unstated'}\n"
         f"must have: {'; '.join(profile.must_have) or 'none stated'}\n"
         f"minimum salary: {int(profile.min_salary_eur_year)} EUR/year\n\n"
         f"JOBS TO SCORE ({len(candidates)})\n\n" + "\n\n".join(listing)
@@ -150,13 +163,14 @@ async def score_batch(
     api_key: str,
     model: str,
     provider_pin: str | None,
+    background: str = "",
 ) -> tuple[list[_Score], llm.Usage]:
     completion = await llm.complete(
         api_key=api_key,
         model=model,
         provider_pin=provider_pin,
         system=_SYSTEM,
-        user=build_prompt(profile, candidates),
+        user=build_prompt(profile, candidates, background=background),
         max_tokens=_MAX_TOKENS,
         timeout=settings.llm_timeout_seconds,
     )
