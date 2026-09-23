@@ -57,6 +57,12 @@ class Settings(BaseSettings):
     # worker fills the new space while the dense arm keeps serving from the old one. They differ
     # only between the start of a backfill and the moment its coverage is complete.
     embedding_read_dim: int = 384
+    # Which provider embeds a QUERY. Empty means "the one that writes", which is every day that is
+    # not a migration. A width cannot say which model produced a space, and a query vector is
+    # compared against a stored one, so during a backfill the read side needs the outgoing model
+    # named explicitly: pgvector refuses a 768-wide query against the 384 column outright, so the
+    # half-migrated state the two widths exist to allow would otherwise fail every recommendation.
+    embedding_read_provider: str = ""
     embed_batch_size: int = 128
 
     # Sources to leave out of every sweep, comma separated. A source is retired by unsetting
