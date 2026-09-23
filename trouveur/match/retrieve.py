@@ -14,7 +14,7 @@ from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from trouveur.db.queries import match as match_q
-from trouveur.ingest.embed import get_provider
+from trouveur.ingest.embed import get_query_provider
 from trouveur.match.fuse import best_ranks, reciprocal_rank_fusion
 from trouveur.models import UserProfile
 
@@ -69,7 +69,7 @@ async def retrieve_arms(
     """
     if not queries and not adverts:
         return Arms()
-    provider = get_provider()
+    provider = get_query_provider()
     dense_queries = [*queries, *adverts]
     vectors = await provider.embed_queries(dense_queries) if dense_queries else []
     dense_budget = max(RETRIEVAL_LIMIT // max(len(dense_queries), 1), MIN_PER_QUERY)

@@ -51,6 +51,58 @@ def test_embedding_version_names_the_vector_space():
     assert str(EMBEDDING_DIM) in version
 
 
+def test_a_query_is_embedded_by_the_model_that_wrote_the_space_it_reads(monkeypatch):
+    """A width cannot say which model produced a space, and a query is compared against one.
+
+    Mid-backfill the worker writes 768 while the dense arm still reads 384. Embedding the query
+    with the writing model there is not a subtle loss of recall: pgvector refuses it outright --
+    "different halfvec dimensions 768 and 384" -- so every recommendation fails for as long as the
+    backfill runs, which is the exact window the two width settings exist to make safe.
+    """
+    from trouveur.ingest.embed import get_provider, get_query_provider
+
+    monkeypatch.setenv("EMBEDDING_PROVIDER", "local-onnx-mpnet")
+    monkeypatch.setenv("EMBEDDING_DIM", "768")
+    monkeypatch.setenv("EMBEDDING_READ_DIM", "384")
+    monkeypatch.setenv("EMBEDDING_READ_PROVIDER", "local-onnx")
+
+    assert get_provider().dim == 768, "the worker must write the new space"
+    assert get_query_provider().dim == 384, "retrieval must ask the old model for its query"
+
+
+def test_reads_follow_writes_when_no_read_provider_is_named(monkeypatch):
+    """Every day that is not a migration, the two are one model and need no second setting."""
+    from trouveur.ingest.embed import get_provider, get_query_provider
+
+    monkeypatch.setenv("EMBEDDING_PROVIDER", "deterministic")
+    monkeypatch.delenv("EMBEDDING_READ_PROVIDER", raising=False)
+
+    assert get_query_provider().name == get_provider().name
+
+
+def test_a_read_provider_that_does_not_fit_the_read_width_is_refused(monkeypatch):
+    """Rejected loudly, because the alternative is confident nonsense from the wrong space."""
+    from trouveur.ingest.embed import get_query_provider
+
+    monkeypatch.setenv("EMBEDDING_PROVIDER", "local-onnx")
+    monkeypatch.setenv("EMBEDDING_READ_DIM", "384")
+    monkeypatch.setenv("EMBEDDING_READ_PROVIDER", "local-onnx-mpnet")
+
+    with pytest.raises(RuntimeError, match="768"):
+        get_query_provider()
+
+
+def test_retrieval_asks_for_the_read_side_provider_not_the_writing_one():
+    """The call site is the whole fix; a helper nothing calls would be worth nothing."""
+    import inspect
+
+    from trouveur.match import retrieve
+
+    source = inspect.getsource(retrieve)
+    assert "get_query_provider()" in source
+    assert "get_provider()" not in source
+
+
 def test_embedding_text_puts_discriminating_fields_before_prose():
     text = embedding_text("Process Engineer", "ACME", ["Wien"], "x" * 5000)
     assert text.startswith("Process Engineer\nACME\nWien")
