@@ -158,7 +158,7 @@ def test_the_image_prewarms_the_model_the_code_actually_loads():
     """
     from pathlib import Path
 
-    from trouveur.ingest.embed.local import MODEL
+    from trouveur.ingest.embed.local import LocalOnnxMpnetProvider, LocalOnnxProvider
 
     dockerfile = (Path(__file__).resolve().parents[2] / "Dockerfile").read_text("utf-8")
     # Comments may name the old model to explain the trap; only the instructions must not.
@@ -166,9 +166,13 @@ def test_the_image_prewarms_the_model_the_code_actually_loads():
         line for line in dockerfile.splitlines() if not line.lstrip().startswith("#")
     )
     prewarm = instructions.split("FASTEMBED_CACHE_PATH", 1)[1]
-    assert "from trouveur.ingest.embed.local import MODEL" in prewarm
-    assert "model_name=MODEL" in prewarm
-    assert MODEL not in instructions
+    assert "from trouveur.ingest.embed.local import" in prewarm
+    assert "model_name=p.model" in prewarm
+    # Every local provider, not only the configured one: the model is chosen by a setting, so an
+    # image carrying just today's choice turns a model switch into a runtime download.
+    for provider in (LocalOnnxProvider, LocalOnnxMpnetProvider):
+        assert provider.__name__ in prewarm
+        assert provider.model not in instructions
     assert "intfloat/" not in instructions
 
 
@@ -306,3 +310,98 @@ async def test_a_match_only_run_sweeps_nothing_and_matches_one_user(monkeypatch)
     assert finished["run_id"] == 7 and finished["status"] == service.RunStatus.SUCCESS
     assert finished["report"]["matches"][0]["scored"] == 2
 
+
+
+async def test_detail_fetches_run_alongside_embedding_rather_than_in_front_of_it():
+    """Detail is network-bound and mostly asleep; in series it left the cores idle.
+
+    A measured tick with Workday's queue full was 135s, 40s of which was detail waiting on the
+    shared per-provider interval while nothing encoded. Here detail waits for a signal only the
+    embed half can send, so the old serial order cannot complete it: the failure is a timeout
+    rather than a number that happens to look wrong.
+    """
+    import asyncio
+
+    from trouveur.runner import service
+
+    embedding_reached = asyncio.Event()
+
+    async def fake_drain_detail(conn, client, sources, *, limit):
+        await asyncio.wait_for(embedding_reached.wait(), timeout=5)
+        return 7
+
+    async def fake_drain_embed(conn, *, limit):
+        embedding_reached.set()
+        return 11
+
+    done = await _run_drain(
+        service, detail=fake_drain_detail, embed=fake_drain_embed
+    )
+    assert done["detail"] == 7
+    assert done["embed"] == 11
+
+
+async def test_a_failing_detail_half_no_longer_stops_embedding():
+    """One stage's exception used to stop all four, silently, for hours.
+
+    A Workday external id raised ValueError out of drain_detail; `drain_queues` had no isolation,
+    so the tick died before derivation, dedupe or embedding ran. The embed queue sat still while
+    the log showed only a generic tick failure every 20 seconds.
+    """
+    from trouveur.runner import service
+
+    async def exploding_detail(conn, client, sources, *, limit):
+        raise ValueError("not enough values to unpack (expected 3, got 1)")
+
+    async def fake_drain_embed(conn, *, limit):
+        return 11
+
+    done = await _run_drain(
+        service, detail=exploding_detail, embed=fake_drain_embed
+    )
+    assert done["detail"] == 0, "the failing half must report no work, not crash the tick"
+    assert done["embed"] == 11, "embedding must still run when detail fails"
+
+
+async def _run_drain(service, *, detail, embed):
+    """Drive drain_queues with every seam stubbed: no database, no network, no model."""
+    from types import SimpleNamespace
+
+    import pytest as _pytest
+
+    class _Conn:
+        async def __aenter__(self):
+            return None
+
+        async def __aexit__(self, *exc):
+            return False
+
+    class _Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+    async def fake_enabled_tenants(conn):
+        return {}
+
+    async def fake_drain_derive(conn):
+        return 3
+
+    async def fake_drain_dedup(conn):
+        return 5
+
+    monkeypatch = _pytest.MonkeyPatch()
+    try:
+        monkeypatch.setattr(service, "connect", lambda: _Conn())
+        monkeypatch.setattr(service, "PoliteClient", lambda: _Client())
+        monkeypatch.setattr(service, "build_sources", lambda **kwargs: [])
+        monkeypatch.setattr(service.admin_q, "enabled_tenants", fake_enabled_tenants)
+        monkeypatch.setattr(service.workers, "drain_detail", detail)
+        monkeypatch.setattr(service.workers, "drain_derive", fake_drain_derive)
+        monkeypatch.setattr(service.workers, "drain_dedup", fake_drain_dedup)
+        monkeypatch.setattr(service.workers, "drain_embed", embed)
+        return await service.drain_queues(SimpleNamespace(embed_batch_size=128))
+    finally:
+        monkeypatch.undo()
