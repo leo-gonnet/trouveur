@@ -1,10 +1,6 @@
 """Jobicy payload -> CanonicalJob. Pure: no I/O, no clock, no database.
 
-Jobicy prefixes every field with `job`, so the title is `jobTitle` and the description is
-`jobDescription`. Reading `title` yields None and the posting is dropped as untitled.
-
-`jobGeo` names where the role may be worked from ("USA", "Anywhere"), not an office address. It is
-passed through unparsed, as with every other source's location string.
+Every field is `job`-prefixed: the title is `jobTitle`, not `title`.
 """
 
 from __future__ import annotations
@@ -38,7 +34,6 @@ _PERIODS = {
 def normalize(
     listing: dict, detail: dict | None = None, *, external_id: str | None = None
 ) -> CanonicalJob | None:
-    # Every field is `job`-prefixed; there is no bare `title` key.
     title = collapse_whitespace(listing.get("jobTitle"))
     if not listing.get("id") or not title or not external_id:
         return None
@@ -54,7 +49,6 @@ def normalize(
         posted_at=iso_datetime(listing.get("pubDate")),
         locations=_locations(listing.get("jobGeo")),
         salary=_salary(listing),
-        # Jobicy is a remote-only board.
         remote_hint=True,
         employment_type_hint=_first(listing.get("jobType")),
         department_hint=_first(listing.get("jobIndustry")),

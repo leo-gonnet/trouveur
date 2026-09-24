@@ -1,12 +1,8 @@
 """Deterministic facet derivation. Pure: no I/O, no clock, no database.
 
-Interpretation lives here and only here. Everything downstream reads facets and never re-parses a
-location or re-extracts a skill, because two implementations of one question diverge, and the
-divergence surfaces as a filter and a score disagreeing about the same posting.
-
-The governing rule is: never guess. Every unmatched value derives to UNKNOWN or to nothing at all.
-A missing facet costs a little recall in one filter; a wrong one silently poisons every filter and
-every ranking that touches it while looking exactly like data.
+Interpretation lives here and ONLY here; nothing downstream re-parses. Never guess: an unmatched
+value derives to UNKNOWN or to nothing, because a wrong facet poisons every filter that reads it
+while looking exactly like data.
 """
 
 from __future__ import annotations
@@ -29,9 +25,7 @@ from trouveur.versions import DERIVE_VERSION
 
 version = DERIVE_VERSION
 
-# Deliberately generous: this only decides whether a posting clears a salary floor, and
-# over-estimating lets a borderline job through to be judged on its merits, while
-# under-estimating silently hides it. Austrian contracts commonly pay 14 monthly salaries.
+# Austrian contracts commonly pay 14 monthly salaries.
 _MONTHS_PER_YEAR = {"AT": 14}
 _DEFAULT_MONTHS = 12
 _WEEKS_PER_YEAR = 52
@@ -82,8 +76,7 @@ def _places(locations: list[Location]) -> tuple[list[str], list[str], list[str],
         if location.city:
             cities.append(_city(location.city))
 
-        # Only parse the free text where the source gave no structure. A source that already
-        # stated its address is never second-guessed.
+        # Only parse free text where the source gave no structure.
         if not (location.country and location.city):
             parsed_country, parsed_city, remote = _parse_free_text(location.raw)
             says_remote = says_remote or remote
@@ -96,14 +89,10 @@ def _places(locations: list[Location]) -> tuple[list[str], list[str], list[str],
 
 
 def _parse_free_text(raw: str) -> tuple[str | None, str | None, bool]:
-    """Read a free-text location such as 'Remote, Canada', 'Bangalore, India' or 'AT, Vienna'.
+    """Read a free-text location such as 'Remote, Canada' or 'AT, Vienna'.
 
-    The country is not always last. Sources that write it first are common enough to matter --
-    Workday states 'AT, Vienna' -- and reading positionally put the country code in the city
-    column and left the country empty, which is a wrong facet and a missing one from one mistake.
-
-    Parts are searched from the end so that the previous reading still wins wherever it was
-    already right: 'Georgia, US' resolves to US, not to Georgia the country.
+    The country is NOT always last -- Workday writes 'AT, Vienna' -- so it is looked for wherever
+    it sits, from the end, which keeps 'Georgia, US' resolving to US.
     """
     parts = [part.strip() for part in raw.split(",") if part.strip()]
     if not parts:
@@ -134,14 +123,8 @@ def _city(value: str) -> str:
 def _work_mode(
     item: CanonicalJob, title: str, location_text: str, location_says_remote: bool
 ) -> WorkMode:
-    """Structured hint, then the location, then the title. Never the description.
-
-    Descriptions are company boilerplate as much as role description, and scanning them reads the
-    employer's culture rather than this vacancy's arrangement: GitLab describing itself as an
-    all-remote company marked an explicitly Bangalore-based role remote, and any employer whose
-    benefits blurb mentions remote work would do the same to its on-site roles.
-    """
-    # A structured claim from the source outranks anything found in prose.
+    """Structured hint, then the location, then the title. NEVER the description: an all-remote
+    employer's boilerplate marked an explicitly Bangalore-based role remote."""
     if item.remote_hint is True:
         return WorkMode.REMOTE
     if location_says_remote:
@@ -151,18 +134,14 @@ def _work_mode(
     for terms, mode in vocab.WORK_MODE_BY_TERM:
         if any(term in haystack for term in terms):
             return mode
-    # remote_hint False is the source stating there is no home office, which is a real answer.
+    # False is the source stating there is no home office, which is a real answer.
     if item.remote_hint is False:
         return WorkMode.ONSITE
     return WorkMode.UNKNOWN
 
 
 def _seniority(title: str) -> Seniority:
-    """Title only.
-
-    Descriptions mention seniority constantly in requirements ("reporting to a senior manager",
-    "you will mentor juniors"), so matching them classifies the wrong thing.
-    """
+    """Title only: descriptions mention seniority in requirements and classify the wrong thing."""
     for term, level in vocab.SENIORITY_TERMS:
         if term in title:
             return level
@@ -199,8 +178,8 @@ def _annualise(item: CanonicalJob, countries: list[str], *, minimum: bool) -> De
     salary = item.salary
     if salary is None:
         return None
-    # Converting a non-euro salary would need an exchange rate, and a stale rate is a wrong
-    # number that looks right. Only euro amounts become euro facets.
+    # A conversion would need an exchange rate, and a stale rate is a wrong number that looks
+    # right. Only euro amounts become euro facets.
     if salary.currency != "EUR":
         return None
     amount = salary.amount_min if minimum else salary.amount_max

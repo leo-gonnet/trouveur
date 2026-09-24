@@ -23,11 +23,8 @@ from trouveur.models import RunStatus, RunTrigger, TenantOrigin
 
 
 async def enabled_tenants(conn: AsyncConnection) -> dict[str, list[str]]:
-    """The crawl set, grouped by source, so the pipeline loads every source's tenants at once.
-
-    Grouped rather than fetched per source on purpose: the pipeline must not have to know which
-    sources are tenant-scoped, or adding one becomes an edit there as well as in the registry.
-    """
+    """The crawl set, grouped by source, so the pipeline loads every source's tenants at once
+    and never has to know which sources are tenant-scoped."""
     rows = await conn.execute(
         sa.select(source_tenant.c.source, source_tenant.c.scope)
         .where(source_tenant.c.enabled.is_(True))
@@ -152,8 +149,8 @@ async def record_scope_health(
         stmt.on_conflict_do_update(
             index_elements=[source_scope_health.c.source, source_scope_health.c.scope],
             set_={
-                # A success resets the streak; a failure extends whatever was already there, so a
-                # slug that has been 404ing for a week is visibly different from one that blipped.
+                # A success resets the streak, a failure extends it, so a slug that has been
+                # 404ing for a week reads differently from one that blipped.
                 "last_ok_at": sa.func.coalesce(
                     stmt.excluded.last_ok_at, source_scope_health.c.last_ok_at
                 ),
@@ -170,11 +167,8 @@ async def record_scope_health(
 
 
 async def scope_health(conn: AsyncConnection, failing_only: bool = False) -> list[sa.Row]:
-    """Per-tenant health, worst first.
-
-    A tenant that has been failing for days is a line to remove from the registry file in the
-    repository, so this is the panel that drives an actual code change rather than a UI edit.
-    """
+    """Per-tenant health, worst first. A tenant failing for days is one to drop with
+    `trouveur tenants remove`; the dashboard shows this read-only."""
     stmt = source_scope_health.select()
     if failing_only:
         stmt = stmt.where(source_scope_health.c.consecutive_failures > 0)
@@ -211,12 +205,8 @@ async def recent_sweeps(conn: AsyncConnection, limit: int = 20) -> list[sa.Row]:
 
 
 async def source_health(conn: AsyncConnection) -> list[sa.Row]:
-    """Latest sweep per source.
-
-    Surfaces completeness and partition overflow, not just success: a sweep that ran fine while
-    silently reaching only the first 10000 rows of a partition is the failure mode worth seeing,
-    and it looks identical to a healthy one in any count of documents collected.
-    """
+    """Latest sweep per source, with completeness and partition overflow -- not just success. A
+    sweep that reached only the first 10000 rows of a partition looks healthy by any count."""
     latest = (
         sa.select(
             source_sweep.c.source,
@@ -256,11 +246,7 @@ async def corpus_overview(conn: AsyncConnection) -> sa.Row:
 
 
 async def description_coverage(conn: AsyncConnection) -> int:
-    """Open postings that actually have a description.
-
-    A posting with only a title embeds on far less text, so the share of the corpus that has one
-    changes what any retrieval measurement means.
-    """
+    """Open postings that actually have a description."""
     return int(
         (
             await conn.execute(
@@ -274,22 +260,17 @@ async def description_coverage(conn: AsyncConnection) -> int:
 
 
 async def derived_coverage(conn: AsyncConnection, fresh_since: datetime) -> sa.Row:
-    """How much of the open corpus is actually usable by retrieval.
-
-    Facets and embeddings arrive asynchronously, so a job can be stored, searchable and still
-    invisible to the recommender. Counting them separately makes that gap visible instead of
-    looking like poor recall.
-    """
+    """How much of the open corpus is actually usable by retrieval. Facets and embeddings arrive
+    asynchronously, so a stored, searchable job can still be invisible to the recommender."""
     return (
         await conn.execute(
             sa.text(
                 """
                 SELECT
                     (SELECT count(*) FROM job WHERE closed_at IS NULL) AS open_jobs,
-                    -- The denominator embedding coverage is actually measured against.
-                    -- job_embedding holds postings that are open AND inside the freshness
-                    -- horizon, so comparing it to open_jobs reports a permanent shortfall that
-                    -- is the policy working, not a backlog.
+                    -- The denominator coverage is measured against: job_embedding holds
+                    -- postings open AND inside the horizon, so comparing it to open_jobs
+                    -- reports a permanent shortfall that is the policy, not a backlog.
                     (SELECT count(*) FROM job j
                      WHERE j.closed_at IS NULL
                        AND COALESCE(j.posted_at, j.first_seen_at) > :fresh_since) AS fresh_jobs,
@@ -297,10 +278,8 @@ async def derived_coverage(conn: AsyncConnection, fresh_since: datetime) -> sa.R
                      WHERE j.closed_at IS NULL AND f.derive_version > 0) AS derived,
                     (SELECT count(*) FROM job_embedding) AS embedded,
                     (SELECT count(DISTINCT embedding_version) FROM job_embedding) AS vector_spaces,
-                    -- Coverage per vector space, because a model change is backfilled over days
-                    -- and "how far along is it" is the question that decides when retrieval may
-                    -- start reading the new space. Guessing it from the embedded total hides the
-                    -- fact that the two spaces are covered to different depths.
+                    -- Per vector space: a model change is backfilled over days, and the total
+                    -- hides that the two spaces are covered to different depths.
                     (SELECT count(*) FROM job_embedding e JOIN job j ON j.id = e.job_id
                      WHERE j.closed_at IS NULL AND e.embedding IS NOT NULL) AS embedded_384,
                     (SELECT count(*) FROM job_embedding e JOIN job j ON j.id = e.job_id
@@ -373,10 +352,8 @@ async def last_match_for_user(conn: AsyncConnection, user_id: int) -> sa.Row | N
 
 
 async def pending_match_run(conn: AsyncConnection, user_id: int) -> sa.Row | None:
-    """The match-only run this user already has queued or running, if any.
-
-    One is enough: a second would re-read the same rows on the same key.
-    """
+    """The match-only run this user already has queued or running, if any. One is enough: a
+    second would re-read the same rows on the same key and bill for it."""
     return (
         await conn.execute(
             pipeline_run.select()
@@ -391,11 +368,7 @@ async def pending_match_run(conn: AsyncConnection, user_id: int) -> sa.Row | Non
 
 
 async def claim_next_run(conn: AsyncConnection) -> sa.Row | None:
-    """Take the next queued run.
-
-    SKIP LOCKED so a second runner cannot pick up the same row, and a bounded attempts column so a
-    run that keeps crashing eventually stops being retried rather than looping forever.
-    """
+    """Take the next queued run. SKIP LOCKED so a second runner cannot pick up the same row."""
     ready = (
         sa.select(pipeline_run.c.id)
         .where(
@@ -455,12 +428,9 @@ async def active_run(conn: AsyncConnection) -> sa.Row | None:
 
 
 async def request_cancel(conn: AsyncConnection, run_id: int) -> bool:
-    """Ask a run to stop. Only a flag: the runner decides when it is safe to act on it.
-
-    A queued run has not started, so it is cancelled outright. A running one is left to the runner,
-    which stops between sources -- killing it mid-source would leave a partially observed source
-    that must never be treated as complete.
-    """
+    """Ask a run to stop. Only a flag: a queued run is cancelled outright, a running one is left
+    to the runner, which stops BETWEEN sources -- a partially observed source must never be
+    treated as complete."""
     cancelled_now = await conn.execute(
         pipeline_run.update()
         .where(
@@ -513,11 +483,7 @@ async def advance_run_progress(
 
 
 async def running_sweeps(conn: AsyncConnection) -> list[sa.Row]:
-    """Sweeps with no verdict yet -- the ones happening right now.
-
-    `start_sweep` inserts the row before the first request, so a source appears here the moment it
-    begins and its documents_seen climbs while it works.
-    """
+    """Sweeps with no verdict yet -- the ones happening right now."""
     return list(
         await conn.execute(
             sa.select(
@@ -534,9 +500,9 @@ async def running_sweeps(conn: AsyncConnection) -> list[sa.Row]:
 async def typical_sweep_seconds(conn: AsyncConnection, limit: int = 5) -> dict[str, float]:
     """Median wall-clock seconds per source over its last few finished sweeps.
 
-    The only defensible basis for an estimate: how long this source actually took here, on this
-    crawl set. A source with no history is absent from the result rather than guessed at, so the
-    page can say it does not know instead of inventing a number.
+    A source with no history is ABSENT rather than guessed at, so the page can say it cannot
+    estimate yet. Averaging across sources would be fiction: a board is seconds, Arbeitsagentur
+    is half an hour.
     """
     rows = await conn.execute(
         sa.text(

@@ -1,14 +1,8 @@
 """Sweeping sources that publish a tenant's complete board in one request.
 
-Greenhouse, Ashby, Lever, Breezy, Rippling and Personio differ only in the URL they answer on and
-the shape of what comes back. Everything else -- looping tenants, isolating one board's failure
-from the rest, batching to the sink, recording per-scope health, deciding what may be closed --
-is the same, and was the same in each of them before this module existed.
-
-The property that makes them one family is worth stating, because it is what `closable_scopes`
-depends on: the response IS the tenant's live set, so a posting we hold in that scope and did not
-see is genuinely gone. A source that pages, filters or windows its results is not in this family
-and must not be forced into it -- see feed.py.
+What makes them one family is what `closable_scopes` depends on: the response IS the tenant's
+live set. A source that pages, filters or windows its results is not in this family -- see
+feed.py.
 """
 
 from __future__ import annotations
@@ -26,23 +20,15 @@ from trouveur.sources.http import PoliteClient
 
 log = logging.getLogger(__name__)
 
-# Boards are handed to the sink in batches rather than as one multi-megabyte list, so a large
-# tenant does not turn into a single oversized transaction.
 BATCH = 200
 
-# Extracts the postings from one board response. Returns the rows; anything else about the
-# envelope (totals, api version) is the source's business and stays in its own module.
 Extract = Callable[[Any], list[dict]]
-# The posting's id within its board, as the source states it.
 IdentifyFn = Callable[[dict], object]
 
 
 def scoped_id(scope: str, job_id: object) -> str:
-    """Scope a board's own id by tenant.
-
-    Nothing documents any of these platforms' ids as globally unique, and a collision between two
-    tenants would silently merge two unrelated postings onto one row.
-    """
+    """Scope a board's own id by tenant. None of these platforms documents its ids as globally
+    unique, and a collision would silently merge two unrelated postings onto one row."""
     return f"{scope}:{job_id}"
 
 
@@ -86,9 +72,7 @@ async def sweep_boards(
         outcome.partitions_done += 1
         outcome.expected = (outcome.expected or 0) + (expected if expected is not None else seen)
         outcome.scope_results.append(ScopeResult(scope=scope, ok=True, documents=seen))
-        # Recorded per board, not per source: one tenant's board failing tells us nothing about
-        # another's, and closing a whole source on a partial sweep would retire every posting
-        # belonging to the boards that did not answer.
+        # Per board, not per source: one tenant's board failing says nothing about another's.
         outcome.closable_scopes.append(scope)
     return outcome
 
@@ -108,9 +92,7 @@ async def _sweep_one(
     decode: Callable[[httpx.Response], Any] | None,
 ) -> tuple[int, int | None]:
     response = await client.get(url, params=params, headers=headers)
-    # A retired or renamed board is a registry problem to surface in the UI, not a sweep failure
-    # -- but it must not be mistaken for "this board has no jobs" either, which is why it raises
-    # rather than returning zero.
+    # Raises rather than returning zero: a dead board must not read as "this board has no jobs".
     if response.status_code == 404:
         raise FetchError(f"{source} board {scope!r} does not exist (HTTP 404).")
     if response.status_code != 200:

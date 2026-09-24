@@ -1,12 +1,7 @@
 """The runner: the only process that sweeps sources and drains queues.
 
-It owns the schedule and the run queue. The web app enqueues rows and reads status; it never
-executes a scan. The two share nothing but Postgres, so either can be restarted, upgraded or fall
-over without taking the other with it.
-
-Each tick does queue work first and run work second. That ordering matters: detail fetches,
-derivation and embedding are what make yesterday's sweep usable, and a runner that only worked
-during a scan would leave the corpus permanently one step behind itself.
+Each tick does queue work FIRST and run work second: draining is what makes yesterday's sweep
+usable, and a runner that only worked during a scan would leave the corpus a step behind itself.
 """
 
 from __future__ import annotations
@@ -140,8 +135,7 @@ async def _execute(settings: Settings, run) -> None:
         control=_progress_control(run.id),
     )
     if report.cancelled:
-        # Stop before matching and before digests. Cancelling a scan should not still spend the
-        # user's LLM credit on whatever the interrupted sweep happened to collect.
+        # Before matching and digests: cancelling must not still spend a user's LLM credit.
         async with connect() as conn:
             await admin_q.finish_run(
                 conn,
@@ -152,9 +146,8 @@ async def _execute(settings: Settings, run) -> None:
         log.info("run %s cancelled after %d source(s)", run.id, len(report.per_source))
         return
 
-    # Matching runs after ingest, but deliberately not gated on the queues being empty: a user
-    # should see today's postings ranked as soon as they are usable, not only once the last
-    # embedding in a 36k backlog has landed.
+    # Not gated on the queues being empty: a user should see today's postings as soon as they
+    # are usable, not once the last embedding in a 36k backlog has landed.
     matches = await matching.run_all(settings)
     notified = 0
     if settings.smtp_host:
@@ -208,7 +201,6 @@ async def _execute_match_only(settings: Settings, run) -> None:
 async def _tick(settings: Settings) -> None:
     async with connect() as conn:
         await admin_q.fail_orphaned_runs(conn)
-        # A claim outliving its worker would otherwise pin those items forever.
         await release_stale(conn)
         await _maybe_enqueue_scheduled(conn)
 

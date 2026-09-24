@@ -1,12 +1,5 @@
-"""SMTP digest, one per user per run.
-
-Contains the best-scoring postings that have not been sent before. notified_at is
-written in the same transaction that sends, so a re-run sends nothing rather than repeating a
-digest the user already read.
-
-A user with no address simply gets no digest: the web UI is the primary surface and email is a
-convenience, so a missing address is a configuration state, not an error.
-"""
+"""SMTP digest, one per user per run: the best-scoring postings not sent before. A user with no
+address simply gets no digest."""
 
 from __future__ import annotations
 

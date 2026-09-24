@@ -1,25 +1,10 @@
 """Workable's public job board — network only, no parsing.
 
 robots.txt (jobs.workable.com, checked 2026-09-09): `Content-Signal: search=yes, ai-input=yes,
-ai-train=no`, with `Disallow: /search`, `/search*?*`, `/profile*`. The `/api/` path this adapter
-uses is not disallowed. We index and retrieve; we do not train.
+ai-train=no`, disallowing `/search`, `/search*?*`, `/profile*`. The `/api/` path used here is not
+disallowed. We index and retrieve; we do not train.
 
-This is the one global source with no tenant registry at all, which is why it is worth its own
-adapter even though Workable also has a per-tenant board API.
-
-Shape verified live on 2026-09-09:
-
-  - ~170 000 postings in one corpus, ordered NEWEST FIRST, paged by opaque `nextPageToken`;
-  - **the page size is fixed at 20 and cannot be raised.** Sending `limit=100` returns HTTP 200
-    with no `jobs` key and no token at all -- an empty result that reads as "the corpus ended"
-    rather than as a rejected parameter. So no page-size parameter is ever sent;
-  - unknown query parameters are silently ignored rather than rejected, so a filter that looks
-    like it applied may not have. Nothing here relies on one;
-  - `location` is already structured as city/subregion/countryName, and the description is inline,
-    so there is no detail phase.
-
-Sweeping the whole corpus is 8 500 requests, so the daily run is a delta over the recency
-ordering; see feed.sweep_feed for why that means it may close nothing.
+The page size is fixed at 20 and unknown parameters are silently ignored -- see `fetch`.
 """
 
 from __future__ import annotations
@@ -41,7 +26,6 @@ _JOBS_URL = "https://jobs.workable.com/api/v1/jobs"
 class WorkableSource:
     name = SOURCE
     requires_detail = False
-    # No tenant list: this endpoint is the whole corpus.
     tenant_scoped = False
 
     def __init__(self, delta_window: timedelta | None = None) -> None:
@@ -51,7 +35,7 @@ class WorkableSource:
         self, client: PoliteClient, sink: DocumentSink, *, backfill: bool = False
     ) -> SweepOutcome:
         async def fetch(cursor: object | None) -> Any:
-            # Deliberately no page-size parameter: an unsupported `limit` returns an empty body
+            # Never send a page-size parameter: an unsupported `limit` returns an empty body
             # that is indistinguishable from the end of the corpus.
             params = {"query": ""}
             if cursor:

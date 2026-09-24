@@ -1,12 +1,8 @@
 """Routes, auth and templates.
 
-The web layer reads the database and enqueues work. It never fetches from a source, never runs a
-sweep and never calls a model directly: web and runner share nothing but Postgres, so either can
-be down without taking the other with it.
-
-It also never re-derives. Everything shown here comes from stored facets; a template that parses
-a location or infers a work mode would be a second implementation of a question already answered
-in trouveur/ingest/derive.py, and the two would drift.
+Reads the database and enqueues work; never fetches, never sweeps, never re-derives. Everything
+shown comes from stored facets -- a template that parses a location is a second implementation
+of a question ingest/derive.py already answered.
 """
 
 from __future__ import annotations
@@ -52,21 +48,17 @@ log = logging.getLogger(__name__)
 BASE = Path(__file__).parent
 app = FastAPI(title="Trouveur", docs_url=None, redoc_url=None, openapi_url=None)
 app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")
-# StrictUndefined, not Jinja's default. The default renders an unknown attribute as an empty
-# string, so a template reading a field its query does not select produces a blank cell and a
-# green test suite -- the exact silent-wrong-answer failure this codebase is built to avoid.
+# StrictUndefined, not Jinja's default: the default renders an unknown attribute as an empty
+# string, so a template reading a field its query does not select gives a blank cell and a green
+# suite.
 templates = Jinja2Templates(directory=BASE / "templates")
 templates.env.undefined = StrictUndefined
 templates.env.globals["version"] = importlib.metadata.version("trouveur")
 
 
 def _posted_age(value) -> str:
-    """How old a posting is, in words.
-
-    On every card, because an edition is keyed on the day a posting became a recommendation and
-    not on the day it was published -- the two differ, and a reader who assumes otherwise will
-    eventually be surprised by a three-day-old advert in today's edition.
-    """
+    """How old a posting is, in words. On every card, because an edition is keyed on the day a
+    posting became a recommendation, not the day it was published."""
     if value is None:
         return "date not stated"
     days = (datetime.now(UTC) - value).days
@@ -93,12 +85,7 @@ class FieldTooLong(ValueError):
 
 
 def _capped(raw: str, limit: int, what: str) -> str:
-    """Refuse an over-long free-text field rather than truncating it.
-
-    Truncating would store half a sentence and tell the user nothing, and this text is read by
-    two prompts whose attention budget is the reason the cap exists. The form carries the same
-    limit as a `maxlength`, so reaching this is a hand-crafted request.
-    """
+    """Refuse an over-long free-text field rather than truncating it to half a sentence."""
     value = raw.strip()
     if len(value) > limit:
         raise FieldTooLong(f"{what} is limited to {limit} characters; this one is {len(value)}.")
@@ -106,8 +93,8 @@ def _capped(raw: str, limit: int, what: str) -> str:
 
 
 def _choices(raw: list[str], allowed: Iterable[str], what: str) -> list[str]:
-    """Keep only values the form offered. An off-list value is a hand-crafted request, and one
-    that reached the table used to break the profile page for that user on every load after."""
+    """Keep only values the form offered. An off-list value that reached the table used to 500
+    the profile page and the match run for that user until someone edited the row."""
     allowed = set(allowed)
     values = [item.strip() for item in raw if item.strip()]
     for value in values:
@@ -123,8 +110,7 @@ def _decimal(raw: str, default: Decimal) -> Decimal:
         return default
 
 
-# Public by opt-in, never by omission. A route absent from this set requires a session, so the
-# failure mode of forgetting to think about auth is "locked", not "open".
+# Public by opt-in, never by omission: the failure mode of forgetting about auth is "locked".
 PUBLIC_PATHS = frozenset({"/", "/login", "/logout", "/healthz"})
 PUBLIC_PREFIXES = ("/static/",)
 
@@ -141,20 +127,14 @@ def _is_public(path: str) -> bool:
 async def require_session(request: Request, call_next):
     """Enforce authentication before anything else looks at the request.
 
-    Middleware rather than a per-handler check or a dependency, because both of those run after
-    FastAPI has already parsed and validated the request body: an anonymous POST with a malformed
-    form was answering 422, which means attacker-controlled input was being processed before the
-    caller was known. Nothing leaked, but the ordering was safe only by accident.
-
-    Doing it here also removes the two-line check that was repeated in every handler, which is the
-    repetition that guarantees somebody eventually forgets it on a new route.
+    Middleware, not a dependency: both a per-handler check and a dependency run AFTER FastAPI has
+    parsed the request body, so an anonymous POST was being processed before the caller was known.
     """
     session = _session(request)
     request.state.session = session
     if session is None and not _is_public(request.url.path):
         return RedirectResponse("/login", status_code=303)
-    # Every page carries the "no key" banner, so the one fact it needs is read here rather than
-    # passed by each route -- a route that forgot would hide the banner on exactly one page.
+    # Set here, not per route: a route that forgot would hide the banner on exactly one page.
     request.state.needs_key = False
     if session is not None and not _is_public(request.url.path):
         async with connect() as conn:
@@ -199,16 +179,14 @@ async def logout():
 async def recommendations(request: Request, edition: str = ""):
     """One day's recommendations. The latest by default; older ones stay reachable.
 
-    A day, rather than a single growing list, because the list had no time axis: a strong posting
-    from three weeks ago outranked everything that arrived this morning and stayed pinned there
-    until it was dismissed. `?edition=` is a date, and an edition is immutable -- it is what was
-    recommended that day, under the profile in force that day.
+    A day rather than one growing list, which had no time axis: a strong posting from three weeks
+    ago outranked everything that arrived this morning until it was dismissed.
     """
     session = request.state.session
     async with connect() as conn:
         profile_row = await users_q.get_profile(conn, session["uid"])
-        # Everything that was reranked is shown, so the page is exactly as long as the user's
-        # rerank budget -- the one number they already set, rather than a second one to tune.
+        # Everything reranked is shown: volume is bounded once, by rerank_limit. There is no
+        # score threshold, and re-adding one is a regression.
         limit = profile_row.rerank_limit if profile_row else 150
         available = await match_q.editions(conn, session["uid"])
         chosen = _chosen_edition(edition, available)
@@ -227,7 +205,6 @@ async def recommendations(request: Request, edition: str = ""):
             "jobs": jobs,
             "editions": available,
             "edition": chosen,
-            # Editions are newest first, so "older" is the next index along.
             "older": days[index + 1] if 0 <= index < len(days) - 1 else None,
             "newer": days[index - 1] if index > 0 else None,
             "is_latest": index == 0,
@@ -241,11 +218,7 @@ async def recommendations(request: Request, edition: str = ""):
 
 
 def _chosen_edition(requested: str, available: list):
-    """The requested edition, or the latest. An unknown date falls back rather than 404s.
-
-    A stale bookmark is not an error worth a page of its own: the useful answer to "that edition
-    is gone" is the current one.
-    """
+    """The requested edition, or the latest. An unknown date falls back rather than 404s."""
     if not available:
         return None
     if requested:
@@ -337,8 +310,8 @@ async def set_state(request: Request, job_id: int, state: str = Form(...)):
     )
 
 
-# UNKNOWN is offered on purpose: a hard filter excludes every posting whose facet was not
-# stated, so "not stated" is how a user keeps them.
+# UNKNOWN is offered on purpose: a hard filter drops every posting whose facet is unstated the
+# moment it is set, and this is how a user keeps them.
 _OPTIONS = {
     enum: [
         (member.value, "not stated" if member == "unknown" else member.replace("_", " "))
@@ -354,8 +327,7 @@ async def profile_form(request: Request):
     async with connect() as conn:
         row = await users_q.get_profile(conn, session["uid"])
         profile = profile_from_row(row)
-        # Priced before the edit, not billed after it: changing a scoring field invalidates this
-        # user's cached scores, and they should see what that costs before committing to it.
+        # Priced before the edit, not billed after it.
         pending = await match_q.count_pending_rerank(conn, session["uid"], profile.version + 1)
     return templates.TemplateResponse(
         request,
@@ -438,8 +410,7 @@ async def settings_form(request: Request):
             "model": settings.default_llm_model,
             "provider": settings.default_llm_provider or "",
             "profile": profile,
-            # Never the key itself. The form shows a fingerprint so the user can tell which key is
-            # stored without this page being able to disclose it to anyone who reaches it.
+            # Never the key itself, not even to the user who set it.
             "credential": credential,
             "spend": spend,
             "history": history,
@@ -470,8 +441,7 @@ async def settings_save(
                 monthly_budget_usd=budget,
             )
         else:
-            # An empty key field means "leave the stored key alone", not "delete it": re-typing a
-            # secret to change an unrelated budget is how secrets end up in shell history.
+            # Empty means "leave the stored key alone", not "delete it".
             existing = await users_q.get_credential(conn, session["uid"])
             if existing is not None:
                 await users_q.update_budget(conn, session["uid"], budget)

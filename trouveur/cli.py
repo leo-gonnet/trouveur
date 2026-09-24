@@ -1,9 +1,4 @@
-"""Command line entry points.
-
-Commands are split along the same seams as the code: sweeping, matching and draining are separate
-because they have separate costs and separate failure modes, and because being able to run one
-without the others is what makes the system debuggable.
-"""
+"""Command line entry points."""
 
 from __future__ import annotations
 
@@ -79,9 +74,8 @@ def drain(rounds: int) -> None:
     settings = get_settings()
 
     async def _run() -> None:
-        # All rounds inside one event loop. The database engine is a singleton whose pool binds to
-        # the loop that created it, so a second asyncio.run() would reuse a pool attached to a
-        # loop that has already closed.
+        # One event loop for every round: the engine is a singleton whose pool binds to the loop
+        # that created it, so a second asyncio.run() would reuse a pool on a closed loop.
         for _ in range(max(rounds, 1)):
             click.echo(str(await drain_queues(settings)))
 
@@ -287,8 +281,7 @@ def tenants_add(source: str, scopes: tuple[str, ...], disabled: bool, note: str 
     from trouveur.sources.errors import SourceError
     from trouveur.sources.registry import clean_scope
 
-    # Each source spells a tenant its own way -- a Greenhouse board is a slug, a Workday board is
-    # tenant:instance:site -- so the grammar comes from the registry rather than from here.
+    # Each source spells a tenant its own way, so the grammar comes from the registry.
     try:
         cleaned = [clean_scope(source, scope) for scope in scopes]
     except SourceError as exc:

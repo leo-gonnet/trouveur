@@ -1,20 +1,8 @@
 """Sweeping global sources: one corpus, paged newest-first, no tenant involved.
 
-Workable's public board, Arbeitnow, Himalayas and Jobicy all answer the same shape of question --
-"the whole corpus, most recently published first" -- and all of them are far too large to re-fetch
-daily. Workable alone reports ~170 000 postings at a fixed 20 per page, which is 8 500 requests
-and better part of three hours at the politeness budget.
-
-So the ordinary run is a delta: page until the postings stop being newer than the window, then
-stop. That is the cheapest incremental mechanism these sources offer, and using it is what keeps
-a daily sweep affordable.
-
-The consequence is the important part. **A delta sweep may close nothing.** It only ever observes
-what was published inside its window, so a posting we hold and did not see may be perfectly live,
-merely older -- closing on that evidence would retire the entire corpus on the first run. These
-sweeps therefore return no closable scope, and lifecycle falls back to closing by age. A backfill
-pages to the end and is complete, so it may close; that is the one case where the whole corpus was
-actually observed.
+The ordinary run is a delta and therefore CLOSES NOTHING: it observes only what was published
+inside its window, so absence proves nothing and closing on it would retire the whole corpus on
+the first run. Only a backfill that pages to the end may close.
 """
 
 from __future__ import annotations
@@ -32,9 +20,7 @@ log = logging.getLogger(__name__)
 
 BATCH = 200
 
-# A backfill that never terminates is worse than one that stops short, because it holds the whole
-# run open. Every source here reports a total, so an honest page budget is derivable, but this is
-# the backstop for a source that starts handing out a cursor forever.
+# Backstop for a source that starts handing out a cursor forever.
 MAX_PAGES = 20_000
 
 
@@ -54,10 +40,8 @@ async def sweep_feed(
 ) -> SweepOutcome:
     """Page a global feed, newest first, stopping at the delta window unless backfilling.
 
-    `complete_on_backfill` is the source's claim that paging to the end of its cursor chain really
-    does observe its entire live set. A source that serves a capped window rather than the whole
-    corpus must pass False: reaching the end of one page is not reaching the end of the corpus,
-    and closing on it would retire everything the window did not happen to include.
+    A source serving a capped window rather than the whole corpus must pass
+    `complete_on_backfill=False`: the end of its one page is not the end of the corpus.
     """
     outcome = SweepOutcome(partitions_total=1)
     cutoff = None if backfill else datetime.now(UTC) - delta_window
@@ -81,13 +65,10 @@ async def sweep_feed(
             if not job_id:
                 continue
             external_id = str(job_id)
-            # A cursor that overlaps pages would otherwise archive the same payload twice in one
-            # sweep and inflate every count the health panel reports.
             if external_id in seen_ids:
                 continue
             posted = published_at(row)
             if cutoff is not None and posted is not None and posted < cutoff:
-                # Newest-first ordering means everything after this is older still.
                 exhausted = True
                 break
             seen_ids.add(external_id)
@@ -125,10 +106,8 @@ async def sweep_feed(
         ScopeResult(scope=GLOBAL_SCOPE, ok=reached_end, documents=outcome.documents)
     )
     if backfill and reached_end and complete_on_backfill:
-        # Only a sweep that actually paged to the end of the corpus observed the whole live set.
         outcome.closable_scopes.append(GLOBAL_SCOPE)
     else:
-        # A delta saw only its window, so absence proves nothing; lifecycle closes by age instead.
         outcome.expected = None
     return outcome
 

@@ -20,10 +20,8 @@ from trouveur.db.schema import (
 )
 from trouveur.models import Expansion
 
-# pgvector applies a WHERE clause AFTER the index walk, so a filtered ANN query can return far
-# fewer rows than asked for -- silently, as a short result rather than an error. Over-fetching and
-# raising ef_search is the standard remedy: cost a few hundred extra index hops rather than lose
-# recall on exactly the users whose filters are narrow.
+# pgvector applies WHERE after the index walk, so a filtered ANN query returns a short result
+# rather than an error. Over-fetching and raising ef_search is the remedy.
 _DENSE_OVERSAMPLE = 4
 _EF_SEARCH = 200
 
@@ -44,14 +42,12 @@ _HARD_FILTERS = f"""
     )
 """
 
-# Issued on its own. asyncpg runs parameterised queries as prepared statements, which reject
-# multiple commands, so this cannot be prepended to the SELECT below. It needs a transaction to
-# have any effect, which db.engine.connect() always provides.
+# Issued on its own: asyncpg runs parameterised queries as prepared statements, which reject
+# multiple commands, so this cannot be prepended to the SELECT below.
 _EF_SEARCH_SQL = f"SET LOCAL hnsw.ef_search = {_EF_SEARCH}"
 
-# Formatted with the column for the configured read width, which is not always the width the
-# embed worker is writing: a model change is backfilled over days, and the dense arm serves from
-# the old space until the new one is fully covered.
+# The READ width, which is not always the width the embed worker is writing: a model change is
+# backfilled over days and the dense arm serves the old space meanwhile.
 _DENSE_SQL_TEMPLATE = f"""
 SELECT j.id AS job_id
 FROM job_embedding e
@@ -68,9 +64,9 @@ LIMIT :limit
 def _dense_sql(column: str) -> str:
     return _DENSE_SQL_TEMPLATE.format(column=column)
 
-# Two lexical paths in one query, because neither is sufficient on German text: the tsvector
-# stems and weights but cannot see 'Ingenieur' inside 'Wirtschaftsingenieur', and the unaccented
-# trigram column matches inside compounds and folds umlauts but cannot rank.
+# Two lexical paths, because neither is sufficient on German: the tsvector stems and ranks but
+# cannot see 'Ingenieur' inside 'Wirtschaftsingenieur'; the trigram column can but cannot rank.
+# Change what is searchable and you must change both.
 _LEXICAL_SQL = f"""
 SELECT j.id AS job_id
 FROM job j
@@ -134,9 +130,7 @@ async def lexical_candidates(
 async def upsert_matches(conn: AsyncConnection, rows: Sequence[dict]) -> int:
     """Record what retrieval found, without disturbing what the user has since done about it.
 
-    state, notified_at and the LLM verdict are deliberately not refreshed: they are the user's
-    history, not retrieval's output, and re-running retrieval must never un-dismiss a job or make
-    an already-sent digest entry look unsent.
+    state, notified_at and the verdict are the user's history, not retrieval's output.
     """
     if not rows:
         return 0
@@ -156,11 +150,7 @@ async def upsert_matches(conn: AsyncConnection, rows: Sequence[dict]) -> int:
 async def pending_rerank(
     conn: AsyncConnection, user_id: int, profile_version: int, limit: int
 ) -> list[sa.Row]:
-    """Jobs this user has retrieved and not yet been scored for.
-
-    Ordered by retrieval score so that a budget cut-off keeps the most promising ones rather than
-    an arbitrary slice.
-    """
+    """Jobs this user has retrieved and not yet been scored for, best first."""
     return list(
         await conn.execute(
             sa.text(
@@ -186,10 +176,7 @@ async def pending_rerank(
 async def scoreable_rows(conn: AsyncConnection, job_ids: Sequence[int]) -> list[sa.Row]:
     """The columns the reranker's prompt needs, for an explicit set of postings.
 
-    `pending_rerank` answers the same question for one user's outstanding shortlist, by way of
-    `user_job_match`. The evaluation harness needs the same shape for the planted needles, which
-    are deliberately never written to that table: the eval measures retrieval and scoring, not a
-    user's match history.
+    For the evaluation harness, whose planted needles are never written to `user_job_match`.
     """
     if not job_ids:
         return []
@@ -291,18 +278,9 @@ async def apply_scores(conn: AsyncConnection, user_id: int, rows: Sequence[dict]
     )
 
 
-# An edition is one day's recommendations, and the day it is keyed on is `scored_at` -- when a
-# posting became a recommendation for this user -- not `posted_at`.
-#
-# Keying on publication date would be the obvious reading of "today's jobs" and it silently loses
-# postings. Discovery lag is under 1.3 days at p99 for the sources that carry volume, but
-# Greenhouse's p90 is 146 days: a posting published in April and found in September would belong
-# to an edition that was published five months ago, so it would appear in none at all.
-#
-# `scored_at` also makes an edition self-healing. Retrieval is cumulative and rerank_limit caps
-# how much is scored per run, so a posting retrieved on Monday at rank 400 may only be scored on
-# Friday -- and it is a recommendation on Friday, which is the edition it belongs in. A runner
-# that missed a day produces no hole for the same reason.
+# An edition is keyed on `scored_at`, NOT `posted_at`. Greenhouse's discovery lag is 146 days at
+# p90, so a posting published in April and found in September would belong to an edition five
+# months old and appear in none at all. It also makes an edition self-healing.
 _EDITION_COLUMNS = """
     j.id, j.public_id, j.url, j.title, j.company, j.posted_at, j.source,
     j.closed_at, j.locations, f.countries, f.cities,
@@ -321,12 +299,8 @@ _EDITION_FILTER = """
 
 
 async def editions(conn: AsyncConnection, user_id: int) -> list[sa.Row]:
-    """Every day this user has recommendations for, newest first.
-
-    Carries the profile version each edition was scored under, because an edition is a one-time
-    publication: editing a profile does not rewrite what Monday recommended, and a reader looking
-    at Monday is entitled to know it was produced by a profile they have since changed.
-    """
+    """Every day this user has recommendations for, newest first, with the profile version each
+    was scored under: editing a profile does not rewrite what Monday recommended."""
     return list(
         await conn.execute(
             sa.text(
@@ -351,11 +325,7 @@ async def editions(conn: AsyncConnection, user_id: int) -> list[sa.Row]:
 async def edition(
     conn: AsyncConnection, user_id: int, day: date, limit: int = 1000
 ) -> list[sa.Row]:
-    """One day's recommendations, best first.
-
-    No score cut inside an edition, for the same reason the page never had one: a threshold hid
-    good postings behind a number the reader had to guess. The day is the cut.
-    """
+    """One day's recommendations, best first. No score cut: the day is the cut."""
     return list(
         await conn.execute(
             sa.text(
@@ -375,9 +345,8 @@ async def edition(
     )
 
 
-# Every scraped posting, whatever the filters decided. A filtered-out or unscored job stays findable
-# here, which is the entire point of the page: adding a score filter would turn it into
-# a second, worse recommendations page and destroy the only view of what was actually collected.
+# Every scraped posting, whatever the filters decided. Adding a score filter here would destroy
+# the only view of what was actually collected.
 _SEARCH_SQL = """
 SELECT j.id, j.public_id, j.url, j.title, j.company, j.posted_at, j.source, j.closed_at,
        j.locations, f.countries, f.cities, f.work_mode::text AS work_mode,
@@ -464,11 +433,8 @@ async def set_state(conn: AsyncConnection, user_id: int, job_id: int, state: str
 async def pending_digest(
     conn: AsyncConnection, user_id: int, limit: int = 25
 ) -> list[sa.Row]:
-    """The best unsent postings for one user, capped by count rather than by score.
-
-    A digest has to be finite, but the bound is how many a person will read, not a quality line:
-    a threshold that is right in a busy week silently sends nothing in a quiet one.
-    """
+    """The best unsent postings for one user, capped by count rather than by score: a threshold
+    that is right in a busy week silently sends nothing in a quiet one."""
     return list(
         await conn.execute(
             sa.text(

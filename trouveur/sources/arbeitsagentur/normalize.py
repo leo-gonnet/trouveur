@@ -1,20 +1,12 @@
-"""Arbeitsagentur payload -> CanonicalJob. Pure: no I/O, no clock, no database.
-
-Purity is the whole point. This function is replayed over the archive whenever it is fixed, so
-anything it reads that is not its arguments would make the replay disagree with the original run.
-
-It produces structure only. Mapping DEUTSCHLAND to DE, annualising a monthly salary and deciding
-whether "Ingenieur (m/w/d)" is a senior role are all interpretation, and all belong in derivation
-where they can be re-run without re-fetching a million postings.
-"""
+"""Arbeitsagentur payload -> CanonicalJob. Pure: no I/O, no clock, no database."""
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from trouveur.models import CanonicalJob, Location, SalaryPeriod, SalaryQuote, collapse_whitespace
+from trouveur.sources.parse import iso_datetime
 
 version = 1
 
@@ -30,13 +22,8 @@ _PERIOD = {
 def normalize(
     listing: dict, detail: dict | None = None, *, external_id: str | None = None
 ) -> CanonicalJob | None:
-    """Merge a listing with its optional detail payload.
-
-    The listing is the floor and the detail only ever adds: a detail fetch that failed arrives
-    here as None, and a posting that has since been retired 404s and also arrives as None. Neither
-    may blank a description we already hold, which is why the two payloads are archived separately
-    rather than one overwriting the other.
-    """
+    """Merge a listing with its optional detail payload; the listing is the floor and the detail
+    only ever adds."""
     merged: dict[str, Any] = {**listing, **(detail or {})}
 
     external_id = external_id or merged.get("referenznummer")
@@ -53,8 +40,8 @@ def normalize(
         title=title,
         company=collapse_whitespace(merged.get("firma")),
         description=collapse_whitespace(merged.get("stellenangebotsBeschreibung")),
-        posted_at=_date(merged.get("datumErsteVeroeffentlichung")),
-        updated_at=_date(merged.get("aenderungsdatum")),
+        posted_at=iso_datetime(merged.get("datumErsteVeroeffentlichung")),
+        updated_at=iso_datetime(merged.get("aenderungsdatum")),
         locations=_locations(merged.get("stellenlokationen")),
         salary=_salary(merged),
         remote_hint=_bool(merged.get("homeofficemoeglich")),
@@ -66,11 +53,7 @@ def normalize(
 
 
 def _url(item: dict, external_id: str) -> str:
-    """Prefer the employer's own advert; fall back to the Arbeitsagentur page.
-
-    externeURL is where the vacancy actually lives and is the useful destination for an applicant,
-    but it is absent on postings that exist only inside the Jobbörse.
-    """
+    """Prefer the employer's own advert; fall back to the Arbeitsagentur page."""
     external = collapse_whitespace(item.get("externeURL"))
     if external:
         return external
@@ -103,8 +86,7 @@ def _salary(item: dict) -> SalaryQuote | None:
     return SalaryQuote(
         amount_min=low,
         amount_max=high,
-        # The Bundesagentur publishes German vacancies and quotes them in euro; this is a property
-        # of the source rather than an inference from the number.
+        # A property of the source: the Bundesagentur quotes German vacancies in euro.
         currency="EUR",
         period=_PERIOD.get(str(item.get("verguetungsangabe") or ""), SalaryPeriod.UNKNOWN),
     )
@@ -129,12 +111,8 @@ def _employment_hint(item: dict) -> str | None:
 
 
 def _agency_hint(detail: dict | None) -> bool | None:
-    """Only the detail payload carries the agency flags.
-
-    Absent a detail fetch the answer is genuinely unknown, so it stays None rather than False --
-    which would read downstream as "confirmed not an agency". These structured flags are also far
-    more reliable than matching "Zeitarbeit" in advert prose.
-    """
+    """Only the detail carries the agency flags, so absent one the answer is None -- unknown --
+    never False, which downstream reads as "confirmed not an agency"."""
     if detail is None:
         return None
     return bool(
@@ -153,13 +131,3 @@ def _decimal(value: Any) -> Decimal | None:
         return Decimal(str(value))
     except (InvalidOperation, ValueError):
         return None
-
-
-def _date(value: Any) -> datetime | None:
-    if not value:
-        return None
-    try:
-        parsed = datetime.fromisoformat(str(value))
-    except ValueError:
-        return None
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)

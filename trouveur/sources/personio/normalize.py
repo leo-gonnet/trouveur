@@ -1,14 +1,7 @@
 """Personio payload -> CanonicalJob. Pure: no I/O, no clock, no database.
 
-The feed is the DACH SME workhorse and it is unusually sparse. Three things about it:
-
-  - **it states no URL.** The canonical link is built from the tenant and the id, which is why the
-    external id keeps the tenant in it -- see board.scoped_id. Without that, a posting archived
-    here could never be linked back to.
-  - the description arrives as a list of titled sections (`Aufgaben`, `Profil`, ...), not one
-    string. The section names carry meaning a reader wants, so they are kept in the joined text.
-  - `office` and `additionalOffices` are the places, and `subcompany` is the hiring entity. A
-    board with one office and a board with several decode to the same list shape.
+The feed states no URL, so the canonical link is built from the tenant and the id -- which is why
+the external id has to keep the tenant in it.
 """
 
 from __future__ import annotations
@@ -31,7 +24,7 @@ def normalize(
     if not job_id or not title or not external_id:
         return None
 
-    # The tenant is only recoverable from the external id, because the feed never names it.
+    # The tenant is only recoverable from the external id; the feed never names it.
     scope, _, _ = external_id.partition(":")
     if not scope:
         return None
@@ -53,8 +46,6 @@ def normalize(
 
 
 def _url(scope: str, job_id: str) -> str:
-    # Imported lazily-by-value rather than from the client, so the pure normaliser stays free of
-    # anything that touches the network.
     return f"https://{scope}.jobs.personio.de/job/{job_id}"
 
 
@@ -79,8 +70,6 @@ def _locations(listing: dict) -> list[Location]:
         collapse_whitespace(office if isinstance(office, str) else None)
         for office in _as_list(listing.get("additionalOffices"))
     ]
-    # Personio states the office as a bare place name ("Wien"), with no country anywhere in the
-    # feed. It is passed through unparsed; saying which part is a city is derivation.
     return [Location(raw=name) for name in dict.fromkeys(names) if name]
 
 

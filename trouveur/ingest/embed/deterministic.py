@@ -1,12 +1,7 @@
 """A reproducible stand-in provider, for tests and for exercising the pipeline without a model.
 
-Its vectors carry no semantics whatsoever. It exists so the ingest and retrieval paths can be
-tested end to end with no model download and no network, which is the only way those tests stay
-fast enough to run on every change.
-
-It is safe to leave selectable in production precisely because it is not silent: the rows it
-writes carry embedding_version "deterministic:sha256:384", so a database running on it is obvious
-from the data rather than only from a config file nobody reads.
+Its vectors carry no semantics. Rows it writes carry embedding_version "deterministic:sha256:384",
+so a database running on it is obvious from the data rather than from a config file.
 """
 
 from __future__ import annotations
@@ -22,7 +17,7 @@ class DeterministicProvider:
     name = "deterministic"
     model = "sha256"
     dim = EMBEDDING_DIM
-    # Asymmetric on purpose, so tests exercise the prefix path even though the vectors are noise.
+    # Asymmetric on purpose, so tests exercise the prefix path.
     document_prefix = "passage: "
     query_prefix = "query: "
 

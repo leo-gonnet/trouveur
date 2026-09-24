@@ -1,12 +1,7 @@
 """Symmetric encryption for the one secret we store on a user's behalf: their LLM API key.
 
-The key is the user's property and their liability. It is encrypted at rest, decrypted only in the
-moment a request is built, never logged, and never sent back to the browser -- the settings form
-shows a fingerprint so a user can tell which key is stored without the application being able to
-show it to anyone who reaches the page.
-
-Losing ENCRYPTION_KEY makes stored keys unrecoverable, which is the correct failure: the
-alternative is a key that can be derived from something already in the database.
+Decrypted only in the moment a request is built, never logged, and never rendered back to the
+browser -- the settings form shows a fingerprint instead.
 """
 
 from __future__ import annotations
@@ -51,9 +46,6 @@ def decrypt(token: bytes) -> str:
 
 
 def fingerprint(plaintext: str) -> str:
-    """A stable, non-reversible label so the UI can say *which* key is stored.
-
-    Deliberately not the last four characters of the key itself: that is key material, and it
-    would end up in screenshots and support threads.
-    """
+    """A stable, non-reversible label so the UI can say WHICH key is stored. Not the last four
+    characters of the key: that is key material, and it ends up in screenshots."""
     return hashlib.sha256(plaintext.encode()).hexdigest()[:12]

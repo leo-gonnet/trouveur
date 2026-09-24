@@ -1,27 +1,16 @@
-"""The vocabularies derivation matches against. One file, on purpose.
+"""Every vocabulary derivation matches against, once. If you need one elsewhere, import it.
 
-A second copy of any of these -- a country map in the matcher, a seniority list in the web layer --
-would disagree with this one, and every disagreement is silent: no error, just postings that
-quietly fail to group or filter. If you need one of these lists somewhere else, import it.
-
-Editing anything here changes derived output for postings already in the database, so it must be
-accompanied by a DERIVE_VERSION bump. That is what makes the corpus re-derive itself.
-
-Keys are folded (lowercase, diacritics stripped) to match trouveur.models.text.fold.
+Editing anything here changes derived output for postings already stored, so it must come with a
+DERIVE_VERSION bump. Keys are folded to match trouveur.models.text.fold.
 """
 
 from __future__ import annotations
 
 from trouveur.models.facets import EmploymentType, Seniority, WorkMode
 
-# Both the source's own spelling and the usual English/German names. Unlisted countries derive to
-# nothing rather than to a guess.
-#
-# German country names must appear BOTH umlauted and transliterated. Folding "Österreich" gives
-# "osterreich", but Arbeitsagentur writes "OESTERREICH", which folds to "oesterreich" and matched
-# nothing: every Austrian posting silently lost its country and became invisible to any country
-# filter. That was 4.3% of a live sample, in a product whose whole point is DACH. Same trap for
-# Dänemark/DAENEMARK and Rumänien/RUMAENIEN. Add both spellings for any name with an umlaut.
+# A German name with an umlaut needs BOTH spellings. Arbeitsagentur writes "OESTERREICH", which
+# folds to "oesterreich", not to the "osterreich" that "Österreich" folds to -- keyed only on the
+# umlauted form, every Austrian posting silently lost its country. 4.3% of a live sample.
 COUNTRIES: dict[str, str] = {
     "deutschland": "DE", "germany": "DE", "allemagne": "DE", "de": "DE",
     "osterreich": "AT", "oesterreich": "AT", "austria": "AT", "at": "AT",
@@ -85,19 +74,16 @@ REGIONS: dict[str, str] = {
 REMOTE_TERMS = (
     "remote", "homeoffice", "home office", "telearbeit", "ortsunabhangig",
     "work from home", "fully remote", "100% remote", "vollstandig remote",
-    # Remote-first boards state the place of work as a word rather than a location. Without these
-    # the term is read as the city -- Jobicy postings derived a city of "Anywhere", which matches
-    # no filter and reads as a real place to anyone looking at the row.
+    # A board naming its work location in words needs the word here, or it is read as a city --
+    # Jobicy postings derived a city of "Anywhere".
     "anywhere", "worldwide", "weltweit", "anywhere in the world", "global",
 )
-# Every term here must be unambiguous about WHERE the work happens. "flexible" was removed after
-# it classified a Bangalore role as hybrid by matching "flexible paid time off"; a benefits list
-# is not a work-mode statement.
+# Every term must be unambiguous about WHERE the work happens: "flexible" was removed after it
+# read "flexible paid time off" as hybrid.
 HYBRID_TERMS = ("hybrid", "teilweise remote", "hybrides arbeiten", "remote moglich")
 ONSITE_TERMS = ("vor ort", "on-site", "onsite", "prasenz", "in office")
 
-# Ordered most specific first: "senior" must win over a bare mention of "junior" elsewhere, and
-# a leadership title must not be read as an ordinary senior role.
+# Ordered most specific first: a leadership title must not be read as an ordinary senior role.
 SENIORITY_TERMS: tuple[tuple[str, Seniority], ...] = (
     ("praktikant", Seniority.INTERN),
     ("praktikum", Seniority.INTERN),
@@ -148,8 +134,6 @@ EMPLOYMENT_TERMS: tuple[tuple[str, EmploymentType], ...] = (
     ("full time", EmploymentType.FULL_TIME),
 )
 
-# What a source's own employment hint means. Source-agnostic tokens: normalisers map their own
-# vocabulary onto these, so this table never grows a per-source branch.
 EMPLOYMENT_HINTS: dict[str, EmploymentType] = {
     "vollzeit": EmploymentType.FULL_TIME,
     "teilzeit": EmploymentType.PART_TIME,
@@ -162,8 +146,8 @@ WORK_MODE_BY_TERM: tuple[tuple[tuple[str, ...], WorkMode], ...] = (
     (ONSITE_TERMS, WorkMode.ONSITE),
 )
 
-# Deliberately short and curated. A skill list is a precision instrument: a term that also occurs
-# as ordinary prose ("management", "design") tags half the corpus and stops discriminating.
+# Deliberately short: a term that also occurs as ordinary prose ("management", "design") tags
+# half the corpus and stops discriminating.
 SKILLS: tuple[str, ...] = (
     "python", "java", "javascript", "typescript", "golang", "rust", "c++", "c#", "kotlin",
     "scala", "ruby", "php", "matlab", "labview", "vba", "sql", "nosql",

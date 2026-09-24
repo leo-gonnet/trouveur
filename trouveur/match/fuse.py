@@ -1,22 +1,14 @@
 """Reciprocal rank fusion.
 
-Retrieval runs several independent searches -- one dense search per expanded query, plus a lexical
-search -- and they disagree, which is the point. Dense recall finds a Lean Management advert for
-someone who wrote "Prozessoptimierung"; lexical recall finds the rare token a vector smears into
-its nearest common concept.
-
-Fused by rank rather than by score on purpose. The two systems' scores are not comparable and
-never will be: a cosine distance and a ts_rank have different scales, different distributions and
-no shared zero, so any weighted sum needs a normalisation constant that has to be retuned every
-time either side changes. Ranks are comparable by construction.
+By RANK, not by score: a cosine distance and a ts_rank have different scales and no shared zero,
+so a weighted sum needs a constant retuned every time either side changes.
 """
 
 from __future__ import annotations
 
 from collections import defaultdict
 
-# The usual constant from the original RRF paper. It damps the top of each list so that one system
-# ranking something first cannot by itself dominate the fusion.
+# The constant from the original RRF paper.
 RRF_K = 60
 
 

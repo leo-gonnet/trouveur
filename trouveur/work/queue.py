@@ -1,16 +1,7 @@
-"""The versioned work queue.
+"""The one versioned work queue: "job N needs work of kind K, to reach version V".
 
-One queue serves every deferred stage. A row here means "job N needs work of kind K, to reach
-version V", which is simultaneously the backlog and the change notification -- so there is no
-separate outbox to keep in step with it.
-
-The queue is what makes an upgrade indistinguishable from a backfill. Bumping DERIVE_VERSION and
-calling refill() enqueues every row below the new version; the same worker that filled the table
-initially drains it. That is the only arrangement in which the upgrade path stays tested, because
-it is exercised on every ordinary run.
-
-Every operation here is batched. Per-row round trips are what actually bottleneck a pipeline at
-this size, not the expensive work the rows describe.
+It is what makes upgrade and backfill the same code path -- a version bump plus refill() enqueues
+every row below it and the ordinary worker drains it, so the repair path stays tested.
 """
 
 from __future__ import annotations
@@ -45,11 +36,8 @@ class WorkKind(StrEnum):
 async def enqueue(
     conn: AsyncConnection, kind: WorkKind, job_ids: list[int], target_version: str
 ) -> int:
-    """Queue work for specific jobs. Idempotent: re-queueing at the same version is a no-op.
-
-    The WHERE on the conflict clause is what makes a re-run free. Without it, re-enqueueing an
-    already-queued item would reset its backoff and it could spin.
-    """
+    """Queue work for specific jobs. Idempotent: the WHERE on the conflict clause is what stops
+    a re-enqueue resetting an item's backoff and letting it spin."""
     if not job_ids:
         return 0
     stmt = pg_insert(work_item).values(
@@ -76,11 +64,8 @@ async def enqueue(
 async def claim(
     conn: AsyncConnection, kind: WorkKind, limit: int, worker: str
 ) -> list[sa.Row]:
-    """Take up to `limit` ready items.
-
-    SKIP LOCKED is required, not an optimisation: without it two workers draining the same kind
-    serialise behind each other's row locks and the second one does nothing.
-    """
+    """Take up to `limit` ready items. SKIP LOCKED is required, not an optimisation: without it
+    two workers on one kind serialise and the second does nothing."""
     ready = (
         sa.select(work_item.c.id)
         .where(
@@ -109,11 +94,8 @@ async def complete(conn: AsyncConnection, item_ids: list[int]) -> None:
 
 
 async def fail(conn: AsyncConnection, item_ids: list[int], error: str) -> None:
-    """Return items to the queue with exponential backoff, or park them once exhausted.
-
-    Parked items are left in the table on purpose: a silently dropped item is indistinguishable
-    from work that was never needed, and the dashboard counts these.
-    """
+    """Return items to the queue with exponential backoff, or park them once exhausted. Parked
+    items stay in the table: a dropped one is indistinguishable from work never needed."""
     if not item_ids:
         return
     backoff = sa.func.make_interval(
@@ -152,16 +134,11 @@ async def release_stale(conn: AsyncConnection, older_than: timedelta = STALE_CLA
 def _stale_query(
     kind: WorkKind, target_version: str, after_job_id: int, limit: int, fresh_since: datetime
 ):
-    """Rows whose derived output is below `target_version`, in keyset order.
-
-    Keyset, not OFFSET: this is the query that runs over the whole corpus after a version bump,
-    and OFFSET would re-scan everything it had already skipped on each successive chunk.
-    """
+    """Rows whose derived output is below `target_version`, in KEYSET order -- never OFFSET,
+    which would re-scan everything it had already skipped on each chunk."""
     if kind is WorkKind.DETAIL:
-        # Detail work is enqueued by the sweep that discovered the posting, because only the
-        # source knows whether it has a detail phase at all. Refilling it here would mean
-        # encoding that per-source fact in the queue, which is exactly the leak the registry
-        # exists to prevent. A detail that will not fetch is parked and visible, not re-derived.
+        # Only the source knows whether it has a detail phase, so refilling here would encode a
+        # per-source fact in the queue -- exactly the leak the registry prevents.
         raise ValueError(
             "Detail work is enqueued at ingest by the source that needs it and is never refilled."
         )
@@ -182,10 +159,8 @@ def _stale_query(
             .order_by(job.c.id)
             .limit(limit)
         )
-    # Embeddings exist for open postings only, so a missing row is work and a closed job is not.
-    # And for recent ones: without the horizon here, every posting the pruner drops for being
-    # stale is immediately found again by this query and re-embedded -- a loop that never
-    # terminates and never produces a vector anyone reads.
+    # Open AND recent. Without the horizon here, every posting the pruner drops as stale is found
+    # again by this query and re-embedded -- a loop that never terminates.
     return (
         sa.select(job.c.id.label("job_id"))
         .select_from(job.outerjoin(job_embedding, job_embedding.c.job_id == job.c.id))
@@ -213,9 +188,7 @@ async def refill(
 ) -> tuple[int, int | None]:
     """Enqueue one chunk of out-of-date rows. Returns (enqueued, cursor for the next chunk).
 
-    Chunked and resumable so that stopping halfway is free and re-running is free: a long refill
-    over millions of rows must be something you can interrupt without a second thought, not a job
-    you are afraid to touch once it has started.
+    Chunked and resumable, so stopping halfway and re-running are both free.
     """
     fresh_since = freshness.fresh_since(get_settings().retrieval_horizon_days)
     rows = list(

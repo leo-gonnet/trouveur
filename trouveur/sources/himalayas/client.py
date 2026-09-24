@@ -1,17 +1,9 @@
 """Himalayas remote-jobs API — network only, no parsing.
 
-robots.txt (himalayas.app, checked 2026-09-09): `User-Agent: * / Allow: /` with disallows only on
-paginated HTML views (`/jobs?page=`) and `/apply`. The JSON API path is not among them.
+robots.txt (himalayas.app, checked 2026-09-09): `Allow: /`, disallowing only paginated HTML views
+and `/apply`. The JSON API path is not among them.
 
-Shape verified live on 2026-09-09:
-
-  - ~104 000 postings, ordered NEWEST FIRST, paged by `nextCursor`;
-  - the response's own `comments` field states that cursor paging "will never return the same job
-    twice" and that the older `offset` parameter is deprecated, so only the cursor is used;
-  - salary arrives as numbers with a currency and period, and the description is inline HTML;
-  - **there is no id field.** `guid` is the stable identifier.
-
-Remote-only, so it contributes postings that are open to a location rather than sited at one.
+There is no `id` field; `guid` is the identity.
 """
 
 from __future__ import annotations

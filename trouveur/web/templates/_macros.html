@@ -17,8 +17,7 @@
 <div class="kpi"><span class="label">{{ label }}</span><strong class="value">{{ value }}</strong></div>
 {% endmacro %}
 
-{# Band names must match app.css. They did not: this emitted `good`/`ok` against a stylesheet
-   that styles `high`/`mid`/`low`, so every score of 65 and over rendered uncoloured. #}
+{# Band names must match app.css, or a score renders uncoloured. #}
 {% macro score_pill(score) %}
   {%- if score is none -%}
     <span class="score none" title="not scored yet">&ndash;</span>
@@ -58,9 +57,8 @@
 </article>
 {% endmacro %}
 
-{# A list field. Without the script it is a one-per-line textarea, and that is also what is
-   posted: the script only renders the same value as chips. `options` (code -> name) restricts
-   entries to that list; the textarea then carries codes and the chips show names. #}
+{# Without the script this is a one-per-line textarea, which is also what is posted; the script
+   only renders the same value as chips. `options` restricts entries to a code -> name list. #}
 {% macro tags(name, values, hint='', options=none, placeholder='') %}
 <div class="tags">
   <textarea name="{{ name }}" rows="2" data-placeholder="{{ placeholder }}"

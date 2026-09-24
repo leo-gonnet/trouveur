@@ -1,15 +1,7 @@
 """Arbeitnow job board API — network only, no parsing.
 
-robots.txt (www.arbeitnow.com, checked 2026-09-09): `User-agent: * / Disallow:` -- an empty rule,
-which permits everything. The API's own `meta.terms` asks that it not be abused and that callers
-link back to the site; the digest links to the posting, and the shared politeness budget applies.
-
-Shape verified live on 2026-09-09:
-
-  - a free, unauthenticated feed of the whole corpus, ordered NEWEST FIRST by `created_at`;
-  - 250 postings a page, paged by a full URL in `links.next` rather than a cursor parameter;
-  - the description is inline HTML, so there is no detail phase;
-  - the feed is DACH-weighted, which is where it earns its place among the global sources.
+robots.txt (www.arbeitnow.com, checked 2026-09-09): `Disallow:` with an empty value, permitting
+everything. Its `meta.terms` asks callers to link back; the digest links to the posting.
 """
 
 from __future__ import annotations

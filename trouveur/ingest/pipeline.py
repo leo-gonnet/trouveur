@@ -1,11 +1,7 @@
 """Sweep orchestration. No parsing, no SQL, no interpretation.
 
-This module decides what runs, in what order, and what happens when a source fails. Everything it
-touches lives behind a function in sources/, db/queries/ or work/ -- if a change to a source's
-behaviour requires editing this file, the source abstraction has leaked.
-
-Failure is isolated per source. One dead source is a recorded warning, never a lost run: the
-sources that did work still land their postings, and the dashboard shows the one that did not.
+If a change to a source's behaviour requires editing this file, the abstraction has leaked.
+Failure is isolated per source: one dead source is a recorded warning, never a lost run.
 """
 
 from __future__ import annotations
@@ -45,12 +41,8 @@ class SourceReport:
 
     @property
     def coverage_shortfall(self) -> int:
-        """Postings the source said existed that the sweep never saw.
-
-        Reported rather than assumed to be zero: the Arbeitsagentur berufsfeld facet does not
-        quite sum to its own total, so a partitioned sweep has a small blind spot by construction.
-        A number that starts growing is the signal that partitioning has stopped covering.
-        """
+        """Postings the source said existed that the sweep never saw. Reported rather than
+        assumed to be zero: a partitioned sweep has a blind spot by construction."""
         if self.expected is None:
             return 0
         return max(0, self.expected - self.documents)
@@ -58,12 +50,8 @@ class SourceReport:
 
 @dataclass
 class RunControl:
-    """How a caller watches a sweep and asks it to stop.
-
-    Callbacks rather than a run id, so this module keeps knowing nothing about the run queue: the
-    runner owns what a "run" is, and ingest owns what a sweep is. It also makes cancellation
-    testable without a database.
-    """
+    """How a caller watches a sweep and asks it to stop. Callbacks rather than a run id, so this
+    module keeps knowing nothing about the run queue."""
 
     starting: Callable[[int], Awaitable[None]] | None = None
     source_done: Callable[[int, str | None], Awaitable[None]] | None = None
@@ -76,8 +64,6 @@ class RunControl:
 @dataclass
 class IngestReport:
     per_source: dict[str, SourceReport] = field(default_factory=dict)
-    # Sources never reached because the run was cancelled. Named rather than counted so the
-    # difference between "found nothing" and "never asked" survives into the report.
     skipped: list[str] = field(default_factory=list)
     pruned: int = 0
 
@@ -121,10 +107,8 @@ async def run(
             client, sources, settings=settings, backfill=backfill, control=control
         )
 
-    # Here rather than in sweep_sources, which stays pure orchestration over a list of sources so
-    # the evaluation harness can reuse it. Unconditional, including after a cancelled run: unlike
-    # retirement, which needs a sweep to have seen a scope in full before absence means anything,
-    # age is known without asking any source.
+    # Unconditional, including after a cancelled run: unlike retirement, age is known without
+    # asking any source.
     report.pruned = await _prune_aged_out(settings)
     return report
 
@@ -137,20 +121,14 @@ async def sweep_sources(
     backfill: bool = False,
     control: RunControl | None = None,
 ) -> IngestReport:
-    """Sweep an already-assembled list of sources, one client shared across all of them.
-
-    Takes the sources rather than building them so the evaluation harness can substitute a
-    narrowed Arbeitsagentur without carrying a second copy of this loop -- and so the politeness
-    budget, which lives on the client, is shared by everything the caller sweeps.
-    """
+    """Sweep an already-assembled list of sources, one client shared across all of them."""
     report = IngestReport()
     if control and control.starting:
         await control.starting(len(sources))
 
     for index, source in enumerate(sources):
-        # Checked between sources, never inside one. A source stopped mid-flight has seen only
-        # part of its live set, and the machinery that decides what to retire reads exactly that
-        # -- so an interrupted sweep must not be able to reach the closing step at all.
+        # Between sources, NEVER inside one: a source stopped mid-flight has seen only part of
+        # its live set, and closing reads exactly that.
         if control and await control.should_stop():
             report.skipped = [later.name for later in sources[index:]]
             log.info("run cancelled before %s", report.skipped[0])
@@ -165,12 +143,7 @@ async def sweep_sources(
 
 
 async def _prune_aged_out(settings: Settings) -> int:
-    """Drop vectors for postings past the horizon, in chunks, until none are left.
-
-    `job_embedding` holds postings that are open AND recent. Closing already drops a vector; this
-    is the other axis, and it is what keeps the ANN index proportional to what a user could
-    actually still apply to rather than to everything that has ever been open.
-    """
+    """Drop vectors for postings past the horizon, in chunks, until none are left."""
     cutoff = freshness.fresh_since(settings.retrieval_horizon_days)
     total = 0
     while True:
@@ -189,9 +162,7 @@ async def _sweep_source(
         sweep_id, started_at = await q.start_sweep(conn, source.name)
 
     async def sink(documents: Sequence[RawDocument]) -> None:
-        # One transaction per batch, not one per sweep. A sweep of tens of thousands of documents
-        # inside a single transaction would hold locks for its whole duration and lose everything
-        # if it failed near the end.
+        # One transaction per batch, not one per sweep.
         async with connect() as conn:
             await q.archive_documents(conn, documents)
             result = await persist(
@@ -203,10 +174,7 @@ async def _sweep_source(
         report.documents += len(documents)
         report.upserted += result.upserted
         report.changed += len(result.changed)
-        # Published per batch, not at the end. The row already exists -- start_sweep inserted it
-        # before the first request -- so this is what makes a long source visibly moving rather
-        # than indistinguishable from a wedged one. One UPDATE per batch, and batches are
-        # hundreds of documents, so it does not show up next to the fetch it follows.
+        # Per batch, not at the end: without it a long source and a wedged one look identical.
         async with connect() as conn:
             await q.record_sweep_progress(conn, sweep_id, documents_seen=report.documents)
 
@@ -230,8 +198,6 @@ async def _sweep_source(
     if outcome.scope_results:
         async with connect() as conn:
             await admin_q.record_scope_health(conn, source.name, outcome.scope_results)
-            # Removing a slug from the registry file should also clear its health row, or the
-            # dashboard keeps reporting a tenant nobody crawls any more.
             await admin_q.prune_scope_health(
                 conn, source.name, [result.scope for result in outcome.scope_results]
             )
@@ -266,10 +232,8 @@ async def _apply_lifecycle(
     """Retire postings, by evidence where there is any and by age where there is not."""
     async with connect() as conn:
         if outcome.closable_scopes:
-            # The sweep saw these scopes in full, so anything it did not see is genuinely gone.
             return await q.close_unseen(conn, source.name, outcome.closable_scopes, started_at)
-        # No scope was observed in full -- a delta sweep, for instance -- so absence proves
-        # nothing and the only available signal is age. Explicitly a heuristic; see close_stale.
+        # No scope seen in full, so absence proves nothing and age is the only signal left.
         return await q.close_stale(
             conn, source.name, timedelta(days=settings.stale_close_days)
         )

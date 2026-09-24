@@ -1,12 +1,6 @@
 """Workable payload -> CanonicalJob. Pure: no I/O, no clock, no database.
 
-Workable is the richest of the global feeds: it states the company, an inline HTML description,
-and -- unusually -- a properly structured location object rather than free text. That structure is
-kept as stated, so derivation never has to re-parse "Vienna, Vienna, Austria" back into parts a
-source already separated.
-
-The description is split across three HTML fields. Only joining `description` would drop the
-requirements section, which is most of what a reranker needs to judge a fit.
+The location arrives already structured, so it is kept as stated rather than re-parsed.
 """
 
 from __future__ import annotations
@@ -60,11 +54,7 @@ def _description(listing: dict) -> str | None:
 
 
 def _locations(listing: dict) -> list[Location]:
-    """Prefer the structured object; fall back to the rendered strings.
-
-    `location` describes one place even when `locations` lists several, so both are read: the
-    structured one is kept verbatim, and any additional rendered string becomes its own entry.
-    """
+    """Prefer the structured object; fall back to the rendered strings."""
     places: list[Location] = []
     node = listing.get("location")
     primary_raw = None

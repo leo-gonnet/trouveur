@@ -1,28 +1,13 @@
-"""Retrieval evaluation by planted known items.
+"""Retrieval evaluation by planted known items: an unlabelled haystack of real postings, into
+which needles are planted whose relevance is known by construction.
 
-Labelling a corpus is the expensive part of evaluating search, so this does the opposite: a large
-haystack of real postings that nobody labels, into which a small set of hand-written needles is
-planted whose relevance is known by construction.
+Recall is rigorous -- a needle either came back or it did not. Precision is NOT measurable, since
+an unplanted posting ranking highly is unjudged rather than wrong; planted negatives are the
+usable substitute. Needles are tiered by which retriever should find them (T1 lexical, T2 dense,
+T3 dense plus expansion, N never), because one aggregate number cannot say whether the hybrid
+earns its cost.
 
-What that buys and what it does not:
-
-  - Recall is measured rigorously. A planted needle either came back or it did not.
-  - Precision is NOT measurable. The haystack is real, so an unplanted posting ranking highly is
-    unjudged, not wrong. Reporting a precision number here would be inventing one.
-  - Planted negatives give a usable substitute: postings the hard filters must exclude, or the
-    reranker must rank below every positive, so "did anything that should have been kept out get
-    through" is answerable without judging the haystack at all.
-
-Needles are tiered by which retriever should find them, because a single aggregate recall number
-cannot answer the question worth asking -- whether the hybrid earns its cost:
-
-  T1  shares vocabulary with the persona          lexical alone should suffice
-  T2  same role, no shared vocabulary             only dense should reach it
-  T3  adjacent role, different title entirely     needs dense plus query expansion
-  N   must be excluded by hard filters, or outranked   should never reach the top
-
-This is an evaluation, not a test. It produces numbers to compare against a baseline; it does not
-pass or fail, and it never gates a merge.
+An evaluation, not a test: it produces numbers to compare against a baseline and gates nothing.
 """
 
 from __future__ import annotations
@@ -54,13 +39,11 @@ log = logging.getLogger(__name__)
 DATA = Path(__file__).parent / "data"
 BASELINE = Path(__file__).parent / "baseline.json"
 POSITIVE_TIERS = ("T1", "T2", "T3")
-# How far a needle may slide down the fused list before it is worth reporting. Below this,
-# movement is the noise of a haystack that is re-swept between runs rather than a change.
+# Below this, movement is the noise of a haystack re-swept between runs rather than a change.
 RANK_SLIDE = 20
 # How far the corpus may grow or shrink before a baseline delta stops meaning anything.
 CORPUS_TOLERANCE = 1.5
-# The reranker runs on a key supplied for the evaluation only, read from the environment.
-# Deliberately NOT stored as a user credential: those live in the database, are entered
+# Read from the environment and never stored: users' keys live in the database and are entered
 # through the web UI, and this harness must not become a second way in.
 EVAL_LLM_KEY_VAR = "TROUVEUR_EVAL_LLM_KEY"
 
@@ -84,10 +67,8 @@ class PersonaResult:
     negatives_retrieved: int = 0
     inversions: int = 0
     missed: list[str] = field(default_factory=list)
-    # Fused rank of every planted positive, 1-based, or null if it never appeared. Recorded
-    # because found/total at one depth saturates -- at 29 of 30 needles found, the only movement
-    # recall can report is a regression, while a needle sliding from rank 12 to rank 90 is a real
-    # loss of quality that recall@200 cannot see at all.
+    # Recorded because found/total saturates: at 29 of 30 found, recall can only report a
+    # regression, while a needle sliding from rank 12 to 90 is invisible to it.
     ranks: dict[str, int | None] = field(default_factory=dict)
     rerank: dict | None = None
 
@@ -97,10 +78,8 @@ class Scorecard:
     limit: int
     embedding_version: str
     corpus_open: int
-    # Share of the haystack that has a description. Not a defect to be below 100%: in production
-    # the detail queue always drains behind the sweep, so a live corpus is always a mixture. It is
-    # recorded because it changes what the numbers mean, and two runs at different coverage are
-    # not comparable.
+    # Not a defect below 100%: the detail queue always drains behind the sweep. Recorded because
+    # two runs at different coverage are not comparable.
     corpus_with_description: int = 0
     personas: list[PersonaResult] = field(default_factory=list)
 
@@ -114,11 +93,8 @@ class Scorecard:
         }
 
 
-# The harness measures retrieval, not the freshness policy. Needles carry fixed dates in their
-# fixtures -- some are weeks old -- so applying the production horizon here would drop them from
-# the corpus and report a recall collapse that says nothing about retrieval. Pinned far enough
-# back that everything planted is eligible, and deliberately not read from settings: a number
-# that moved when an operator edited the horizon would make two runs incomparable.
+# Pinned, not read from settings: needles carry fixed dates, so the production horizon would drop
+# them and report a recall collapse that says nothing about retrieval.
 EVAL_FRESH_SINCE = datetime(2000, 1, 1, tzinfo=UTC)
 
 
@@ -130,9 +106,8 @@ async def plant_needles(needles: list[dict]) -> dict[str, int]:
     never actually have produced.
     """
     by_source: dict[str, list[str]] = defaultdict(list)
-    # Which sources' needles carry a detail payload, read off the needles rather than hardcoded:
-    # a needle written for Workday or Rippling would otherwise have its description silently
-    # dropped, since persist only looks a detail up when told the source has that phase.
+    # Read off the needles rather than hardcoded: persist only looks a detail up when told the
+    # source has that phase, so a hardcoded list silently drops a new source's descriptions.
     detailed_sources = {n["source"] for n in needles if n.get("detail")}
     documents: list[RawDocument] = []
     detail_documents: list[RawDocument] = []
@@ -163,8 +138,7 @@ async def plant_needles(needles: list[dict]) -> dict[str, int]:
             await persist(
                 conn, source, external_ids, requires_detail=source in detailed_sources
             )
-            # Reuses the ingest lookup rather than adding a query: it already returns the job id
-            # keyed by external id, which is exactly the mapping needed here.
+            # Reuses the ingest lookup, which already returns the mapping needed here.
             stored = await ingest_q.stored_content_hashes(conn, source, external_ids)
             for needle in needles:
                 if needle["source"] != source:
@@ -257,10 +231,8 @@ async def _rerank_needles(
                 settings, profile, batch,
                 api_key=api_key, model=model,
                 provider_pin=settings.default_llm_provider,
-                # The truncated background rather than the distilled one. Production distils
-                # once per profile version and caches it; there is no expansion row here, and
-                # spending a model call to build one would make this grading depend on a second
-                # model's output. This is the same floor the pipeline falls back to.
+                # The truncated background, not a distilled one: building one would make this
+                # grading depend on a second model's output. The same floor the pipeline uses.
                 background=expand.truncated_background(profile),
             )
         except llm.LlmError as exc:
@@ -306,8 +278,7 @@ def grade_scores(needles: list[dict], scores: dict[str, int]) -> dict:
         "scored": len(scores),
         "unscored": sum(1 for n in needles if n["id"] not in scores),
         "scores": dict(sorted(scores.items())),
-        # Pairs, not postings: one negative scoring above three positives is three things the
-        # reader has to step over, and a single count of "bad negatives" would hide that.
+        # Pairs, not postings: one negative above three positives is three things to step over.
         "inversions": sum(
             1 for bad in negative.values() for good in positive.values() if bad >= good
         ),
@@ -346,8 +317,8 @@ async def _evaluate_persona(
     profile = await _ensure_persona(persona)
     result = PersonaResult(persona=persona["key"])
 
-    # The deterministic expansion only, so the score does not depend on a model call that costs
-    # money and varies between runs. What query expansion adds is a separate measurement.
+    # Deterministic expansion only, so a run costs nothing and does not vary with a model. What
+    # expansion adds is therefore not yet a number this produces.
     queries = deterministic_queries(profile)
     result.queries = len(queries)
 
@@ -507,9 +478,8 @@ def render(card: Scorecard, baseline: dict | None) -> str:
         + "   ".join(f"{arm} {_bar(**totals[arm])}" for arm in ("lexical", "dense", "fused"))
     )
 
-    # Recall at one depth saturates, and a saturated number can only ever report a regression.
-    # The shallower depths are where a change still has somewhere to move, and they are also the
-    # depths that matter: the reranker's budget is far smaller than k.
+    # The shallower depths are where a change still has somewhere to move, and they are the ones
+    # that matter: the reranker's budget is far smaller than k.
     ranks = [rank for persona in card.personas for rank in persona.ranks.values()]
     planted = len(ranks)
     depths = [k for k in (10, 25, 50, 100, card.limit) if k <= card.limit]
@@ -586,8 +556,7 @@ def regressions(card: Scorecard, baseline: dict | None) -> list[str]:
                     f"{persona.persona}/{tier}: {now['found']}/{now['total']} "
                     f"(was {was['found']}/{was['total']})"
                 )
-        # A needle still inside k but much further down it. Invisible to recall, and the reason
-        # ranks are recorded at all: at 29 of 30 found, this is where quality actually moves.
+        # Inside k but much further down: invisible to recall, and where quality actually moves.
         previous_ranks = previous.get(persona.persona, {}).get("ranks", {})
         for name, rank in persona.ranks.items():
             was_rank = previous_ranks.get(name)
@@ -598,9 +567,8 @@ def regressions(card: Scorecard, baseline: dict | None) -> list[str]:
 
 
 
-# Occupational fields that actually contain work the personas would consider. A haystack of
-# retail and logistics postings is a haystack the filters remove for free, which would make every
-# recall number flattering and meaningless: the needles must compete with plausible neighbours.
+# Fields the personas plausibly compete in. A haystack the filters remove for free would flatter
+# every number: the needles must compete with plausible neighbours.
 HAYSTACK_PARTITIONS = [
     "Maschinenbau",
     "Elektrotechnik",
@@ -613,11 +581,8 @@ HAYSTACK_PARTITIONS = [
 ]
 
 
-# Detail requests one `--sweep` may spend. Only Arbeitsagentur, Workday and Rippling have a
-# separate detail phase, but for those a description costs one polite request per posting, so an
-# unbounded drain is hours. Production absorbs that across a day; an evaluation run cannot, and a
-# command nobody is willing to wait for is a command nobody runs. What the budget does not reach
-# is reported by the scorecard's description coverage rather than hidden.
+# A description costs one polite request per posting, so an unbounded drain is hours. What the
+# budget does not reach is reported as description coverage rather than hidden.
 DETAIL_BUDGET = 6000
 
 
@@ -650,8 +615,8 @@ async def snapshot_haystack(backfill: bool = False) -> int:
         report = await pipeline.sweep_sources(
             client, sources, settings=settings, backfill=backfill
         )
-        # One client across the sweep and the whole detail drain. A fresh PoliteClient per round
-        # would reset the per-provider budget and turn a polite loop into a burst.
+        # One client across the sweep and the drain: a fresh one per round would reset the
+        # per-provider budget and turn a polite loop into a burst.
         fetched = await drain_details(client, {source.name: source for source in sources})
 
     collected = sum(source.documents for source in report.per_source.values())

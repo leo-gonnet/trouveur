@@ -1,17 +1,8 @@
 """Offsite export of the corpus, one immutable day-partition at a time.
 
-The archive is the only thing in this system that cannot be recomputed -- everything downstream
-of it is a pure function of it -- and it lives on one VPS with one disk. This puts a copy
-somewhere else, nightly, without ever rewriting what it already wrote.
-
-The design is one idea: **a day is a file, and a file is written once.** Everything follows from
-it. There is no cursor to keep in sync, because "which days are done" is read back from the
-destination. A run that dies halfway is resumed by the next one, because the days it finished are
-already there. A day that was empty is simply re-checked, cheaply, until it has something in it.
-And a partition can never disagree with the database about the past, because nothing ever goes
-back and edits one.
-
-What a day is safe to freeze on differs per stream and is `Stream.lag_days`; see `streams`.
+One idea: a day is a file, and a file is written once. So there is no cursor to keep in sync --
+"which days are done" is read back from the destination -- and an interrupted run is resumed by
+the next one. When a day is safe to freeze differs per stream; see `Stream.lag_days`.
 """
 
 from __future__ import annotations
@@ -125,8 +116,7 @@ async def export(
     for stream in streams:
         async with connect() as conn:
             counts = await stream.counts(conn)
-        # Never freeze a day that can still change: today is still being written to, and a
-        # stream with a lag is still filling in days behind it.
+        # Never freeze a day that can still change: today is still being written to.
         frozen = today - timedelta(days=1 + stream.lag_days)
         for day in sorted(counts):
             if day > frozen:
@@ -142,9 +132,8 @@ async def export(
                 local = Path(scratch) / f"{stream.name}-{day}.parquet"
                 rows = await _write_partition(stream, day, local)
                 if rows == 0:
-                    # The count said there was something here and the page found nothing, so a
-                    # row went away between the two. Uploading an empty file would assert "this
-                    # day is done" about a day that is not.
+                    # A row went away between the count and the page. An empty file would assert
+                    # "this day is done" about a day that is not.
                     log.warning("%s for %s emptied while being read", stream.name, day)
                     continue
                 size = local.stat().st_size

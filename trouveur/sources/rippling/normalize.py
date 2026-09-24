@@ -1,13 +1,6 @@
 """Rippling payload -> CanonicalJob. Pure: no I/O, no clock, no database.
 
-The listing is thin by design here -- title, url, department, one location -- and everything a
-reranker reads arrives only on the detail. The detail is therefore preferred field by field,
-with the listing as the fallback, so a posting whose detail fetch has not drained yet still
-produces a usable row instead of no row.
-
-`description` is an object keyed by section (`company`, `role`, ...), not a string. Reading it as
-one yields a Python dict repr in the description column: text that looks like data, embeds like
-noise, and is not obviously wrong to a reader skimming the page.
+`description` is an OBJECT keyed by section, not a string.
 """
 
 from __future__ import annotations
@@ -21,8 +14,8 @@ version = 1
 
 SOURCE = "rippling"
 
-# The order sections are joined in, so the same posting always hashes the same way. Dict order
-# would be the source's, and a reordered payload would flap content_hash and re-bill every score.
+# Fixed join order: dict order is the source's, and a reordered payload would flap content_hash
+# and re-bill every score.
 _SECTIONS = ("role", "company", "requirements", "benefits")
 
 
@@ -35,7 +28,7 @@ def normalize(
         return None
 
     if detail.get("unlistedFromSearch") is True:
-        # Rippling still serves the posting, but it is not published on the board.
+        # Still served, but not published on the board.
         return None
 
     employment = detail.get("employmentType")
@@ -50,8 +43,6 @@ def normalize(
         description=_description(detail.get("description")),
         posted_at=iso_datetime(detail.get("createdOn")),
         locations=_locations(detail, listing),
-        # `payRangeDetails` is a list whose shape was empty on every posting probed, so nothing is
-        # claimed from it rather than guessing at a structure never observed carrying data.
         salary=None,
         remote_hint=None,
         employment_type_hint=collapse_whitespace(employment.get("id"))

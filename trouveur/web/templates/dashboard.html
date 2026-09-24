@@ -65,9 +65,6 @@
       </tr>
     </table>
     {% if coverage.embedded_384 and coverage.embedded_768 %}
-      {# Two spaces at once is what a model change looks like while it is being backfilled, so
-         this reports progress rather than an alarm. It only becomes a problem if it never
-         finishes, or if retrieval is pointed at a space before its coverage is complete. #}
       <p class="notice">A second vector space is being filled:
         {{ '{:,}'.format(coverage.embedded_768) }} of {{ '{:,}'.format(coverage.open_jobs) }}
         open postings ({{ (100 * coverage.embedded_768 / coverage.open_jobs) | round(1) }}%).

@@ -1,15 +1,7 @@
 """Ashby payload -> CanonicalJob. Pure: no I/O, no clock, no database.
 
-Ashby is unusually generous: it states the description as plain text, the address as structured
-fields, and -- with includeCompensation -- salary as numbers rather than a rendered string. All
-three are taken as stated rather than re-derived from prose.
-
-Two shapes are easy to get wrong:
-
-  - `title` arrives with leading whitespace on real boards (" Security Engineer, Cloud"), so it
-    must be collapsed before it becomes an identity input.
-  - `secondaryLocations` holds the other places a posting names, and dropping it loses every
-    remote-in-another-country variant of the same role.
+`title` arrives with leading whitespace on live boards and is an identity input, so it must be
+collapsed.
 """
 
 from __future__ import annotations
@@ -30,8 +22,6 @@ version = 1
 
 SOURCE = "ashby"
 
-# Ashby's own interval vocabulary. Anything absent stays UNKNOWN rather than being guessed:
-# annualising an interval we misread would silently distort every salary filter.
 _PERIODS = {
     "YEAR": SalaryPeriod.YEAR,
     "ANNUAL": SalaryPeriod.YEAR,
@@ -88,11 +78,7 @@ def _locations(listing: dict) -> list[Location]:
 
 
 def _with_address(raw: str, address: Any) -> Location:
-    """Keep the source's own structured address where it stated one.
-
-    Derivation parses `raw` only where structure is absent, so a source that already knows the
-    answer is never second-guessed.
-    """
+    """Keep the source's own structured address where it stated one."""
     postal = (address or {}).get("postalAddress") if isinstance(address, dict) else None
     if not isinstance(postal, dict):
         return Location(raw=raw)

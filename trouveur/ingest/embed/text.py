@@ -1,10 +1,7 @@
-"""What we actually embed. One implementation, used at ingest and never re-derived elsewhere.
+"""What we actually embed: discriminating fields first, then a bounded slice of prose.
 
-A vacancy advert is mostly boilerplate -- benefits, equal-opportunity statements, company history.
-Embedding all of it pulls every posting from one employer toward the same point and washes out the
-role, so the text is assembled deliberately: the discriminating fields first, then a bounded slice
-of prose. The model's context is ~512 tokens, so anything past the budget is not truncated by
-accident, it is chosen.
+An advert is mostly boilerplate, and embedding all of it pulls every posting from one employer
+toward the same point. The budget is chosen, not an accidental truncation.
 """
 
 from __future__ import annotations

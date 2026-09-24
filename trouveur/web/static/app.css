@@ -2,16 +2,9 @@
 
    Tokens are the only place a value is written; components below read them. A feature never
    sets a colour, a radius or a spacing of its own — add a token or a component here instead.
-
-   Palette: the logo's navy on a cool off-white canvas with white surfaces; the top bar is solid
-   navy and carries the light logo variant. Navy is text, links, buttons and the active item; the
-   logo's red-orange appears in the logo and nowhere else. Status (good/warn/bad, score bands)
-   uses muted tints so a dashboard scans without looking colourful. One system sans-serif and
-   one type scale: 13px for labels and pills, 14px for secondary text and controls, 15px body,
-   24px page title. Every control is the same height.
-
-   Layout: the page is full width and is the only thing that scrolls. Dashboard-style pages are
-   boxed sections; recommendations and search are a mail-style list of rows.
+   The logo's navy on off-white, one system sans-serif, no display font. The logo's red-orange
+   is used in the logo and nowhere else. The page is full width and is the only thing that
+   scrolls.
 
    Components: .topbar .nav .banner .page-head .section .section-head .grid .kpis .kpi table .pill
    .score button/.btn(.primary .danger .ghost) label/input .field .tags .checks .notice .empty .bar
@@ -39,8 +32,7 @@
   --warn: #8a5308;       --warn-soft: #fbf0da;
   --bad: #a3271f;        --bad-soft: #fae6e4;
 
-  /* Diagram lane backgrounds on the Architecture page and nothing else. They carry no meaning,
-     unlike good/warn/bad, so a status must never use them. */
+  /* Diagram lanes only. These carry no meaning, so a status must never use them. */
   --tint-1: #e6eef8; --tint-2: #e3f1e8;
 }
 
@@ -138,8 +130,9 @@ a.pill:hover { color: var(--fg); border-color: var(--border); }
                      background: currentColor; animation: pulse 1.6s ease-in-out infinite; }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
 
-/* The first thing read on a row and what the list is sorted by, so it is sized to be glanced
-   at rather than to fit in a line of text. Band names must match score_pill in _macros.html. */
+/* The first thing read on a row and what the list is sorted by, so it is sized to be glanced at.
+   Band names must match score_pill in _macros.html: they did not, and every score of 65 and over
+   rendered uncoloured. */
 .score { flex: none; min-width: 2.75rem; text-align: center; font-weight: 700; font-size: 15px;
          line-height: 1.1; padding: var(--space-2); border-radius: var(--radius);
          font-variant-numeric: tabular-nums; }

@@ -1,13 +1,8 @@
 """Local ONNX embeddings. No network, no per-document cost, no torch.
 
-The model handles German and English in one vector space, which this corpus needs: an Austrian
-advert and its English equivalent must land near each other.
-
-Prefixes are a property of the model, declared here rather than applied by callers. This one is
-symmetric -- trained for sentence similarity, so a query and a document are encoded identically
-and it takes no prefix. The e5 family is the opposite: it expects "passage: " and "query: " and
-loses noticeable recall without them. Getting this backwards is silent either way, so a model
-swap must set the prefixes alongside the name, and both belong in one place.
+A model swap must set the prefixes alongside the name: this model is symmetric and takes none,
+the e5 family expects "passage: "/"query: " and loses recall without them, and either mistake is
+silent.
 """
 
 from __future__ import annotations
@@ -45,8 +40,6 @@ class LocalOnnxProvider:
                     "provider."
                 ) from exc
             model = TextEmbedding(model_name=self.model)
-            # Probed once, at load, not per batch: the cost is one embedding for the life of the
-            # process.
             self._check(model)
             self._model = model
         return self._model
@@ -55,10 +48,9 @@ class LocalOnnxProvider:
     def _check(model: Any) -> None:
         """Refuse a model build that cannot produce a usable vector.
 
-        Not paranoia: the ONNX build of jina-embeddings-v2-base-de returns all-NaN vectors
-        through this exact path. NaN does not raise -- it flows into the column, and cosine
-        turns the whole ANN index into noise that looks like a working search returning bad
-        results. One probe at load is cheaper than discovering that from a user's digest.
+        The ONNX build of jina-embeddings-v2-base-de returns all-NaN through this exact path.
+        NaN does not raise: it flows into the column and cosine turns the index into noise that
+        looks like a working search returning bad results.
         """
         import math
 
@@ -81,8 +73,7 @@ class LocalOnnxProvider:
     async def _embed(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
-        # onnxruntime is synchronous and CPU-bound; running it inline would stall the event loop
-        # for the whole batch and starve every concurrent fetch.
+        # onnxruntime is synchronous and CPU-bound; inline it would stall the event loop.
         return await asyncio.to_thread(self._embed_sync, texts)
 
     def _embed_sync(self, texts: list[str]) -> list[list[float]]:
@@ -100,14 +91,8 @@ class LocalOnnxProvider:
 class LocalOnnxMpnetProvider(LocalOnnxProvider):
     """The same local path with a stronger multilingual model, at 768 dimensions.
 
-    Measured against the incumbent over an identical pool of 2,530 postings, the planted needles
-    whose adverts use different words for the same role went from 1 of 6 inside the top 50 to 4
-    of 6, and the adjacent-role ones from 1 of 6 to 5 of 6 -- a larger gain than any query-side
-    change produced, with the plain deterministic queries and no adverts at all.
-
-    It costs roughly two and a half times the compute per document, so switching is a backfill
-    measured in days on a four-core host, and it needs the 768-wide column: get_provider refuses
-    a width the column cannot hold rather than truncating to fit.
+    Roughly 2.5x the compute per document, so switching is a backfill measured in days, and it
+    needs the 768-wide column.
     """
 
     name = "local-onnx-mpnet"
