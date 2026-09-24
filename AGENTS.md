@@ -445,11 +445,18 @@ so the deployment has no LLM spend of its own and one user's exhausted budget ca
 - Changing the default model is an eval question, not a taste question. **The model and the
   provider pin are installation settings** (`default_llm_model`, `default_llm_provider`), never
   a per-user field: a user-chosen model makes scores incomparable across users and lets the pin
-  be cleared. The Settings page shows them read-only. **The monthly ceiling is one of them**
-  (`monthly_budget_usd`), copied onto the credential when it is saved so the batch check reads it
-  off the row it already has: a ceiling the spender can raise is not a ceiling. Every field left
-  on Profile is a `SCORING_FIELDS` member.
-- **The user's one cost control is `scoring_enabled`, a switch.** Retrieval depth is the constant
+  be cleared. The Settings page shows them read-only. Every field left on Profile is a
+  `SCORING_FIELDS` member.
+- **The ceiling is the user's, and it is theirs only while scoring is on.** It lives on the
+  credential; `settings.monthly_budget_usd` is the starting value for a FIRST key, never a reset
+  — replacing a key keeps the ceiling that was set on it. The form disables the input while the
+  switch is off, and **a disabled input submits nothing**, so an absent value means "keep it".
+  Reading it as "reset to the default" silently put every user back on $5 whenever they saved
+  anything else on the page. The route refuses a posted ceiling while scoring is off rather than
+  trusting the markup to have disabled it.
+- **The user's two cost controls are the `scoring_enabled` switch and the ceiling it governs.**
+  The switch submits itself (`.switch`, not a tick box: one that needed a Save button would be a
+  tick box); the ceiling keeps a Save button. Retrieval depth is the constant
   `retrieve.RETRIEVAL_LIMIT` and scoring depth is `rerank.RERANK_LIMIT`; neither is a setting,
   because retrieval is free and rerank takes the top N by retrieval score whatever was fetched,
   so a per-user number had no effect to explain. `rerank_limit` was three things at once — list

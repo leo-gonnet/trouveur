@@ -178,6 +178,112 @@ async def test_the_scoring_switch_pauses_spending_and_says_so(client, seeded):
     assert "Scoring is off" not in (await client.get("/recommendations")).text
 
 
+async def test_the_ceiling_is_the_users_to_set_while_scoring_is_on(client, seeded):
+    async with connect() as conn:
+        await users_q.save_credential(
+            conn, seeded["user_id"], api_key_encrypted=b"probe",
+            api_key_fingerprint="probe", model="probe/model", provider_pin=None,
+            monthly_budget_usd=Decimal("5"),
+        )
+    assert (
+        await client.post(
+            "/settings/scoring", data={"scoring_enabled": "on", "monthly_budget_usd": "12.50"}
+        )
+    ).status_code == 303
+    async with connect() as conn:
+        assert (
+            await users_q.get_credential(conn, seeded["user_id"])
+        ).monthly_budget_usd == Decimal("12.50")
+
+
+async def test_an_absent_ceiling_keeps_the_stored_one_rather_than_resetting_it(client, seeded):
+    """The form DISABLES the ceiling while scoring is off, and a disabled input submits nothing.
+
+    Read as "reset to the default", that silently put the user back on $5 every time they
+    touched the switch -- a cost control quietly widened by the control meant to narrow it.
+    """
+    async with connect() as conn:
+        await users_q.save_credential(
+            conn, seeded["user_id"], api_key_encrypted=b"probe",
+            api_key_fingerprint="probe", model="probe/model", provider_pin=None,
+            monthly_budget_usd=Decimal("42"),
+        )
+
+    assert (await client.post("/settings/scoring", data={})).status_code == 303
+    async with connect() as conn:
+        credential = await users_q.get_credential(conn, seeded["user_id"])
+    assert credential.monthly_budget_usd == Decimal("42"), "the ceiling was silently reset"
+
+
+async def test_the_ceiling_cannot_be_changed_while_scoring_is_off(client, seeded):
+    """Enforced in the route, not only by the disabled attribute the browser is asked to honour."""
+    async with connect() as conn:
+        await users_q.save_credential(
+            conn, seeded["user_id"], api_key_encrypted=b"probe",
+            api_key_fingerprint="probe", model="probe/model", provider_pin=None,
+            monthly_budget_usd=Decimal("42"),
+        )
+    assert (
+        await client.post("/settings/scoring", data={"monthly_budget_usd": "999"})
+    ).status_code == 303
+    async with connect() as conn:
+        assert (
+            await users_q.get_credential(conn, seeded["user_id"])
+        ).monthly_budget_usd == Decimal("42")
+
+
+async def test_replacing_a_key_keeps_the_ceiling_that_was_set_on_it(client, seeded):
+    """The installation default is a starting value for a first key, not a reset."""
+    async with connect() as conn:
+        await users_q.save_credential(
+            conn, seeded["user_id"], api_key_encrypted=b"probe",
+            api_key_fingerprint="probe", model="probe/model", provider_pin=None,
+            monthly_budget_usd=Decimal("42"),
+        )
+    assert (
+        await client.post("/settings", data={"api_key": "sk-or-v1-replacement"})
+    ).status_code == 303
+    async with connect() as conn:
+        assert (
+            await users_q.get_credential(conn, seeded["user_id"])
+        ).monthly_budget_usd == Decimal("42")
+
+
+async def test_editing_the_ceiling_does_not_queue_a_paid_run(client, seeded):
+    """Turning scoring back on is a reason to run; changing a number is not."""
+    from trouveur.db.queries import admin as admin_q
+
+    async with connect() as conn:
+        await users_q.save_credential(
+            conn, seeded["user_id"], api_key_encrypted=b"probe",
+            api_key_fingerprint="probe", model="probe/model", provider_pin=None,
+            monthly_budget_usd=Decimal("5"),
+        )
+    assert (
+        await client.post(
+            "/settings/scoring", data={"scoring_enabled": "on", "monthly_budget_usd": "9"}
+        )
+    ).status_code == 303
+    async with connect() as conn:
+        assert await admin_q.pending_match_run(conn, seeded["user_id"]) is None
+
+    # Off, then on again: that one does queue.
+    assert (await client.post("/settings/scoring", data={})).status_code == 303
+    assert (
+        await client.post("/settings/scoring", data={"scoring_enabled": "on"})
+    ).status_code == 303
+    async with connect() as conn:
+        assert await admin_q.pending_match_run(conn, seeded["user_id"]) is not None
+
+
+async def test_the_ceiling_input_is_locked_while_scoring_is_off(client, seeded):
+    assert (await client.post("/settings/scoring", data={})).status_code == 303
+    body = (await client.get("/settings")).text
+    assert 'name="monthly_budget_usd"' in body, "the ceiling is still shown, just not editable"
+    assert "disabled" in body
+    assert "Save ceiling" not in body
+
+
 async def test_the_pause_never_bills_a_re_score(client, seeded):
     """It is a cost control, not part of what a good match is: a bump would bill the user."""
     async with connect() as conn:

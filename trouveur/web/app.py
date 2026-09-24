@@ -450,36 +450,55 @@ async def settings_save(request: Request, api_key: str = Form("")):
     settings = get_settings()
     async with connect() as conn:
         key = api_key.strip()
-        if key:
-            await users_q.save_credential(
-                conn,
-                session["uid"],
-                api_key_encrypted=encrypt(key),
-                api_key_fingerprint=fingerprint(key),
-                model=settings.default_llm_model,
-                provider_pin=settings.default_llm_provider,
-                monthly_budget_usd=settings.monthly_budget_usd,
-            )
-            # Usually the last step of setting up, and the first thing that makes scoring
-            # possible at all. Without this the page stays empty until the next daily scan.
-            await _queue_match(conn, session["uid"])
-        else:
-            # Empty means "leave the stored key alone", not "delete it". The ceiling is still
-            # refreshed, so raising it in the environment reaches users who already have a key.
-            existing = await users_q.get_credential(conn, session["uid"])
-            if existing is not None:
-                await users_q.update_budget(conn, session["uid"], settings.monthly_budget_usd)
+        # Empty means "leave the stored key alone", not "delete it".
+        if not key:
+            return RedirectResponse("/settings?saved=1", status_code=303)
+        existing = await users_q.get_credential(conn, session["uid"])
+        await users_q.save_credential(
+            conn,
+            session["uid"],
+            api_key_encrypted=encrypt(key),
+            api_key_fingerprint=fingerprint(key),
+            model=settings.default_llm_model,
+            provider_pin=settings.default_llm_provider,
+            # Replacing a key is not a reason to forget the ceiling the user set on it; the
+            # installation default is the starting value for a FIRST key only.
+            monthly_budget_usd=(
+                existing.monthly_budget_usd if existing else settings.monthly_budget_usd
+            ),
+        )
+        # Usually the last step of setting up, and the first thing that makes scoring
+        # possible at all. Without this the page stays empty until the next daily scan.
+        await _queue_match(conn, session["uid"])
     return RedirectResponse("/settings?saved=1", status_code=303)
 
 
 @app.post("/settings/scoring", response_class=HTMLResponse)
-async def settings_scoring_save(request: Request, scoring_enabled: str = Form("")):
-    """The user's pause. Not a SCORING_FIELD, so it never bumps the version or bills a re-score."""
+async def settings_scoring_save(
+    request: Request,
+    scoring_enabled: str = Form(""),
+    monthly_budget_usd: str = Form(""),
+):
+    """The switch and the ceiling it governs. Neither is a SCORING_FIELD, so saving here never
+    bumps the profile version or bills a re-score."""
     session = request.state.session
     enabled = scoring_enabled == "on"
     async with connect() as conn:
+        previous = await users_q.get_profile(conn, session["uid"])
+        was_enabled = previous.scoring_enabled if previous else True
         await users_q.save_profile(conn, session["uid"], {"scoring_enabled": enabled})
-        if enabled:
+
+        # The form disables the ceiling while scoring is off, and a disabled input submits
+        # nothing at all -- so an absent value means "keep it", never "reset it to the default".
+        # Refused outright while scoring is off, rather than only hidden in the markup.
+        if enabled and monthly_budget_usd.strip():
+            credential = await users_q.get_credential(conn, session["uid"])
+            if credential is not None:
+                ceiling = _decimal(monthly_budget_usd, credential.monthly_budget_usd)
+                await users_q.update_budget(conn, session["uid"], max(ceiling, Decimal(0)))
+
+        # Only the switch turning back on is a reason to run; editing the ceiling is not.
+        if enabled and not was_enabled:
             await _queue_match(conn, session["uid"])
     return RedirectResponse("/settings?saved=1", status_code=303)
 
