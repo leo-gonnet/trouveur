@@ -16,20 +16,15 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql+asyncpg://trouveur@127.0.0.1:5432/trouveur"
     session_secret: str = "dev-only-insecure-secret"
-    # Encrypts users' stored LLM API keys. Losing it makes them unrecoverable, which is correct:
-    # a key derivable from the database would not be protecting anything.
     encryption_key: str = "dev-only-insecure-encryption-key"
 
-    # Offered as the starting values on a new user's Settings page. There is no installation-wide
-    # key: reranking runs on each user's own credential, so model and provider are per user and
-    # these are only defaults.
+    # Installation settings, shown read-only on Settings. Never per user: a user-chosen model
+    # makes scores incomparable across users and lets the provider pin be cleared.
     default_llm_model: str = "deepseek/deepseek-v4-flash"
-    # Unpinned, OpenRouter spreads one model across many backends at a wide price spread and
-    # differing quantisation, so neither cost nor scores are reproducible. Provider slugs are
-    # quantisation-qualified, so this pins fp8.
+    # Unpinned, OpenRouter spreads one model across backends at a wide price spread and differing
+    # quantisation, so neither cost nor scores are reproducible.
     default_llm_provider: str | None = "deepinfra/fp8"
-    # Backends vary widely in latency for a batch of this size, so the http_timeout_seconds below
-    # is far too short to survive a slow one.
+    # Backends vary widely in latency, so http_timeout_seconds is far too short here.
     llm_timeout_seconds: float = 300.0
 
     smtp_host: str | None = None
@@ -44,51 +39,34 @@ class Settings(BaseSettings):
     max_login_attempts: int = 5
     lockout_minutes: int = 15
 
-    # "local-onnx" needs `uv sync --extra embeddings`. "deterministic" produces reproducible but
-    # meaningless vectors; it exists for tests and stamps its rows so its use is visible in data.
+    # "local-onnx" needs `uv sync --extra embeddings`.
     embedding_provider: str = "local-onnx"
-    # Width of the embedding column, which a migration owns. It lives here so the provider guard
-    # can compare against what the database actually holds: a provider whose width differs must
-    # be rejected loudly, because a vector of the wrong shape is either an error at insert or,
-    # worse, a silently meaningless neighbour.
+    # The width the embed worker WRITES; a migration owns the column, this lets the provider
+    # guard reject a mismatch loudly rather than storing a meaningless vector.
     embedding_dim: int = 384
-    # Which vector space retrieval READS. Separate from the width above, which is what the embed
-    # worker WRITES, because a model change is a backfill that takes days: throughout it the
-    # worker fills the new space while the dense arm keeps serving from the old one. They differ
-    # only between the start of a backfill and the moment its coverage is complete.
+    # The width, and then the model, retrieval READS. Both differ from the write side only for
+    # the length of a model backfill, while the worker fills the new space and the dense arm
+    # serves the old one. A width alone cannot say which model produced a space.
     embedding_read_dim: int = 384
-    # Which provider embeds a QUERY. Empty means "the one that writes", which is every day that is
-    # not a migration. A width cannot say which model produced a space, and a query vector is
-    # compared against a stored one, so during a backfill the read side needs the outgoing model
-    # named explicitly: pgvector refuses a 768-wide query against the 384 column outright, so the
-    # half-migrated state the two widths exist to allow would otherwise fail every recommendation.
     embedding_read_provider: str = ""
     embed_batch_size: int = 128
 
-    # Sources to leave out of every sweep, comma separated. A source is retired by unsetting
-    # it here rather than by deleting its adapter: the adapter is months of accumulated knowledge
-    # about someone else's API, and the reason to stop sweeping is usually that the postings are
-    # not worth the request budget today -- which can change back. Tenant-scoped sources can also
-    # be emptied of tenants; this is the only way to stop one that is not.
+    # Comma separated. A source is retired by naming it here, never by deleting its adapter.
     disabled_sources: str = ""
 
-    # How old a posting may be and still be recommended. A radar that surfaces a vacancy a
-    # fortnight late has, for anything competitive, found nothing. Measured steady-state
-    # discovery lag is under 1.3 days at the 99th percentile for every source that carries
-    # volume, so this is roughly five times the worst case -- it drops old inventory, never a
-    # posting we were merely slow to find. See trouveur/db/queries/freshness.py.
+    # How old a posting may be and still be recommended. Measured discovery lag is under 1.3 days
+    # at p99 for every source that carries volume, so this drops old inventory, never a posting
+    # we were merely slow to find.
     retrieval_horizon_days: int = 7
 
-    # Arbeitsagentur only ever exposes a delta, so nothing it returns can prove a posting is gone.
-    # Without an age cutoff its open set, and therefore the ANN index, would grow without bound.
+    # A delta source can never prove a posting is gone, so without an age cutoff its open set --
+    # and the ANN index -- would grow without bound.
     stale_close_days: int = 90
 
-    # Offsite copy of the corpus. The archive is the only input that cannot be recomputed and it
-    # lives on one disk; this is where a nightly copy of it goes. A `<owner>/<name>` Hugging Face
+    # Offsite copy of the archive, which lives on one disk. A `<owner>/<name>` Hugging Face
     # dataset repository, or `local:<path>` to rehearse into a directory without a token.
     archive_repo: str = ""
-    # Scope this to write on that one repository and nothing else. It is a credential for an
-    # account, not for a bucket: a broad token in a nightly cron is a standing offer.
+    # Scope this to that one repository: it is a credential for an account, not for a bucket.
     archive_token: str | None = None
 
     http_timeout_seconds: float = 30.0

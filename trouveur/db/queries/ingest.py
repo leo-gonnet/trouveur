@@ -1,9 +1,4 @@
-"""Ingest-side SQL: the raw archive, job upserts and lifecycle.
-
-Every statement here is batched. At tens of thousands of documents a sweep the round trip is the
-bottleneck, not the work, and a per-row loop is the difference between a sweep that finishes in
-minutes and one that does not finish.
-"""
+"""Ingest-side SQL: the raw archive, job upserts and lifecycle. Every statement is batched."""
 
 from __future__ import annotations
 
@@ -26,10 +21,7 @@ async def archive_documents(
 ) -> dict[tuple[str, str], int]:
     """Store payloads verbatim. Returns {(external_id, kind): document_id}.
 
-    Keyed by content hash, so re-fetching a posting whose bytes have not changed adds no row and
-    only refreshes fetched_at. DO UPDATE rather than DO NOTHING purely so that the id comes back
-    for unchanged documents too -- DO NOTHING returns nothing, and the caller needs the id to
-    point the job row at its source payload.
+    DO UPDATE rather than DO NOTHING purely so the id comes back for unchanged documents too.
     """
     if not documents:
         return {}
@@ -59,13 +51,7 @@ async def archive_documents(
 async def latest_documents(
     conn: AsyncConnection, source: str, external_ids: Sequence[str], kind: DocumentKind
 ) -> dict[str, tuple[int, dict]]:
-    """Most recent archived payload per posting: {external_id: (doc_id, payload, scope)}.
-
-    Normalisation reads from here rather than from whatever the sweep happened to be holding, so
-    that it always sees the complete picture. Normalising a listing-only payload for a posting
-    whose description arrived in an earlier detail fetch would recompute content_hash without the
-    description and flap it on every sweep, re-scoring the whole corpus daily at the user's cost.
-    """
+    """Most recent archived payload per posting: {external_id: (doc_id, payload, scope)}."""
     if not external_ids:
         return {}
     stmt = (
@@ -119,8 +105,7 @@ def job_row(
         "updated_at": item.updated_at,
         "closes_at": item.closes_at,
         "locations": [loc.model_dump() for loc in item.locations],
-        # Flattened for search. Cities are how people actually look for jobs, and without this
-        # neither search path can see a place name at all.
+        # Flattened for search: without it neither search path can see a place name at all.
         "location_text": " ".join(loc.raw for loc in item.locations),
         "salary_amount_min": salary.amount_min if salary else None,
         "salary_amount_max": salary.amount_max if salary else None,
@@ -143,8 +128,8 @@ async def upsert_jobs(
 ) -> dict[str, int]:
     """Insert or refresh postings, keyed on provenance identity. Returns {external_id: job_id}.
 
-    Seeing a posting is what makes it live, so this clears closed_at: a board that re-lists a
-    vacancy reopens it, and the embedding is re-queued by the caller because closing deleted it.
+    Seeing a posting makes it live, so this clears closed_at; the caller re-queues the embedding
+    because closing deleted it.
     """
     if not rows:
         return {}
@@ -167,11 +152,8 @@ async def upsert_jobs(
 
 
 async def ensure_facet_rows(conn: AsyncConnection, job_ids: Sequence[int]) -> None:
-    """Give every job a facet row at derive_version 0.
-
-    Created up front so that refilling the derive queue after a version bump is an index scan on
-    one column rather than an anti-join against the whole job table.
-    """
+    """Give every job a facet row at derive_version 0, so refilling the derive queue is an index
+    scan on one column rather than an anti-join against the whole job table."""
     if not job_ids:
         return
     stmt = pg_insert(job_facet).values([{"job_id": job_id} for job_id in job_ids])
@@ -186,9 +168,7 @@ async def touch_seen(conn: AsyncConnection, job_ids: Sequence[int]) -> None:
     )
 
 
-# Closing a job also drops its embedding, in one statement so the two can never disagree.
-# job_embedding holds open postings only -- that is what keeps the ANN index proportional to the
-# live corpus instead of to all history, and it is an invariant, not an optimisation.
+# Closing a job drops its embedding in the SAME statement, so the two can never disagree.
 _CLOSE_SQL = """
 WITH closed AS (
     UPDATE job SET closed_at = now()
@@ -209,10 +189,7 @@ async def close_unseen(
 ) -> int:
     """Retire postings a complete sweep did not see.
 
-    Only ever called with scopes the sweep actually observed in full. A delta sweep reports none,
-    so it closes nothing: seeing only what was published yesterday says nothing about whether a
-    posting from last month is still live, and closing on that basis would retire the entire
-    corpus on the first run.
+    Only ever called with scopes the sweep observed IN FULL. A delta sweep reports none.
     """
     if not scopes:
         return 0
@@ -230,11 +207,7 @@ async def close_unseen(
 async def close_stale(conn: AsyncConnection, source: str, older_than: timedelta) -> int:
     """Retire postings not seen for a long time, for sources that cannot report completeness.
 
-    This is a heuristic and is deliberately named as one. Arbeitsagentur only ever exposes a delta,
-    so nothing it returns can prove a posting has gone; without this the open set -- and therefore
-    the ANN index -- would grow without bound. Age is a poor proxy for "closed", so keep the
-    window generous. The principled replacement is a full partitioned sweep or per-posting
-    liveness probing, neither of which is built.
+    A heuristic, and named as one: age is a poor proxy for "closed", so keep the window generous.
     """
     sql = _CLOSE_SQL.format(cutoff="now() - CAST(:age AS interval)", scope_clause="")
     result = await conn.execute(sa.text(sql), {"source": source, "age": older_than})
@@ -242,11 +215,7 @@ async def close_stale(conn: AsyncConnection, source: str, older_than: timedelta)
 
 
 async def close_retired(conn: AsyncConnection, job_ids: Sequence[int]) -> int:
-    """Close postings whose source reported them gone (a 404 on the detail endpoint).
-
-    This is evidence rather than the age heuristic: the posting itself said it no longer exists.
-    Deletes the embedding in the same statement, keeping job_embedding an index of the live set.
-    """
+    """Close postings whose source reported them gone (a 404 on the detail endpoint)."""
     if not job_ids:
         return 0
     result = await conn.execute(
@@ -281,12 +250,8 @@ async def start_sweep(conn: AsyncConnection, source: str) -> tuple[int, datetime
 async def record_sweep_progress(
     conn: AsyncConnection, sweep_id: int, *, documents_seen: int
 ) -> None:
-    """Publish how far a sweep has got, while it is still going.
-
-    Everything else about a sweep is written when it ends, which is exactly when it stops being
-    interesting: until then the row says only that the source started. A source that has been
-    running for twenty minutes and one that is wedged look identical without this.
-    """
+    """Publish how far a sweep has got, while it is still going: without it a source that has
+    been running for twenty minutes and one that is wedged look identical."""
     await conn.execute(
         source_sweep.update()
         .where(source_sweep.c.id == sweep_id)

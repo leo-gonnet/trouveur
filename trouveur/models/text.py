@@ -1,7 +1,7 @@
 """Text folding, used by hashing, dedupe markers and the trigram search column.
 
-One implementation, deliberately. Postgres does the same folding with unaccent() for the trigram
-index; if these two ever disagree, substring search silently stops matching the rows it indexed.
+Postgres does the same folding with unaccent() for the trigram index; if the two disagree,
+substring search silently stops matching the rows it indexed.
 """
 
 from __future__ import annotations

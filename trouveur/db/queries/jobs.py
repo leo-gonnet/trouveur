@@ -57,8 +57,7 @@ async def load_for_embedding(conn: AsyncConnection, job_ids: Sequence[int]) -> l
     )
 
 
-# pgvector's halfvec has no SQLAlchemy type here, so vectors go over as text and are cast in the
-# statement. unnest keeps it one round trip for the whole batch rather than one per vector.
+# halfvec has no SQLAlchemy type here, so vectors go over as text and are cast in the statement.
 _WRITE_EMBEDDINGS = """
 INSERT INTO job_embedding (job_id, embedding_version, {column})
 SELECT id, version, vector::halfvec
@@ -109,11 +108,8 @@ async def load_for_dedup(conn: AsyncConnection, job_ids: Sequence[int]) -> list[
 async def write_dedup_markers(
     conn: AsyncConnection, rows: Sequence[tuple[int, bytes]], dedup_version: int
 ) -> None:
-    """Record which postings look like the same role. Marks only; never merges, never deletes.
-
-    Collapsing two rows destroys the evidence for the decision, and an early dedup pass is always
-    partly wrong. A marker can be recomputed by bumping DEDUP_VERSION; a merge cannot be undone.
-    """
+    """Record which postings look like the same role. MARKS only; never merges, never deletes:
+    a marker can be recomputed by bumping DEDUP_VERSION, a merge cannot be undone."""
     if not rows:
         return
     await conn.execute(
@@ -145,13 +141,7 @@ async def detail_targets(conn: AsyncConnection, job_ids: Sequence[int]) -> list[
 async def fresh_subset(
     conn: AsyncConnection, job_ids: Sequence[int], fresh_since: datetime
 ) -> list[int]:
-    """Narrow a set of postings to those still inside the freshness horizon.
-
-    Used before queueing embedding work. A source that lists its whole backlog -- Greenhouse
-    boards carry roles open for months -- would otherwise have every one of them embedded at the
-    moment of discovery and pruned again on the next sweep. The vector is never read either way;
-    only the CPU is real.
-    """
+    """Narrow a set of postings to those still inside the freshness horizon."""
     if not job_ids:
         return []
     rows = await conn.execute(
@@ -160,13 +150,8 @@ async def fresh_subset(
     return [row.id for row in rows]
 
 
-# Closing a posting already drops its vector, keeping job_embedding an index of the live set.
-# This extends the same invariant along the other axis the recommender cares about: the set is
-# open AND recent, so the ANN index stays proportional to what a user could actually apply to
-# rather than to everything that has ever been open.
-#
-# Batched, because an unbounded DELETE on a table under an HNSW index is a long lock on the one
-# table retrieval cannot do without.
+# The other axis of the job_embedding invariant: the set is open AND recent. Chunked, because an
+# unbounded DELETE under an HNSW index is a long lock on the one table retrieval needs.
 _PRUNE_STALE = """
 WITH stale AS (
     SELECT e.job_id

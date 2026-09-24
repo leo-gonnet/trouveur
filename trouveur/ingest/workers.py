@@ -1,12 +1,7 @@
 """Queue drainers: one per kind of deferred work.
 
-Each follows the same shape -- claim a batch, do the work, complete or fail -- because that shape
-is what makes the whole thing resumable. A worker that dies mid-batch releases its claim after a
-timeout and the batch is redone; nothing is lost because every stage is idempotent.
-
-These are also the upgrade path. Bumping DERIVE_VERSION and refilling the queue puts the whole
-corpus through drain_derive, which is the same function that ran on today's postings. There is no
-separate migration script to rot.
+These are also the upgrade path -- a version bump plus a refill puts the whole corpus through the
+same function that ran on today's postings, so there is no separate migration script to rot.
 """
 
 from __future__ import annotations
@@ -40,11 +35,7 @@ WORKER = "runner"
 
 
 def _to_canonical(row: sa.Row) -> CanonicalJob:
-    """Rebuild the canonical record from stored columns, so derivation stays a pure function.
-
-    Derivation must see exactly what it would have seen at ingest; reading the row rather than
-    re-normalising the payload is what makes a derive-version bump cheap.
-    """
+    """Rebuild the canonical record from stored columns, so derivation stays a pure function."""
     salary = None
     if row.salary_amount_min is not None or row.salary_amount_max is not None:
         salary = SalaryQuote(
@@ -108,8 +99,8 @@ async def drain_embed(conn: AsyncConnection, limit: int = 256) -> int:
         return 0
     rows = await jobs_q.load_for_embedding(conn, [item.job_id for item in items])
     if not rows:
-        # Every claimed posting closed between being queued and being embedded. Closing deletes
-        # embeddings by design, so there is nothing to do and the items are done, not failed.
+        # Every claimed posting closed between queue and embed. Closing deletes embeddings by
+        # design, so these are done, not failed.
         await complete(conn, [item.id for item in items])
         return 0
 
@@ -141,8 +132,8 @@ async def drain_embed(conn: AsyncConnection, limit: int = 256) -> int:
 async def drain_dedup(conn: AsyncConnection, limit: int = 1000) -> int:
     """Mark postings that look like the same role.
 
-    One naive pass: title, company and first city. It will be wrong at the edges, which is exactly
-    why it writes a marker rather than merging anything -- a better pass is a version bump away.
+    Naive on purpose, which is why it writes a MARKER and never merges: a better pass is a
+    version bump away, and a merge could not be undone.
     """
     items = await claim(conn, WorkKind.DEDUP, limit, WORKER)
     if not items:
@@ -163,9 +154,8 @@ async def drain_detail(
 ) -> int:
     """Fetch descriptions for postings whose source has a separate detail phase.
 
-    Deliberately small batches drained continuously rather than a burst inside the sweep: at ~36k
-    Arbeitsagentur postings a day, one polite request per second absorbs the load comfortably
-    across a day but would add ten hours to a sweep.
+    Small batches drained continuously rather than a burst inside the sweep: one polite request
+    per second absorbs ~36k Arbeitsagentur postings across a day but would add ten hours to it.
     """
     items = await claim(conn, WorkKind.DETAIL, limit, WORKER)
     if not items:
@@ -187,8 +177,7 @@ async def drain_detail(
             await fail(conn, [by_job[row.id]], str(exc))
             continue
         if document is None:
-            # A 404 on the detail endpoint is the posting itself telling us it is gone. That is
-            # evidence of closure rather than the age heuristic, so act on it.
+            # A 404 is the posting telling us it is gone -- evidence, not the age heuristic.
             retired.append(row.id)
             done.append(by_job[row.id])
             continue

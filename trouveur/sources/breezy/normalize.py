@@ -1,10 +1,4 @@
-"""Breezy HR payload -> CanonicalJob. Pure: no I/O, no clock, no database.
-
-Breezy names the title `name` and states the company on every posting, which most per-tenant
-boards do not. Its `salary` is a rendered string ("$0.05 - $0.06 / hour") rather than numbers;
-it is deliberately not parsed here, because a regex over a formatted range is exactly the kind of
-guess that produces a confidently wrong figure. A wrong salary is worse than no salary.
-"""
+"""Breezy HR payload -> CanonicalJob. Pure: no I/O, no clock, no database."""
 
 from __future__ import annotations
 
@@ -39,7 +33,7 @@ def normalize(
         posted_at=iso_datetime(listing.get("published_date")),
         updated_at=iso_datetime(listing.get("updated_date")),
         locations=_locations(listing),
-        # `salary` is a formatted string, not numbers. Left unset rather than parsed out of prose.
+        # `salary` is a formatted string, not numbers. A wrong salary is worse than none.
         salary=None,
         remote_hint=_remote(listing),
         employment_type_hint=collapse_whitespace(employment.get("name")),
@@ -66,8 +60,8 @@ def _locations(listing: dict) -> list[Location]:
 def _place(node: dict) -> Location | None:
     """Keep Breezy's structured city and country where it states them.
 
-    `country` and `state` are objects with `name`, not strings; reading them as strings yields a
-    dict repr in the country column, which then matches no vocabulary entry at all.
+    `country` and `state` are OBJECTS with `name`, not strings. Read as strings they put a dict
+    repr in the country column, which matches no vocabulary entry at all.
     """
     raw = collapse_whitespace(node.get("name"))
     city = collapse_whitespace(node.get("city"))

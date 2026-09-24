@@ -1,16 +1,8 @@
 """Lever postings API — network only, no parsing.
 
-robots.txt (api.lever.co, checked 2026-09-09): `User-agent: * / Allow: / / Crawl-delay: 1`. The
-host explicitly permits crawling and asks for one second between requests, which is exactly the
-project's default politeness budget.
+robots.txt (api.lever.co, checked 2026-09-09): `Allow: /` with `Crawl-delay: 1`.
 
-Shape verified live on 2026-09-09:
-
-  - one request returns the tenant's COMPLETE live board, so the response is itself the seen-set;
-  - the body is a BARE TOP-LEVEL ARRAY, not an object with a `jobs` key. Reaching for `["jobs"]`
-    raises TypeError on a list, which at least fails loudly -- but a `.get("jobs")` would return
-    None and report an empty board;
-  - `descriptionPlain` carries the full text, so there is no detail phase.
+The body is a BARE TOP-LEVEL ARRAY, not an object with a `jobs` key.
 """
 
 from __future__ import annotations
@@ -41,8 +33,6 @@ class LeverSource:
     async def sweep(
         self, client: PoliteClient, sink: DocumentSink, *, backfill: bool = False
     ) -> SweepOutcome:
-        # A board dump is always the complete live set, so a backfill and a daily run are the same
-        # request. The flag is accepted for protocol conformance and deliberately unused.
         return await sweep_boards(
             client,
             sink,
@@ -61,8 +51,7 @@ class LeverSource:
 
 
 def _extract(payload: Any) -> list[dict]:
-    # The response is the list itself. Guarded rather than assumed, so a future envelope shows up
-    # as an empty sweep to investigate instead of a TypeError mid-batch.
+    # Guarded, so an envelope appearing later is an empty sweep rather than a TypeError.
     if not isinstance(payload, list):
         return []
     return [row for row in payload if isinstance(row, dict)]

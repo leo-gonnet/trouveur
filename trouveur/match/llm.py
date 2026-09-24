@@ -1,9 +1,6 @@
 """OpenRouter transport and cost metering. All prompt text for scoring lives in rerank.py.
 
-Every call is made with a user's own key, so this module never reads a global credential and the
-system has no LLM spend of its own. Two consequences shape the code: a failure is one user's
-problem and must not touch another's run, and the cost of a call is that user's money, so it is
-measured from the response rather than estimated.
+Every call uses a user's own key: there is no installation-wide credential.
 """
 
 from __future__ import annotations
@@ -56,11 +53,10 @@ async def complete(
         "model": model,
         "max_tokens": max_tokens,
         "temperature": 0,
-        # Without this a reasoning model spends the entire token budget on hidden thinking and
-        # returns empty content: the batch is lost and billed anyway.
+        # Without this a reasoning model spends the whole budget on hidden thinking and returns
+        # empty content: the batch is lost AND billed.
         "reasoning": {"enabled": False},
-        # Ask for the real charge rather than inferring one from list prices, which several
-        # providers do not bill by.
+        # The real charge, not an inference from list prices several providers do not bill by.
         "usage": {"include": True},
         "messages": [
             {"role": "system", "content": system},
@@ -70,15 +66,11 @@ async def complete(
     if provider_pin:
         body["provider"] = {
             "order": [provider_pin],
-            # Fallbacks are allowed, but only within the constraint below. Pinning one provider
-            # with allow_fallbacks disabled meant a single upstream outage took the whole paid
-            # stage down: deepinfra/fp8 answered 429 engine_overloaded for hours while the same
-            # model served normally elsewhere, and the user was told their own key was being
-            # rate-limited. The pin still decides who is asked first, which is what it was for.
+            # With fallbacks off, one upstream outage took the whole paid stage down for hours.
+            # The pin still decides who is asked first, which is what it was for.
             "allow_fallbacks": True,
-            # The user's profile and advert text leave our infrastructure here. Never route them
-            # to a backend that may train on them. This applies to the fallbacks too -- it is a
-            # filter over eligible providers, not a property of the pinned one.
+            # The user's profile leaves our infrastructure here; never route it to a backend that
+            # may train on it. A filter over eligible providers, so it covers the fallbacks too.
             "data_collection": "deny",
         }
 
@@ -97,10 +89,8 @@ async def complete(
     if response.status_code == 402:
         raise LlmError("The OpenRouter account has insufficient credit for this request.")
     if response.status_code == 429:
-        # Two different failures share this status: the key is being throttled, or every eligible
-        # provider is overloaded. Telling the user to check their key when the upstream is down
-        # sends them to fix something that is not broken, so the provider's own words are passed
-        # through when it gave any.
+        # Either the key is throttled or every eligible provider is overloaded. Telling the user
+        # to check their key when the upstream is down sends them to fix nothing.
         detail = ""
         try:
             error = (response.json().get("error") or {})

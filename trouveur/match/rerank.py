@@ -1,15 +1,6 @@
 """The paid stage: scoring a shortlist against one user's profile, on that user's own key.
 
-All scoring prompt text lives here. Do not scatter fragments across modules -- a prompt assembled
-from three files cannot be reviewed, and a change to one fragment silently rescores the corpus.
-
-Cost discipline is structural rather than advisory:
-
-  - Retrieval runs first and rerank_limit bounds what is sent, so this only ever sees a shortlist.
-  - Every result is cached by (content_hash, user, profile_version), so a posting is scored once
-    per profile, ever. Re-scoring an unchanged posting is a bug, not an inefficiency.
-  - The monthly ceiling is checked before each batch is sent, not reported after it returns. A
-    retry loop on someone else's card is not something to find out about from the user.
+ALL scoring prompt text lives here; a prompt assembled from three files cannot be reviewed.
 """
 
 from __future__ import annotations
@@ -29,8 +20,7 @@ log = logging.getLogger(__name__)
 
 BATCH_SIZE = 10
 _DESCRIPTION_CHARS = 1500
-# Output is billed as generated, not as budgeted, so headroom is free and buys immunity to a
-# truncated response losing an entire batch.
+# Billed as generated, not as budgeted, so headroom is free.
 _MAX_TOKENS = 3000
 
 _SYSTEM = """You screen job adverts for one candidate. You are strict and concise.
@@ -78,10 +68,9 @@ class RerankReport:
 def build_prompt(profile: UserProfile, candidates: list, *, background: str = "") -> str:
     """The profile block, then the batch.
 
-    `background` is the distilled summary from the expansion stage, not the raw field on the
-    profile. It arrives as an argument rather than being read off `profile` because it is derived
-    per profile version and cached there, and because the difference matters to the bill: this
-    block is re-sent with every batch, so what goes in it is multiplied by rerank_limit.
+    `background` is the distilled summary from the expansion stage and MUST stay an argument:
+    reading `profile.background` here looks identical in a diff and bills a 4,000-character CV
+    once per batch instead of once per profile version.
     """
     listing = []
     for row in candidates:
@@ -117,11 +106,8 @@ def build_prompt(profile: UserProfile, candidates: list, *, background: str = ""
 
 
 def parse_response(text: str) -> list[_Score]:
-    """Parse the model's array. A malformed response yields nothing -- never a score of zero.
-
-    Treating unparseable output as 0 would mark good jobs as bad and cache that verdict, and the
-    user would never see them again.
-    """
+    """Parse the model's array. A malformed response yields nothing -- NEVER a score of zero,
+    which would cache a wrong verdict and hide a good job permanently."""
     cleaned = text.strip()
     start, end = cleaned.find("["), cleaned.rfind("]")
     if start == -1 or end == -1:
@@ -145,11 +131,8 @@ def parse_response(text: str) -> list[_Score]:
 def would_exceed_budget(
     spent: Decimal, budget: Decimal, estimate: Decimal
 ) -> bool:
-    """Whether sending one more batch would cross the ceiling.
-
-    Checked with an estimate from batches already sent this run, so the cap is enforced before the
-    money is spent. Without an estimate the ceiling could only be noticed after being passed.
-    """
+    """Whether sending one more batch would cross the ceiling, checked before the money is
+    spent rather than reported after."""
     if budget <= 0:
         return True
     return spent + estimate > budget

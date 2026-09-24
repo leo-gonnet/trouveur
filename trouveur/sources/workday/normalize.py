@@ -1,18 +1,7 @@
 """Workday payload -> CanonicalJob. Pure: no I/O, no clock, no database.
 
-Everything a reader needs is on the detail; the listing carries five fields and two of them are
-traps:
-
-  - **`postedOn` is relative prose** ("Posted Today", "Posted 30+ Days Ago"). It is never parsed.
-    Resolving it would need the fetch time, which a pure normaliser does not have, and guessing
-    from it would put a wrong absolute date on every posting. The detail states `startDate` as a
-    real date and that is the only date used.
-  - **`locationsText` is a count, not a place** -- it reads "3 Locations". Treating it as a
-    location string would put "3 Locations" in the city column of every multi-site posting, where
-    it matches no vocabulary and quietly fails every location filter.
-
-Until the detail drains, a posting therefore has a title and a URL and no date or location. That
-is correct: a missing facet is recoverable, a wrong one is not.
+Two listing fields are traps and neither is read: `postedOn` is relative prose ("Posted Today"),
+and `locationsText` is a count ("3 Locations"), not a place.
 """
 
 from __future__ import annotations
@@ -39,7 +28,7 @@ def normalize(
     if not external_id or not title:
         return None
     if info and info.get("posted") is False:
-        # The posting is still addressable but is no longer published on the board.
+        # Still addressable, but no longer published on the board.
         return None
 
     scope, _, path = external_id.partition(":")
@@ -87,7 +76,7 @@ def _locations(info: dict) -> list[Location]:
     )
     places = []
     for name in dict.fromkeys(name for name in names if name):
-        # The country is stated once for the posting, so it only describes a single location.
+        # One code for the whole posting, so it only describes a location list of one.
         places.append(Location(raw=name, country=country_name if len(names) == 1 else None))
     return places
 

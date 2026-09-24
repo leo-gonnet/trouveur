@@ -1,22 +1,12 @@
 """What gets exported, in what shape, and when a day is safe to freeze.
 
-Three streams, because the corpus has three kinds of fact and they do not age the same way:
+Three streams, because the corpus has three kinds of fact that do not age the same way: raw
+`documents` by fetch day (the only irrecoverable one), `jobs` by first-seen day, and `lifecycle`
+retirements by the day they happened -- which a `jobs` partition cannot carry, since a posting
+closed six months later would have to reach back into an old file.
 
-    documents   raw payloads, keyed by the day they were fetched. Insert-only upstream, so a
-                day is immutable the moment it is over. This is the stream that matters: it is
-                the only input that cannot be recomputed, and everything else in the database is
-                a pure function of it.
-    jobs        normalised postings with their facets, keyed by the day they were first seen.
-                Recomputable in principle, exported because reconstructing 200k postings by
-                replaying the normaliser is a chore nobody wants before an evaluation.
-    lifecycle   retirements, keyed by the day they happened. The one fact a `jobs` partition
-                cannot carry: a posting first seen in March and closed in September would have
-                to reach back into a file written six months earlier.
-
-A stream declares its own Arrow schema rather than inferring one. Inference reads types off
-whatever happened to be in the first chunk, so a column that is all-NULL on a quiet day lands as
-`null` instead of `string` and the day's file no longer matches the rest of the dataset -- which
-surfaces much later, as a reader that cannot concatenate two partitions.
+Each declares its own Arrow schema rather than inferring one: inference reads types off the first
+chunk, so an all-NULL column on a quiet day lands as `null` and stops concatenating.
 """
 
 from __future__ import annotations
@@ -40,9 +30,8 @@ DOCUMENT_SCHEMA = pa.schema(
         ("external_id", pa.string()),
         ("kind", pa.string()),
         ("scope", pa.string()),
-        # The payload as Postgres stored it, as text. Not a struct: every source has a different
-        # shape, several change theirs without notice, and a schema that unifies them is a
-        # normaliser -- which is the stage this stream exists to be independent of.
+        # Text, not a struct: a schema that unifies every source's shape is a normaliser, which
+        # is the stage this stream exists to be independent of.
         ("payload", pa.string()),
         ("payload_sha256", pa.string()),
         ("fetched_at", _TS),
@@ -120,14 +109,10 @@ class Stream:
     schema: pa.Schema
     counts: Counts
     page: Page
-    # The column the page query orders by and resumes from. Named, not inferred from the schema:
-    # paging is keyset, so reading this off field order would make reordering a schema silently
-    # change which column the cursor advances on -- and a cursor on the wrong column either
-    # loops forever or skips rows, both without an error.
+    # Named, not inferred: paging is keyset, and a cursor on the wrong column either loops
+    # forever or skips rows, both without an error.
     key: str
-    # Days to leave alone at the recent end. Zero where upstream only ever inserts; a posting's
-    # description arrives on a later fetch than its listing, so freezing a `jobs` day the moment
-    # it is over would archive rows that are still filling in.
+    # Days to leave alone at the recent end. Zero where upstream only ever inserts.
     lag_days: int
 
     def path(self, day: date) -> str:

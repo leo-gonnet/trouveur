@@ -1,11 +1,6 @@
 """Arbeitnow payload -> CanonicalJob. Pure: no I/O, no clock, no database.
 
-`created_at` is epoch **seconds** here, where Lever states milliseconds. Both decode through the
-same helper so neither can be read as the other -- a posting placed in 1970 would be dropped by
-every recency filter and by the delta window that decides when a sweep stops.
-
-`job_types` and `tags` are the source's own free-form labels. They are passed through as a hint,
-not mapped to an employment type here; mapping vocabulary is derivation.
+`created_at` is epoch SECONDS, where Lever states milliseconds; both go through the same helper.
 """
 
 from __future__ import annotations
@@ -44,7 +39,6 @@ def normalize(
 
 def _locations(value: Any) -> list[Location]:
     raw = collapse_whitespace(value if isinstance(value, str) else None)
-    # A bare place name ("Dresden"), passed through unparsed.
     return [Location(raw=raw)] if raw else []
 
 

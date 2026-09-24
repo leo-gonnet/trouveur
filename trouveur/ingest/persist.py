@@ -1,13 +1,8 @@
 """The single write path from the archive into the job table.
 
-Everything that produces or repairs a job row goes through persist(): the sweep that just archived
-a listing, the worker that just archived a detail, and a re-normalisation after a version bump.
-One path, so the repair path is the same code the ordinary run exercises every day.
-
-It deliberately re-reads payloads from the archive rather than trusting what the caller is
-holding. A listing-only re-sweep normalised in isolation would produce a job with no description,
-recompute content_hash without it, and flap the hash on every run -- re-deriving, re-embedding and
-re-scoring the entire corpus daily at the user's expense.
+It re-reads payloads from the archive rather than trusting the caller's: a listing-only re-sweep
+normalised in isolation would recompute content_hash without the description and flap it on every
+run, re-deriving and re-scoring the whole corpus daily at the user's expense.
 """
 
 from __future__ import annotations
@@ -62,9 +57,6 @@ async def persist(
     for external_id in external_ids:
         listing = listings.get(external_id)
         if listing is None:
-            # A detail can outlive its listing in the archive only if the listing was never
-            # stored, which means something upstream skipped a step rather than a posting being
-            # legitimately absent.
             log.warning("%s: no archived listing for %s; skipping", source, external_id)
             result.skipped += 1
             continue
@@ -103,8 +95,6 @@ async def persist(
         else:
             result.unchanged += 1
 
-    # Only changed content earns new derived work. Re-deriving an unchanged posting is pure cost,
-    # and at this volume it is the difference between a cheap daily run and an expensive one.
     if result.changed:
         await enqueue(conn, WorkKind.DERIVE, result.changed, str(versions.DERIVE_VERSION))
         await enqueue(conn, WorkKind.DEDUP, result.changed, str(versions.DEDUP_VERSION))
@@ -112,15 +102,13 @@ async def persist(
         detail_ids = [job_ids[eid] for eid in result.needs_detail if eid in job_ids]
         await enqueue(conn, WorkKind.DETAIL, detail_ids, "1")
 
-    # Embedding waits for the description. Embedding a title-only Arbeitsagentur posting would
-    # produce a vector that is then immediately invalidated when the detail lands, doubling the
-    # embedding work for every posting from that source and polluting recall in between.
+    # Embedding waits for the description: a title-only vector is invalidated the moment the
+    # detail lands, doubling the work and polluting recall in between.
     pending_detail = {job_ids[eid] for eid in result.needs_detail if eid in job_ids}
     embeddable = [job_id for job_id in result.changed if job_id not in pending_detail]
     if embeddable:
-        # And it waits for nothing that has aged out. A board that lists its whole backlog would
-        # otherwise have every months-old role embedded on discovery and pruned on the next
-        # sweep; the vector is never read either way, only the CPU is real.
+        # And for nothing aged out: a board listing its whole backlog would otherwise embed every
+        # months-old role on discovery and prune it on the next sweep.
         fresh = await jobs_q.fresh_subset(
             conn,
             embeddable,

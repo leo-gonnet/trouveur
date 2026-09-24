@@ -5,8 +5,6 @@
   <h1>Recommendations</h1>
   {% if edition %}
     <p class="hint">
-      {# The distinction the whole page rests on: an edition is what became a recommendation
-         that day, not what was published that day. The age on each card is the other half. #}
       Postings that became recommendations for you on
       <strong>{{ edition.day.strftime('%A %d %B %Y') }}</strong>{% if is_latest %}
       <span class="pill live">latest edition</span>{% endif %}.

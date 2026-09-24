@@ -1,18 +1,9 @@
 """Jobicy remote-jobs API — network only, no parsing.
 
 robots.txt (jobicy.com, checked 2026-09-09): `Content-Signal: ai-train=yes, search=yes,
-ai-input=yes` -- an explicit grant for indexing and for use as model input. The response body also
-asks that Jobicy be credited with a link and that apply buttons go to the original posting URL;
-the digest links to `url`, which is that posting.
+ai-input=yes`. Its body asks that apply links go to the original posting; the digest links `url`.
 
-Shape verified live on 2026-09-09:
-
-  - a small feed (thousands, not hundreds of thousands) of remote postings, newest first;
-  - `count` caps the page; there is no cursor, so the feed is read in one pass rather than paged;
-  - salary arrives as numbers with a currency and period, and the description is inline HTML.
-
-Because there is no cursor, the delta window cannot shorten the request -- but the whole feed is
-one page, so the ordinary run costs a single call either way.
+One capped page, no cursor -- which is why it closes nothing even on a backfill.
 """
 
 from __future__ import annotations
@@ -30,7 +21,7 @@ SOURCE = "jobicy"
 
 _JOBS_URL = "https://jobicy.com/api/v2/remote-jobs"
 
-# The documented maximum for one request. The feed has no cursor, so this is the whole sweep.
+# The documented maximum for one request. No cursor, so this is the whole sweep.
 _COUNT = 50
 
 
@@ -53,16 +44,14 @@ class JobicySource:
             source=SOURCE,
             fetch=fetch,
             extract=lambda payload: require_list(payload, "jobs", source=SOURCE),
-            # One page only: returning no cursor is what stops the sweep after the first call.
             next_cursor=lambda payload: None,
             identify=lambda row: row.get("id"),
             published_at=lambda row: iso_datetime(row.get("pubDate")),
             backfill=backfill,
             delta_window=self.delta_window,
             expected_for=lambda payload: (payload or {}).get("jobCount"),
-            # One capped page is not the whole live set, so this sweep may never close anything.
-            # Without this a backfill would treat the newest 50 postings as the entire corpus and
-            # retire every other Jobicy posting we hold.
+            # One capped page is not the whole live set. Without this a backfill would treat the
+            # newest 50 postings as the corpus and retire every other Jobicy posting we hold.
             complete_on_backfill=False,
         )
 

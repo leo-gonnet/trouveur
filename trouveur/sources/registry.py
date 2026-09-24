@@ -1,13 +1,7 @@
 """The one place source-specific knowledge is dispatched.
 
-Everything downstream addresses a source by name and never branches on which source it is. Adding
-a source is an entry in the table below plus its own package -- if a change requires editing the
-ingest pipeline, the matcher or the web layer as well, the abstraction has leaked and the fix
-belongs here rather than there.
-
-The table is declarative on purpose. Twelve hand-written constructor calls is the branching this
-module exists to prevent, and every one of them would need remembering when a new capability --
-a scope grammar, a delta window -- is added to the family.
+Nothing downstream may branch on which source it is. If a change needs editing here AND in the
+pipeline, the matcher or the web layer, the abstraction has leaked.
 """
 
 from __future__ import annotations
@@ -40,19 +34,12 @@ ScopeCleaner = Callable[[str], str]
 
 @dataclass(frozen=True)
 class SourceSpec:
-    """Everything the rest of the system needs to know about one source.
-
-    `normalize_version` is stored on every row the normaliser writes, so raising it is what makes
-    the whole corpus eligible for re-derivation.
-    """
+    """Everything the rest of the system needs to know about one source."""
 
     normalize: NormalizeFn
     normalize_version: int
-    # Built with the source's tenant list when it is tenant-scoped, and with nothing when it is
-    # not. Kept as a factory so assembling a run stays free of I/O and of per-source branching.
     build: Callable[[list[str]], Source]
     tenant_scoped: bool
-    # How an operator's paste becomes a tenant identifier. Only meaningful when tenant_scoped.
     clean_scope: ScopeCleaner = slug_scope
 
 
@@ -135,9 +122,6 @@ SOURCES: dict[str, SourceSpec] = {
     ),
 }
 
-# Kept as a mapping of its own because persist(), the golden tests and the architecture guard all
-# ask the same question -- "which sources normalise, and at what version" -- and none of them
-# should have to know about the rest of a spec.
 NORMALIZERS: dict[str, tuple[NormalizeFn, int]] = {
     name: (spec.normalize, spec.normalize_version) for name, spec in SOURCES.items()
 }
@@ -156,8 +140,8 @@ def normalizer_for(source: str) -> tuple[NormalizeFn, int]:
 def clean_scope(source: str, raw: str) -> str:
     """Turn one operator-supplied entry into a tenant identifier, by the source's own grammar.
 
-    Validation happens here, at the write, because a malformed scope that reaches `source_tenant`
-    fails on every sweep afterwards and surfaces only as a slowly growing failure count.
+    At the write: a malformed scope that reaches `source_tenant` 404s on every sweep afterwards
+    and surfaces only as a slowly growing failure count.
     """
     try:
         spec = SOURCES[source]
@@ -178,25 +162,15 @@ def build_sources(
     only: str | None = None,
     disabled: Iterable[str] = (),
 ) -> list[Source]:
-    """Assemble the sources for a run.
-
-    Tenants arrive as a mapping keyed by source name, so the caller loads the whole crawl set with
-    one query and never branches on which sources happen to be tenant-scoped. Sources still do no
-    I/O of their own here, so a sweep can be exercised against a stub transport with no database.
+    """Assemble the sources for a run. Does no I/O and reads no settings.
 
     A tenant-scoped source with no tenants is dropped rather than run: sweeping it would make no
     requests, find nothing, and report a perfectly healthy empty sweep.
-
-    `disabled` is taken rather than read from settings, because assembling a run does no I/O and
-    reads no configuration -- that is what lets a sweep be exercised against a stub transport
-    with no database and no environment.
     """
     tenants = tenants or {}
     disabled = {name.strip() for name in disabled if name.strip()}
     unknown = disabled - set(SOURCES)
     if unknown:
-        # A typo here silently sweeps a source the operator believes is off, which is the
-        # opposite of what they asked for and invisible until a bill or a rate limit arrives.
         raise SourceError(
             f"Cannot disable unknown source(s): {', '.join(sorted(unknown))}. "
             f"Known sources are: {', '.join(sorted(SOURCES))}."

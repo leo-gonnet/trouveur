@@ -1,15 +1,9 @@
 """Breezy HR public board — network only, no parsing.
 
 robots.txt (breezy.hr, checked 2026-09-09): `Allow: /` with `Disallow: /api/`, `/app/`, `/m/`,
-`/tags/`. This adapter uses `/json`, which is not among the disallowed paths. Boards live on
-per-tenant subdomains, so the budget is owed to breezy.hr as a whole -- see http.throttle_key.
+`/tags/`. This adapter uses `/json`, which is not disallowed.
 
-Shape verified live on 2026-09-09:
-
-  - one request returns the tenant's COMPLETE live board, so the response is itself the seen-set;
-  - the body is a BARE TOP-LEVEL ARRAY, as with Lever;
-  - an unknown board returns HTTP 404 with an HTML page, not JSON, so the status must be checked
-    before the body is decoded.
+The body is a BARE TOP-LEVEL ARRAY.
 """
 
 from __future__ import annotations
@@ -37,8 +31,6 @@ class BreezySource:
     async def sweep(
         self, client: PoliteClient, sink: DocumentSink, *, backfill: bool = False
     ) -> SweepOutcome:
-        # A board dump is always the complete live set, so a backfill and a daily run are the same
-        # request. The flag is accepted for protocol conformance and deliberately unused.
         return await sweep_boards(
             client,
             sink,

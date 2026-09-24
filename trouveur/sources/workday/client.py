@@ -1,24 +1,11 @@
 """Workday CXS careers API — network only, no parsing.
 
-robots.txt: checked per tenant host, not per platform, because Workday boards are tenant-hosted
-and their rules differ. A representative host on 2026-09-09 allowed the career site path and
-disallowed only `/talentcommunity/` and `/refreshFacet/`; `/wday/` was not disallowed. **A new
-tenant's robots.txt must be read before it is enabled** -- the sibling SuccessFactors platform was
-observed serving `Disallow: /` on one tenant host and nothing on another, so a platform-wide
-verdict is not sound for this family.
+robots.txt is checked PER TENANT HOST, not per platform: boards are tenant-hosted and their rules
+differ. A representative host on 2026-09-09 disallowed only `/talentcommunity/` and
+`/refreshFacet/`. A new tenant's robots.txt must be read before it is enabled.
 
-Shape verified live on 2026-09-09. Three behaviours here fail silently and all three are guarded:
-
-  - **`limit` caps at exactly 20.** `limit=21`, `50` and `100` all return HTTP 400. Raising the
-    page size "for throughput" fails the whole sweep.
-  - **`total` is not usable as a count or as a terminator.** One query returned total=2000 at
-    offset 0, total=0 at offset 1980, and total=2000 at offset 2000 -- while still returning rows
-    past its own stated total. Paging until `offset >= total` would stop early or never stop.
-    The only reliable end is an empty `jobPostings` array.
-  - **`postedOn` is relative prose** ("Posted Today", "Posted 30+ Days Ago"), not a date. It is
-    archived as stated and resolved in derivation, never parsed into an absolute here.
-
-The listing carries no description, so every posting costs one detail request.
+`limit` caps at exactly 20, `total` contradicts itself across pages, and `postedOn` is relative
+prose. Each is guarded below.
 """
 
 from __future__ import annotations
@@ -36,17 +23,14 @@ SOURCE = "workday"
 
 _JOBS_URL = "https://{tenant}.{instance}.myworkdayjobs.com/wday/cxs/{tenant}/{site}/jobs"
 
-# Verified live: 21 and above return HTTP 400. This is a hard ceiling, not a default.
+# Verified live: 21 and above return HTTP 400. A hard ceiling, not a default.
 PAGE_SIZE = 20
 
-# A tenant with more postings than this is paged past rather than swept forever. Recorded as an
-# overflow so a growing number is visible, in the same spirit as the Arbeitsagentur result window.
 MAX_OFFSET = 10_000
 
 
 class WorkdaySource:
     name = SOURCE
-    # The listing has no description; every posting needs a detail fetch.
     requires_detail = True
     tenant_scoped = True
 
@@ -56,8 +40,6 @@ class WorkdaySource:
     async def sweep(
         self, client: PoliteClient, sink: DocumentSink, *, backfill: bool = False
     ) -> SweepOutcome:
-        # Paging a tenant to exhaustion observes its whole live set, so a backfill and a daily run
-        # are the same walk. The flag is accepted for protocol conformance and deliberately unused.
         outcome = SweepOutcome(partitions_total=len(self.boards), expected=0)
         for scope in self.boards:
             try:
@@ -72,8 +54,7 @@ class WorkdaySource:
             outcome.scope_results.append(ScopeResult(scope=scope, ok=True, documents=seen))
             if overflowed:
                 outcome.partitions_overflowed += 1
-                # The sweep did not reach the end of this board, so postings it did not see may
-                # still be live and nothing here may be closed.
+                # The walk did not reach the end, so nothing here may be closed.
                 continue
             outcome.closable_scopes.append(scope)
         return outcome
@@ -95,12 +76,10 @@ class WorkdaySource:
             if not rows:
                 return seen, False
 
-            # Past its last posting Workday clamps the offset instead of running out: probed live
-            # on 2026-09-22, offset=2000 and offset=9980 returned the identical page. So the empty
-            # page above never arrives for most boards and the walk grinds to MAX_OFFSET against
-            # one repeating page -- 500 requests for a 2,000-posting board, at 1 req/s shared
-            # across every tenant. A page carrying nothing new is that clamp, and it is a real end:
-            # everything behind it has already been sinked, so the board stays closable.
+            # Past its last posting Workday CLAMPS the offset rather than running out (probed
+            # 2026-09-22: offset=2000 and offset=9980 returned the identical page), so the empty
+            # page above never arrives for most boards. A page carrying nothing new is that clamp
+            # and is a real end -- everything behind it has already been sinked.
             paths = {path for row in rows if (path := _external_path(row))}
             if paths and paths <= seen_paths:
                 return seen, False
@@ -147,10 +126,8 @@ class WorkdaySource:
     async def fetch_detail(
         self, client: PoliteClient, external_id: str
     ) -> RawDocument | None:
-        # `scoped_id` joins the three-part scope to the externalPath, so the id is
-        # `tenant:instance:site:/job/...` -- four fields. Partitioning on the first colon yields
-        # the tenant alone, which `split_workday_scope` then rejects with a bare ValueError that
-        # `drain_detail` does not catch, taking the whole runner tick down with it.
+        # The id is `tenant:instance:site:/job/...` -- four fields. Splitting on the first colon
+        # yields the tenant alone and raises a ValueError `drain_detail` does not catch.
         tenant, _, rest = external_id.partition(":")
         instance, _, rest = rest.partition(":")
         site, _, path = rest.partition(":")
@@ -162,7 +139,6 @@ class WorkdaySource:
         scope = f"{tenant}:{instance}:{site}"
         base = _JOBS_URL.format(tenant=tenant, instance=instance, site=site).removesuffix("/jobs")
         response = await client.get(f"{base}{path}")
-        # A retired posting 404s. That is the normal end of a listing's life, not a failure.
         if response.status_code == 404:
             return None
         if response.status_code != 200:

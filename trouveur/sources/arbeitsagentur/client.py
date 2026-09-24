@@ -1,19 +1,10 @@
 """Bundesagentur für Arbeit Jobsuche API — network only, no parsing.
 
-Public and free: no signup, and the API key below is the documented public one. robots.txt is not
-applicable (rest.arbeitsagentur.de serves 403 for it); this is a published JSON API intended for
-third-party use.
+robots.txt: not applicable, rest.arbeitsagentur.de serves 403 for it (checked 2026-09-08).
 
-Every constraint in this module was verified against the live API on 2026-09-08, and every one of
-them fails *silently* -- zero rows or the entire corpus, never an exception. Re-probe before
-changing any of them; do not infer them from the shape of the URL.
-
-  Endpoint versions differ per endpoint and this is not a typo:
-    search  pc/v6/jobs                       v6 works; v4 -> 403
-    detail  pc/v4/jobdetails/{base64(refnr)} v4 works; v5 and v6 -> 403
-
-  The result list key is `ergebnisliste`, not `stellenangebote`.
-  Search results carry no description; only the detail endpoint has one.
+Every constant below was probed live and every one of them fails silently -- zero rows or the
+entire corpus, never an exception. Re-probe before changing any; do not infer from the URL.
+Search is v6 and detail is v4: other versions 403. The result key is `ergebnisliste`.
 """
 
 from __future__ import annotations
@@ -42,17 +33,13 @@ _HEADERS = {
     "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/126 Safari/537.36",
 }
 
-# size=500 is the maximum. size=501 returns HTTP 200 with an EMPTY result list rather than an
-# error, so an "optimisation" to 1000 would quietly collect nothing at all.
+# size=501 returns HTTP 200 with an EMPTY result list, not an error.
 MAX_PAGE_SIZE = 500
 
-# size * page may not exceed 10000; beyond it the API returns HTTP 400. Any partition with more
-# matches than this cannot be paged through and must be split or reported as overflowed.
+# size * page may not exceed 10000; beyond it, HTTP 400.
 RESULT_WINDOW = 10_000
 
-# veroeffentlichtseit accepts only these values. It is NOT a number of days: 2, 3, 4, 5, 30 and
-# 100 are all accepted and all return the ENTIRE ~1M corpus instead of a window, with no error.
-# A "2-day catch-up" would therefore silently fetch a million rows. Verified 2026-09-08.
+# NOT a number of days. Any other value is accepted and returns the ENTIRE ~1M corpus.
 DELTA_WINDOWS = {0, 1, 7, 14}
 _DAILY_WINDOW = 1
 _BACKFILL_WINDOW = 14
@@ -60,15 +47,9 @@ _BACKFILL_WINDOW = 14
 
 class ArbeitsagenturSource:
     name = SOURCE
-    # Descriptions cost one request each, so the sweep records the need and a background worker
-    # drains it at a polite constant rate instead of the sweep paying ~36k requests inline.
     requires_detail = True
 
     def __init__(self, partition_filter: list[str] | None = None) -> None:
-        # Restricts the sweep to occupational fields whose name contains one of these strings.
-        # For debugging a single partition and for building an evaluation corpus; a production
-        # sweep leaves it unset, and a run that sets it logs the narrowing so a corpus that
-        # stopped growing is traceable to this rather than to the source.
         self.partition_filter = partition_filter
 
     async def sweep(
@@ -90,9 +71,7 @@ class ArbeitsagenturSource:
                 "not a full sweep",
                 len(partitions),
             )
-        # A delta sweep observes only postings published inside its window, so it can never
-        # establish that an older posting has gone. closable_scopes stays empty, which forbids
-        # lifecycle from closing anything on the strength of this sweep. See SweepOutcome.
+        # A delta window observed no scope in full, so nothing may be closed on this sweep.
         outcome = SweepOutcome(
             closable_scopes=[], partitions_total=len(partitions), expected=expected
         )
@@ -109,13 +88,8 @@ class ArbeitsagenturSource:
         return outcome
 
     async def _partitions(self, client: PoliteClient, window: int) -> tuple[list[str], int]:
-        """Read the berufsfeld facet and use its keys as partition boundaries.
-
-        Taken from the API rather than hardcoded so a new occupational field starts being swept on
-        its own. The facet counts do not quite sum to the total -- a small share of postings carry
-        no berufsfeld and are invisible to a partitioned sweep -- so the caller records the
-        shortfall as a measured coverage hole rather than assuming there isn't one.
-        """
+        # Read from the API, not hardcoded. The counts do not sum to the total; the caller
+        # records the shortfall as a measured coverage hole.
         payload = await client.get_json(
             _SEARCH_URL, params={"veroeffentlichtseit": window, "size": 1}, headers=_HEADERS
         )
@@ -144,9 +118,7 @@ class ArbeitsagenturSource:
                 "size": MAX_PAGE_SIZE,
                 "page": page,
             }
-            # Deliberately absent: `pav` (HTTP 400), `homeoffice` (HTTP 400) and `arbeitszeit=ho`
-            # (0 rows). There is no server-side remote filter; remote is derived from the
-            # homeofficemoeglich field instead.
+            # Never send `pav` (400), `homeoffice` (400) or `arbeitszeit=ho` (0 rows).
             payload = await client.get_json(_SEARCH_URL, params=params, headers=_HEADERS)
             results = payload.get("ergebnisliste") or []
             if page == 1 and int(payload.get("maxErgebnisse") or 0) > RESULT_WINDOW:
@@ -178,7 +150,6 @@ class ArbeitsagenturSource:
     ) -> RawDocument | None:
         token = base64.b64encode(external_id.encode()).decode()
         response = await client.get(f"{_DETAIL_URL}/{token}", headers=_HEADERS)
-        # A retired posting 404s. That is the normal end of a listing's life, not a failure.
         if response.status_code == 404:
             return None
         if response.status_code != 200:

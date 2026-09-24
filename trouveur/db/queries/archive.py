@@ -1,15 +1,9 @@
 """SQL for the offsite corpus export.
 
-Reads only, and reads in arrival order: `source_document` by `fetched_at`, `job` by
-`first_seen_at`, closures by `closed_at`. That order is the whole design. A day of the archive is
-a contiguous slice that never changes again, so a day is a file, a file is written once, and
-"which days are already uploaded" is the only state the export needs -- which means it can be read
-back from the destination instead of being tracked here and drifting.
+Reads only, in arrival order, so a day is a contiguous slice that never changes again: a day is a
+file, written once, and "which days are uploaded" can be read back from the destination.
 
-Enums, UUIDs, JSONB and bytea are cast to text in the query rather than converted in Python. The
-archive outlives this schema: a Parquet file holding `'listing'` and a hex digest is readable in
-ten years by something that has never heard of `document_kind`, and a driver-level type mapping
-is exactly the kind of thing that changes underneath a format that is supposed to be stable.
+Types are cast to text in the query, not converted in Python -- the archive outlives this schema.
 """
 
 from __future__ import annotations
@@ -19,21 +13,11 @@ from datetime import date
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-# Deliberately absent from every projection below:
-#
-#   search_de, search_fold   generated search columns; a pure function of the text beside them.
-#   job_embedding            vectors, recomputable from the text and worthless in another model's
-#                            space. The archive exists so the corpus survives a model change, not
-#                            so one model's output does.
-#   user_*, llm_score_cache  one person's account, credentials and match history. The corpus is
-#                            public job postings; none of this is, and a private repository is not
-#                            a reason to upload it.
+# Deliberately absent below: the generated search columns and job_embedding (both recomputable),
+# and every user_* table -- the corpus is public job postings, a person's account is not.
 
-# How many rows each day holds, for every day the stream has any. One aggregate per stream
-# rather than a probe per day: it answers "which days exist" and "how big is each" at once, so a
-# day that never had anything in it is simply absent instead of being re-checked every night for
-# the rest of the installation's life. It is also what makes --dry-run worth running, since the
-# alternative is a dry run that reports every partition as zero rows.
+# One aggregate per stream rather than a probe per day, so a day that never had anything is
+# absent instead of being re-checked every night for ever.
 _DOCUMENT_COUNTS = """
 SELECT fetched_at::date AS day, count(*) AS rows FROM source_document GROUP BY 1
 """
@@ -120,10 +104,8 @@ ORDER BY j.id
 LIMIT :chunk
 """
 
-# Closures are the one thing a day partition of `job` cannot carry: a posting ingested in March
-# and retired in September changes a file that was written six months earlier. So retirement is
-# its own append-only stream, keyed by the day it happened, and a reader reconstructs state at
-# any date by replaying it over the job partitions.
+# A day partition of `job` cannot carry closures: a posting ingested in March and retired in
+# September would change a file written six months earlier. So retirement is its own stream.
 _CLOSURES = """
 SELECT id AS job_id,
        source,

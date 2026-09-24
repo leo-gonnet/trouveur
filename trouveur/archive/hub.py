@@ -1,14 +1,7 @@
 """Where an exported partition goes.
 
-Two destinations behind one interface, because the useful thing to do before pointing a nightly
-job at someone else's servers is to run the whole thing into a local directory and look at what
-it produced. The local destination is not a test double -- it is the rehearsal, and the tests
-happen to use it too.
-
-The Hub destination is deliberately thin. It uploads one partition per commit rather than
-batching a run into one, which makes a run resumable: a night that dies on day seven leaves days
-one through six in the repository, and the next run sees them and carries on. A tidier commit
-history would cost that, and the corpus is worth more than the history is.
+One partition per commit rather than one per run, which is what makes a run resumable: a night
+that dies on day seven leaves days one to six in place for the next run to see.
 """
 
 from __future__ import annotations
@@ -88,15 +81,13 @@ class HubDestination:
         self.repo_id = repo_id
         self._api = HfApi(token=token)
         if read_only:
-            # A dry run must leave no trace. Creating the repository and writing the dataset
-            # card are both writes, and doing them here meant `--dry-run` silently created a
-            # repository on someone's account before reporting that it would change nothing.
+            # A dry run must leave no trace: creating the repository is a write, and doing it
+            # here silently created one before reporting that nothing would change.
             return
         self._api.create_repo(
             repo_id, repo_type="dataset", private=True, exist_ok=True
         )
-        # Written once, on the repository's first night. Here rather than in `existing()`,
-        # which callers are entitled to assume does not write anything.
+        # Here rather than in `existing()`, which callers may assume does not write.
         if not self._api.file_exists(repo_id, "README.md", repo_type="dataset"):
             self._api.upload_file(
                 path_or_fileobj=CARD.encode(),

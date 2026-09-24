@@ -1,9 +1,4 @@
-"""Shared polite HTTP client.
-
-Every adapter goes through this so that politeness is implemented once rather than forgotten once
-per source: a per-host minimum interval, an identifying User-Agent, and retries that back off
-instead of hammering a source that is already struggling.
-"""
+"""Shared polite HTTP client. Every adapter goes through it."""
 
 from __future__ import annotations
 
@@ -28,14 +23,10 @@ _MAX_ATTEMPTS = 4
 def throttle_key(url: str) -> str:
     """The provider a URL belongs to, which is what the politeness budget is owed to.
 
-    Keying on the full hostname looks right and is wrong for every source that gives each tenant
-    its own subdomain -- Personio, Breezy, Teamtailor. With a board per subdomain, `{slug}.jobs.
-    personio.de` yields one independent budget *per tenant*, so a thousand boards means a thousand
-    requests a second at one provider while every counter still reads as compliant.
-
-    The registrable domain is approximated as the last two labels. That over-groups a multi-part
-    public suffix such as `co.uk` into one budget, which costs a little throughput and is the safe
-    direction to be wrong in: over-throttling is polite, under-throttling is what gets us blocked.
+    The registrable domain, NOT the hostname: Personio and Breezy give every tenant its own
+    subdomain, so a per-host budget would be one budget per board -- a thousand requests a second
+    at one provider, with every counter still reading as compliant. Over-grouping is the safe
+    direction to be wrong in.
     """
     host = urlsplit(url).netloc.rsplit("@", 1)[-1].split(":", 1)[0].lower()
     labels = [label for label in host.split(".") if label]
@@ -67,11 +58,7 @@ class PoliteClient:
             await self._client.aclose()
 
     async def _throttle(self, host: str) -> None:
-        """Rate-limit per provider, not globally and not per hostname.
-
-        The lock is per provider too: a global lock would serialise every source behind the
-        slowest one, which at this fan-out costs far more than it protects.
-        """
+        """Rate-limit per provider, not globally and not per hostname."""
         lock = self._locks.setdefault(host, asyncio.Lock())
         async with lock:
             elapsed = time.monotonic() - self._last.get(host, 0.0)
@@ -107,12 +94,8 @@ class PoliteClient:
         params: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
     ) -> httpx.Response:
-        """One retry-and-throttle path for every verb.
-
-        POST exists because Workday, Taleo and SuccessFactors search by request body. It shares
-        this path deliberately: a second implementation would be a second place to forget the
-        politeness budget.
-        """
+        """One retry-and-throttle path for every verb; POST is here so Workday's body search
+        cannot become a second place to forget the politeness budget."""
         if self._client is None:
             raise FetchError("PoliteClient must be used as an async context manager.")
         host = throttle_key(url)
@@ -134,8 +117,6 @@ class PoliteClient:
                     await asyncio.sleep(retry_after)
                     continue
             if attempt < _MAX_ATTEMPTS:
-                # Jittered, so a source that rate-limited a burst does not receive the whole
-                # burst again in lockstep once the backoff expires.
                 await asyncio.sleep((2 ** (attempt - 1)) + random.uniform(0, 0.5))
         raise FetchError(
             f"Giving up on {url} after {_MAX_ATTEMPTS} attempts; last failure was {last_error}."

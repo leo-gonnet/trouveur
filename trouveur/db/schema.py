@@ -1,8 +1,7 @@
 """Table definitions used to build queries.
 
-The authoritative DDL is in alembic/versions/; this mirrors it so SQLAlchemy Core can construct
-statements, and the two must be kept in step. Generated columns and index definitions live only in
-the migration -- queries do not need them declared to use them.
+The authoritative DDL is in alembic/versions/; this mirrors it and the two must be kept in step.
+Generated columns and indexes live only in the migration.
 """
 
 from __future__ import annotations
@@ -31,7 +30,7 @@ user_state = _enum("user_state", "new", "saved", "applied", "dismissed")
 run_status = _enum("run_status", "queued", "running", "success", "failed", "cancelled")
 run_trigger = _enum("run_trigger", "scheduled", "manual")
 
-# The raw archive. Append-only and never pruned: it is the only input that cannot be recomputed.
+# Append-only and never pruned: the only input that cannot be recomputed.
 source_document = sa.Table(
     "source_document",
     metadata,
@@ -49,10 +48,9 @@ source_document = sa.Table(
     ),
 )
 
-# Provenance identity: one row per posting per board, keyed by (source, external_id). This is
-# emphatically NOT "the same job in the world" -- that question is answered by dedup_group below,
-# which only ever marks. Conflating the two is how V1 silently discarded every posting that
-# reached it from a second source.
+# (source, external_id) is PROVENANCE identity -- one row per posting per board. It is not "the
+# same job in the world": that is dedup_group, which only ever marks. Conflating the two silently
+# discards every posting that arrives from a second source.
 job = sa.Table(
     "job",
     metadata,
@@ -93,9 +91,8 @@ job = sa.Table(
     sa.UniqueConstraint("source", "external_id", name="job_provenance_uniq"),
 )
 
-# Interpretation, versioned separately from normalisation because the two are fixed at different
-# times for different reasons. A row is created with the job at derive_version 0, so refilling the
-# derive queue is an index scan on one column rather than an anti-join.
+# Interpretation, versioned separately from normalisation. A row is created with the job at
+# derive_version 0, so refilling the derive queue is an index scan rather than an anti-join.
 job_facet = sa.Table(
     "job_facet",
     metadata,
@@ -116,25 +113,19 @@ job_facet = sa.Table(
     sa.Column("derived_at", sa.DateTime(timezone=True)),
 )
 
-# Open postings only. Closing a job DELETES its row here, so this table is its own partial index:
-# the ANN index stays proportional to the live corpus rather than to all history, with no
-# denormalised is_open flag to drift out of sync. The vector is a pure function of job text, so a
-# reopened posting is simply re-embedded.
+# Open postings ONLY. Closing a job deletes its row here, which keeps the ANN index proportional
+# to the live corpus with no is_open flag to drift. An invariant, not an optimisation.
 job_embedding = sa.Table(
     "job_embedding",
     metadata,
     sa.Column("job_id", sa.BigInteger, primary_key=True),
-    # provider:model:dim, not an integer. An integer cannot express that two rows came from
-    # different vector spaces, and mixing spaces in one column is a similarity bug that never
-    # raises -- it just quietly returns nonsense neighbours.
+    # provider:model:dim, not an integer: an integer cannot express that two rows came from
+    # different vector spaces, and mixing spaces returns nonsense neighbours without raising.
     sa.Column("embedding_version", sa.Text, nullable=False),
     sa.Column("embedded_at", sa.DateTime(timezone=True), nullable=False,
               server_default=sa.func.now()),
 )
 
-# The single queue. Deliberately not paired with a separate outbox: "this row needs work" and
-# "this row changed, tell a consumer" are the same statement, and two mechanisms for it would be
-# two things to keep in sync.
 work_item = sa.Table(
     "work_item",
     metadata,
@@ -153,9 +144,8 @@ work_item = sa.Table(
     sa.UniqueConstraint("kind", "job_id", name="work_item_kind_job_uniq"),
 )
 
-# One row per source per sweep. `complete` is the lifecycle gate: a posting may only be closed for
-# not being seen if the sweep that failed to see it actually covered the whole source. A truncated
-# or partially failed sweep that closed everything it missed would empty the corpus silently.
+# `complete` is the lifecycle gate: a posting may only be closed for not being seen if the sweep
+# that missed it covered the whole source. Otherwise a truncated sweep empties the corpus.
 source_sweep = sa.Table(
     "source_sweep",
     metadata,
@@ -175,20 +165,15 @@ source_sweep = sa.Table(
     sa.Column("error", sa.Text),
 )
 
-# The crawl set: which tenants a per-tenant source sweeps. Some sources publish no index of their
-# own, so this is the only list of them that exists.
-#
-# In the database rather than the repository because it is written by more than one thing -- an
-# operator today, a discovery pass later -- and a discovery pass proposing hundreds of candidates
-# does not belong in a hand-edited file. The cost accepted in exchange: the corpus a given commit
-# produces is no longer reproducible from that commit alone.
+# The crawl set. In the database rather than the repository because more than one thing writes
+# it; the cost accepted is that the corpus is not reproducible from a commit alone.
 source_tenant = sa.Table(
     "source_tenant",
     metadata,
     sa.Column("source", sa.Text, primary_key=True),
     sa.Column("scope", sa.Text, primary_key=True),
-    # Discovery inserts disabled rows and an operator promotes them, so a discovery pass can never
-    # enlarge the crawl -- and the bill, and the politeness budget -- on its own.
+    # Discovery inserts disabled rows and a human promotes them, so it can never enlarge the
+    # crawl, the bill or the politeness budget on its own.
     sa.Column("enabled", sa.Boolean, nullable=False, server_default="false"),
     sa.Column("origin", tenant_origin, nullable=False, server_default="manual"),
     sa.Column("note", sa.Text),
@@ -196,10 +181,8 @@ source_tenant = sa.Table(
               server_default=sa.func.now()),
 )
 
-# Observation, not configuration. Which tenants exist is decided in the repository (see
-# trouveur/sources/scopes.py); this records only what happened when we asked them. Keeping the two
-# apart is why this table is written on every sweep, whereas its predecessor mixed an editable
-# board list with health columns that nothing ever filled in.
+# Observation, not configuration: source_tenant is the crawl set, this is only what happened when
+# we asked. Their predecessor mixed the two and half of it rotted unnoticed.
 source_scope_health = sa.Table(
     "source_scope_health",
     metadata,
@@ -218,9 +201,6 @@ app_user = sa.Table(
     metadata,
     sa.Column("id", sa.BigInteger, primary_key=True),
     sa.Column("username", sa.Text, nullable=False, unique=True),
-    # Optional: a user with no address simply gets no digest. The web UI is the primary surface,
-    # email is a convenience, and requiring one would make an account harder to create than it
-    # needs to be for something with no self-service registration.
     sa.Column("email", sa.Text),
     sa.Column("password_hash", sa.Text, nullable=False),
     sa.Column("is_active", sa.Boolean, nullable=False, server_default="true"),
@@ -234,14 +214,10 @@ user_profile = sa.Table(
     "user_profile",
     metadata,
     sa.Column("user_id", sa.BigInteger, primary_key=True),
-    # Per user, not global. Editing a profile invalidates that user's cached scores and nobody
-    # else's, which is only expressible with the version living here.
     sa.Column("version", sa.Integer, nullable=False, server_default="1"),
     sa.Column("title", sa.Text, nullable=False, server_default=""),
     sa.Column("years_experience", sa.Integer, nullable=False, server_default="0"),
     sa.Column("objectives", sa.Text, nullable=False, server_default=""),
-    # What the candidate has done, in their own words. A scoring field: it changes what a good
-    # match is, so editing it bumps the version and clears the cached scores.
     sa.Column("background", sa.Text, nullable=False, server_default=""),
     sa.Column("languages", ARRAY(sa.Text), nullable=False, server_default="{}"),
     sa.Column("must_have", ARRAY(sa.Text), nullable=False, server_default="{}"),
@@ -257,9 +233,8 @@ user_profile = sa.Table(
               server_default=sa.func.now()),
 )
 
-# Reranking runs on the user's own OpenRouter key. The ciphertext never leaves this table: it is
-# decrypted immediately before a call, never logged, and never rendered back into the settings
-# form (the UI shows only a fingerprint).
+# The ciphertext never leaves this table: decrypted immediately before a call, never logged, and
+# never rendered back to the browser -- the UI shows only a fingerprint.
 user_llm_credential = sa.Table(
     "user_llm_credential",
     metadata,
@@ -267,16 +242,16 @@ user_llm_credential = sa.Table(
     sa.Column("api_key_encrypted", BYTEA, nullable=False),
     sa.Column("api_key_fingerprint", sa.Text, nullable=False),
     sa.Column("model", sa.Text, nullable=False),
-    # Unpinned, OpenRouter spreads one model across many backends at a wide price spread and
-    # differing quantisation, so neither cost nor scores are reproducible.
+    # Unpinned, OpenRouter spreads one model across backends at a wide price spread and differing
+    # quantisation, so neither cost nor scores are reproducible.
     sa.Column("provider_pin", sa.Text),
     sa.Column("monthly_budget_usd", sa.Numeric, nullable=False, server_default="5"),
     sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False,
               server_default=sa.func.now()),
 )
 
-# Spend is metered per user per calendar month and checked *before* each batch, not reported
-# after. A retry loop on someone else's credit card is not a bug you want reported by the user.
+# Checked BEFORE each batch, not reported after: a retry loop on someone else's card is not
+# something to discover from the user. Metered in USD, the currency OpenRouter bills in.
 user_llm_spend = sa.Table(
     "user_llm_spend",
     metadata,
@@ -290,8 +265,7 @@ user_llm_spend = sa.Table(
               server_default=sa.func.now()),
 )
 
-# The per-user overlay on a shared, user-agnostic corpus. Everything V1 hung off the job row
-# lives here instead, which is what makes a second user a row rather than a rewrite.
+# The per-user overlay on a shared, user-agnostic corpus.
 user_job_match = sa.Table(
     "user_job_match",
     metadata,
@@ -312,8 +286,7 @@ user_job_match = sa.Table(
               server_default=sa.func.now()),
 )
 
-# Scores are cached corpus-wide by (content_hash, profile_version): the same posting scored for
-# the same profile is never paid for twice, including after a re-fetch that changed nothing.
+# Cached by (content_hash, user, profile_version): a posting is scored once per profile, ever.
 llm_score_cache = sa.Table(
     "llm_score_cache",
     metadata,
@@ -328,8 +301,6 @@ llm_score_cache = sa.Table(
               server_default=sa.func.now()),
 )
 
-# One LLM call per profile version, not per job: the expansion is reused for every retrieval that
-# profile performs until the user edits it.
 user_query_expansion = sa.Table(
     "user_query_expansion",
     metadata,
@@ -337,12 +308,10 @@ user_query_expansion = sa.Table(
     sa.Column("profile_version", sa.Integer, primary_key=True),
     sa.Column("expansion_version", sa.Integer, primary_key=True),
     sa.Column("queries", ARRAY(sa.Text), nullable=False, server_default="{}"),
-    # Synthetic adverts, kept apart from the phrases because only the dense arm can use them.
+    # Kept apart from the phrases because only the dense arm can use them.
     sa.Column("adverts", ARRAY(sa.Text), nullable=False, server_default="{}"),
-    # The profile's background distilled once per version. Here rather than on user_profile
-    # because it is derived under this row's key, not something the user typed: the reranker
-    # reads it on every batch, and paying for the distillation once per profile version is what
-    # keeps a pasted CV from being billed 150 times and from crowding out the objectives.
+    # Distilled once per profile version. The reranker reads it on every batch, so sending the
+    # raw field instead would bill a pasted CV once per ten postings.
     sa.Column("background_summary", sa.Text, nullable=False, server_default=""),
     sa.Column("created_at", sa.DateTime(timezone=True), nullable=False,
               server_default=sa.func.now()),
@@ -376,8 +345,8 @@ pipeline_run = sa.Table(
     sa.Column("finished_at", sa.DateTime(timezone=True)),
     sa.Column("report", JSONB),
     sa.Column("error", sa.Text),
-    # Progress, written while the run is in flight rather than at the end. A run that only
-    # reports itself once it is over cannot be watched, and cannot be told apart from a stuck one.
+    # Progress, written while the run is in flight: a run that reports itself only once it is
+    # over cannot be told apart from a stuck one.
     sa.Column("cancel_requested", sa.Boolean, nullable=False, server_default="false"),
     sa.Column("sources_total", sa.SmallInteger),
     sa.Column("sources_done", sa.SmallInteger, nullable=False, server_default="0"),

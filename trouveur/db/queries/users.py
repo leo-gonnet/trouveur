@@ -18,10 +18,9 @@ from trouveur.db.schema import (
     user_profile,
 )
 
-# Changing one of these changes what a good match *is*, so it invalidates that user's cached LLM
-# scores and forces a re-score they will be billed for. Everything else about a profile -- the
-# how many results to retrieve or rerank -- changes presentation or volume only and must not
-# bump the version. Getting this wrong is not a crash, it is a surprise invoice.
+# Changing one of these changes what a good match IS, so it invalidates the user's cached scores
+# and bills a re-score. A volume setting must never be added here: it is not a crash, it is a
+# surprise invoice.
 SCORING_FIELDS = frozenset(
     {
         "title", "years_experience", "objectives", "background", "languages", "must_have",

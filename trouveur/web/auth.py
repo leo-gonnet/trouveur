@@ -1,12 +1,7 @@
 """Session auth.
 
-There is deliberately no registration route, no password reset and no user-listing endpoint: the
-only way to create a login is `trouveur create-user` on the server. That omission removes the
-largest attack surface of an internet-facing app, and it is the reason this application can be
-exposed without an identity provider in front of it.
-
-Sessions carry the user id, so every query downstream is scoped to one user rather than assuming
-there is only one.
+There is deliberately no registration route, no password reset and no user-listing endpoint:
+`trouveur create-user` on the server is the only way to create a login.
 """
 
 from __future__ import annotations
@@ -75,8 +70,7 @@ async def authenticate(
     """Verify credentials. Returns (user_id, message)."""
     user = await users_q.get_user_by_username(conn, username)
     if user is None:
-        # Hash anyway, so a missing username and a wrong password take comparable time and the
-        # response cannot be used to enumerate accounts.
+        # Hash anyway, so the response time cannot be used to enumerate accounts.
         _hasher.hash(password)
         log.warning("failed login attempt for unknown username")
         return None, "Invalid username or password."

@@ -1,9 +1,4 @@
-"""Provider selection.
-
-One provider per process, chosen by configuration. Callers ask for the version string rather than
-hardcoding one, so switching providers changes a setting and then refills the embed queue --
-which re-embeds the corpus through the ordinary worker rather than through a bespoke script.
-"""
+"""Provider selection. One per process, chosen by configuration."""
 
 from __future__ import annotations
 
@@ -52,16 +47,8 @@ def get_provider() -> EmbeddingProvider:
 def get_query_provider() -> EmbeddingProvider:
     """The provider retrieval embeds its QUERIES with, which must match the space it reads.
 
-    A query vector is compared against a stored one, so it has to come from the same model -- not
-    merely the same width. Reading the narrow column with a query the wide model produced is not a
-    subtle degradation: pgvector refuses it outright with "different halfvec dimensions 768 and
-    384", so every recommendation fails.
-
-    That is exactly the state a model swap spends its whole backfill in. EMBEDDING_DIM and
-    EMBEDDING_READ_DIM exist so the worker can fill the new space while the dense arm keeps
-    serving the old one, but a width alone cannot say which model wrote that space. This is the
-    other half of that pair: leave it unset and reads follow writes, which is every day that is
-    not a migration; set it to the outgoing provider for the length of the backfill.
+    Same MODEL, not merely same width. Leave it unset and reads follow writes; set it to the
+    outgoing provider for the length of a model backfill, while the worker fills the new space.
     """
     settings = get_settings()
     name = settings.embedding_read_provider or settings.embedding_provider

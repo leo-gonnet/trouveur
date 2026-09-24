@@ -32,8 +32,8 @@ async def send_digests(settings: Settings) -> int:
             except Exception as exc:  # noqa: BLE001 - one user's mail must not block another's
                 log.warning("digest to user %s failed: %s", user.id, exc)
                 continue
-            # Marked inside the same transaction as the send, so a crash cannot leave a user
-            # believing they were told about postings that no mail ever mentioned.
+            # In the same transaction as the send, so a crash cannot mark postings as notified
+            # that no mail ever mentioned.
             await match_q.mark_notified(conn, user.id, [row.id for row in rows])
         sent += 1
     return sent

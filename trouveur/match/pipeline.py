@@ -1,11 +1,7 @@
 """Per-user matching: retrieve, then rerank. Orchestration only.
 
-Runs per user in isolation. One user's expired API key, exhausted budget or malformed profile must
-never affect another's results, which is also why spend and credentials are per user rather than
-per installation.
-
-The two stages are deliberately separate: retrieval is free and re-runnable, and only the last
-stage costs money.
+Runs per user in ISOLATION: one user's expired key or exhausted budget must never affect
+another's results. Retrieval is free and re-runnable; only the last stage costs money.
 """
 
 from __future__ import annotations
@@ -94,8 +90,7 @@ async def run_for_user(user_id: int, settings: Settings | None = None) -> MatchR
         return report
     report.queries = len(queries) + len(adverts)
 
-    # One cutoff for the whole run, so the two arms cannot disagree about which postings are
-    # fresh -- see db/queries/freshness.py.
+    # One cutoff for the whole run, so the two arms cannot disagree about what is fresh.
     fresh_since = freshness.fresh_since(settings.retrieval_horizon_days)
     async with connect() as conn:
         await _retrieve(conn, profile, queries, report, adverts, fresh_since=fresh_since)
@@ -113,13 +108,7 @@ async def run_for_user(user_id: int, settings: Settings | None = None) -> MatchR
 async def _queries(
     conn: AsyncConnection, settings: Settings, profile: UserProfile, credential, report
 ) -> Expansion:
-    """The expansion for this profile version, computed at most once per version.
-
-    Queries run through both retrieval arms; adverts run through the dense arm only -- see
-    retrieve.retrieve_arms for why that is a constraint rather than a preference. The background
-    summary is not a query at all: it is derived here because it shares this cache key, and it is
-    read by the reranker.
-    """
+    """The expansion for this profile version, computed at most once per version."""
     cached = await match_q.get_query_expansion(
         conn, profile.user_id, profile.version, QUERY_EXPANSION_VERSION
     )
@@ -145,13 +134,11 @@ async def _queries(
             )
             report.cost_usd += usage.cost_usd
         except (llm.LlmError, CredentialError) as exc:
-            # Expansion is an enhancement, never a prerequisite: retrieval must still work for a
-            # user with no key, no credit or a key we can no longer decrypt.
+            # An enhancement, never a prerequisite: retrieval must work with no key at all.
             log.info("query expansion unavailable for user %s: %s", profile.user_id, exc)
             report.errors.append(f"Query expansion skipped: {exc}")
 
-        # A separate call, and a separately survivable failure. The adverts are the long output,
-        # which is where a cheap model's JSON breaks; losing them must not also lose the phrases.
+        # Separately survivable: losing the long output must not also lose the phrases.
         try:
             adverts, advert_usage = await expand.expand_adverts(
                 settings,
@@ -169,9 +156,8 @@ async def _queries(
             log.info("advert expansion unavailable for user %s: %s", profile.user_id, exc)
             report.errors.append(f"Advert expansion skipped: {exc}")
 
-        # A third independently survivable call. Distilling here rather than sending the raw
-        # field with every batch is what keeps this one cost per profile version instead of one
-        # per ten postings -- and keeps a long CV from crowding out the objectives.
+        # Distilled here rather than sent raw with every batch: one cost per profile version
+        # instead of one per ten postings.
         if profile.background.strip():
             try:
                 summary, summary_usage = await expand.summarise_background(
@@ -277,8 +263,7 @@ async def _rerank(
     spend_row = await users_q.month_spend(conn, profile.user_id)
     spent = Decimal(spend_row.cost_usd) if spend_row else Decimal(0)
     budget = Decimal(credential.monthly_budget_usd)
-    # Before any batch has run there is no measured cost, so the first check uses a deliberately
-    # pessimistic figure rather than zero -- a zero estimate would always pass the ceiling test.
+    # Pessimistic, not zero: a zero estimate would always pass the ceiling test.
     estimate = Decimal("0.02")
 
     for start in range(0, len(uncached), rerank.BATCH_SIZE):

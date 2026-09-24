@@ -1,9 +1,5 @@
-"""Hybrid retrieval, with the arms kept separable.
-
-The pipeline fuses everything; the evaluation harness scores each arm on its own to answer whether
-the hybrid is earning its cost. Both call this, so there is one implementation of "what does
-retrieval return" and the number the harness reports is the number production produces.
-"""
+"""Hybrid retrieval, with the arms kept separable so the evaluation harness can score each one
+against the number production actually produces."""
 
 from __future__ import annotations
 
@@ -19,11 +15,8 @@ from trouveur.match.fuse import best_ranks, reciprocal_rank_fusion
 from trouveur.models import UserProfile
 
 MIN_PER_QUERY = 25
-# Retrieval is free, so it fetches deep for everyone rather than being tuned per user: rerank takes
-# the top rerank_limit by retrieval score whatever was fetched, so over-fetching costs nothing. The
-# dense arm is bounded below this by
-# ef_search in db/queries/match.py, which is fine -- past a couple of hundred neighbours per query
-# similarity is noise -- while the lexical arm honours the full budget.
+# A constant, not a per-user setting: retrieval is free and rerank takes the top rerank_limit
+# whatever was fetched, so a per-user value would have no effect to explain.
 RETRIEVAL_LIMIT = 2000
 
 
@@ -49,22 +42,11 @@ async def retrieve_arms(
 ) -> Arms:
     """Run every retriever for the queries it can use, without fusing.
 
-    Queries go to both arms. Adverts go to the dense arm ONLY, and this is not a tuning choice:
-    `websearch_to_tsquery` ANDs its terms, so a 69-word advert becomes a 65-term conjunction that
-    matches nothing. Measured over 224k postings, adverts through the lexical arm returned zero
-    rows on both the tsvector and the trigram path, every time -- sending them there spends half
-    the query budget on empty results.
+    Adverts go to the dense arm ONLY: `websearch_to_tsquery` ANDs its terms, so a 69-word advert
+    becomes a conjunction that matched zero rows every time it was measured. They are ADDED to
+    the queries rather than replacing them -- substituting cost a needle 310 rank positions.
 
-    Adverts are ADDED to the queries in the dense arm rather than replacing them. Substituting
-    them cost exactly the postings that share the profile's own vocabulary: one planted needle
-    fell from rank 31 to 341 when the user's words stopped being searched for directly.
-
-    The per-query budget is the retrieval limit spread across each arm's queries, floored: an arm
-    with many queries must not give each a slice so thin that a good match falls off the end.
-
-    `fresh_since` bounds the corpus by age and has no default on purpose. Production reads it
-    from the horizon setting; the evaluation harness plants needles with fixed dates and passes
-    its own, so that a retrieval number stays a retrieval number and does not quietly become a
+    `fresh_since` has no default on purpose, so a retrieval number cannot quietly become a
     measurement of the freshness policy instead.
     """
     if not queries and not adverts:

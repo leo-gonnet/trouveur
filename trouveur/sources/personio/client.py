@@ -1,24 +1,12 @@
 """Personio XML job feed — network only, no field interpretation.
 
-robots.txt (jobs.personio.de, checked 2026-09-09): empty, so no restriction is expressed. The XML
-feed is Personio's own documented syndication endpoint, published so job boards can consume a
-customer's postings. Boards live on per-tenant subdomains, so the politeness budget is owed to
-personio.de as a whole -- see http.throttle_key.
+robots.txt (jobs.personio.de, checked 2026-09-09): empty, so no restriction is expressed.
 
-Shape verified live on 2026-09-09 against a real board:
+An unknown tenant answers HTTP 429 with an HTML challenge page, not 404 -- see `_sweep_board`.
+The feed states no posting URL, so the tenant must survive in the external id.
 
-  - one request returns the tenant's COMPLETE live board, so the response is itself the seen-set;
-  - **an unknown tenant answers HTTP 429 with a Vercel "Security Checkpoint" HTML page, not 404.**
-    A valid board returns 200 even when polled fast, so 429 here is not rate limiting -- it is how
-    a bad slug looks. PoliteClient retries 429 by design, so without the check below a typo'd slug
-    burns four attempts and a backoff on every sweep and reports itself as throttling forever;
-  - **the feed states no posting URL.** There is no href, link or url element anywhere in it, so
-    the canonical URL has to be built from the tenant and the id.
-
-Decoding XML into a dict happens here rather than in the normaliser, for the same reason the
-Greenhouse client calls response.json(): that is transport decoding, not interpretation. The
-archive then holds one decoded record per posting exactly as it does for every JSON source, and
-reading its *fields* stays in the versioned pure normaliser where a fix is a re-derive.
+It keeps its own board loop rather than `sweep_boards` because that content-type check has to run
+before the status gate the shared sweep applies first.
 """
 
 from __future__ import annotations
@@ -36,15 +24,6 @@ SOURCE = "personio"
 
 _BOARD_URL = "https://{scope}.jobs.personio.de/xml"
 
-# The feed carries no URL, so this is the only way to address a posting. Verified against a live
-# board on 2026-09-09.
-_JOB_URL = "https://{scope}.jobs.personio.de/job/{job_id}"
-
-
-def job_url(scope: str, job_id: str) -> str:
-    return _JOB_URL.format(scope=scope, job_id=job_id)
-
-
 class PersonioSource:
     name = SOURCE
     requires_detail = False
@@ -56,8 +35,6 @@ class PersonioSource:
     async def sweep(
         self, client: PoliteClient, sink: DocumentSink, *, backfill: bool = False
     ) -> SweepOutcome:
-        # A board dump is always the complete live set, so a backfill and a daily run are the same
-        # request. The flag is accepted for protocol conformance and deliberately unused.
         outcome = SweepOutcome(partitions_total=len(self.boards), expected=0)
         for scope in self.boards:
             try:
@@ -78,9 +55,8 @@ class PersonioSource:
     ) -> int:
         response = await client.get(_BOARD_URL.format(scope=scope))
         content_type = response.headers.get("content-type", "")
-        # An unknown tenant answers 429 with an HTML challenge page. Treating it as rate limiting
-        # would retry a slug that will never exist; the body, not the status, is what tells them
-        # apart.
+        # An unknown tenant answers 429 with an HTML challenge page: the body, not the status,
+        # is what tells a bad slug apart from throttling PoliteClient would retry.
         if "xml" not in content_type.lower():
             raise FetchError(
                 f"Personio board {scope!r} returned HTTP {response.status_code} with "
@@ -121,20 +97,14 @@ def _positions(text: str, scope: str) -> list[dict]:
     records = []
     for node in root.iter("position"):
         record = element_to_dict(node)
-        # A position with no id cannot be addressed or de-duplicated; it is dropped rather than
-        # given a synthetic key that would change on every sweep.
         if isinstance(record, dict) and str(record.get("id") or "").strip():
             records.append(record)
     return records
 
 
 def element_to_dict(node: ElementTree.Element) -> Any:
-    """One XML element as JSON-compatible data, faithfully.
-
-    Repeated sibling tags become a list so that a board with one job description and a board with
-    several decode to the same shape -- otherwise the normaliser would need to handle both, and
-    would get one of them wrong.
-    """
+    """One XML element as JSON-compatible data. Repeated sibling tags become a list, so a board
+    with one section and a board with several decode to the same shape."""
     children = list(node)
     if not children:
         return (node.text or "").strip()
