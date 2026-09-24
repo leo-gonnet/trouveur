@@ -1,14 +1,37 @@
-# Trouveur — a self-hosted job radar
+<div align="center">
 
-A platform to find your next job. It sweeps job sources into a shared corpus, then ranks that
-corpus against each user's profile and surfaces what is worth reading in a web UI and a digest.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/logo/trouveur-dark.png">
+  <img src="assets/logo/trouveur-light.png" alt="Trouveur" width="150">
+</picture>
 
-Engineering rules and the source-by-source API traps live in [AGENTS.md](./AGENTS.md).
+# Trouveur
+
+**A job radar.** It collects the job market into one corpus every day, then ranks that corpus against one profile. More than a million postings archived so far.
+
+</div>
+
+## Why
+
+Job platforms rank on the words you typed. They return what you thought to ask for, and nothing
+else.
+
+One word is already a filter. *Software engineer* and *software developer* give two different
+lists on the same site. So you run both, every day, and still miss the third phrasing. Each
+platform covers its own slice, so you log into several. Some offer no posted-date filter at all: a
+month-old advert sits above one published ten minutes ago.
+
+Trouveur inverts that. **Collection knows nothing about you; selection happens afterwards.**
+Sources are swept by their own structure, with nobody's keywords involved — boards of companies, national employment agencies, aggregator feeds. Ranking runs
+over everything collected. A role you would have wanted but never thought to name still arrives.
+
+**Recall is the metric.** I have not found another job recommendation tool that treats it as the
+headline number rather than as a by-product.
+
+The product itself is deliberately boring. No CV optimizations. No filters to tune. No dashboard to
+configure. One list, ordered, once a day. The engineering is all underneath it.
 
 ## How it works
-
-Ingestion does not know about users, and selection does not fetch. That split is the whole design:
-searching sources with a user's keywords caps recall at whatever they thought to type.
 
 ```
 INGEST  (shared corpus, runs once for everyone)
@@ -20,106 +43,56 @@ MATCH   (per user, cheap, re-runnable)
           ──> BM25/FTS  ─┴─ RRF fusion ──> LLM rerank ──> digest
 ```
 
-Raw payloads are archived verbatim and kept, and everything derived from them carries a version.
-Fixing a parser is therefore a re-derive, not a re-crawl: bump the version, refill the queue, and
-the ordinary worker brings the whole corpus up to date.
+**Everything derived is a versioned pure function of the archive.** Raw payloads are kept forever.
+Fixing a parser is a re-derive, not a re-crawl: bump its version, and the ordinary daily worker
+recomputes every row below it. Upgrade and backfill are one code path, so the repair path is
+exercised every day.
 
-**Reranking runs on each user's own OpenRouter key**, entered in Settings, encrypted at rest and
-capped by a monthly ceiling that is checked before each batch. The deployment itself has no LLM
-spend. Everything except reranking — sweeping, retrieval, hybrid search, the web UI — works with
-no API key at all.
+**Retrieval is hybrid.** An embedding model reads meaning. Postgres full-text and a
+trigram index read words, because German compounds mean `ingenieur` has to find
+`Wirtschaftsingenieur`. The two rankings are fused by RRF. Only the last seven days are indexed, so
+the index tracks the live market rather than all history.
 
-## Quick start (local)
+**The final ranking is an LLM, on your own key.** A posting is scored once per profile and cached
+for ever after, which puts a day's run under a cent. Everything before that stage works with
+no key at all.
+
+**A new source is one package and one registry entry.** Two modules: one does network and nothing
+else, the other is a pure versioned function from raw payload to canonical job. Nothing downstream
+may name a source, and a test enforces it.
+
+## Evaluation
+
+Retrieval quality is measured rather than asserted. `trouveur eval` plants hand-written needles in
+a haystack of real postings, so their relevance is known by construction and no corpus has to be
+labelled. Recall is then a number, and the design decisions behind the pipeline were settled
+against it — several of them would have been guessed wrong.
+
+## Running it
+
+Python 3.12, FastAPI + Jinja2 + HTMX, PostgreSQL 16 + pgvector, SQLAlchemy Core + asyncpg. No build
+step, no Node, no JavaScript framework. `uv` is required.
 
 ```bash
-uv sync
+uv sync --extra embeddings
 docker run -d --name trouveur-db -p 5432:5432 \
   -e POSTGRES_USER=trouveur -e POSTGRES_PASSWORD=dev -e POSTGRES_DB=trouveur \
   pgvector/pgvector:pg16
 export DATABASE_URL=postgresql+asyncpg://trouveur:dev@127.0.0.1:5432/trouveur
-export SESSION_SECRET=dev-only-insecure-secret
-export ENCRYPTION_KEY=dev-only-change-me
 uv run alembic upgrade head
-uv run trouveur create-user
-uv run trouveur tenants list                # 11 verified boards are seeded by the migration
-uv run trouveur sweep --source greenhouse
-uv run trouveur drain                       # derive, embed, fetch details
-uv run trouveur match --user 1
+uv run trouveur create-user                    # the only way to make a login
+uv run trouveur tenants add <source> <company> # the crawl set is a table, managed from the CLI
+uv run trouveur sweep
+uv run trouveur drain                          # derive, embed, fetch details
+uv run trouveur serve
 ```
 
-The test suite is offline and runs in well under a second. A second, opt-in suite exercises every
-SQL path against a real Postgres and is skipped unless `TROUVEUR_TEST_DATABASE_URL` is set — worth
-running before any change to the queries or the migration, because SQL that compiles is not SQL
-that runs.
+`uv run pytest` runs 247 offline unit tests in about a second. An opt-in suite runs every SQL path
+against a real Postgres, because SQL that compiles is not SQL that runs.
 
-`uv` is required: this project's target host has no working `venv` module, and CI uses `uv` too.
-`create-user` is the only way to make a login — there is no sign-up route. Then
-`uv run trouveur serve` for the UI and `uv run trouveur runner` if you want scans to fire on a
-schedule and the queues to drain continuously.
-
-Semantic retrieval needs the local embedding model: `uv sync --extra embeddings`. Without it, set
-`EMBEDDING_PROVIDER=deterministic` to exercise the pipeline (its vectors carry no meaning, and rows
-it writes are stamped so its use is visible in the data).
-
-Profiles and API keys live in the database and are edited in the UI. So does the crawl set — which
-companies each per-tenant source sweeps — but it is managed from the server with
-`trouveur tenants add|enable|disable|remove`, not in the web UI: it is shared by every user, so one
-person cannot enlarge the crawl everyone pays for. The dashboard shows it read-only alongside
-per-tenant health, so a board that starts 404ing is visible as one to remove.
-
-The crawl set is a table rather than a file so that a discovery pass can populate it later. Such a
-pass registers candidates **disabled**, for a human to promote; it can never enlarge the crawl on
-its own.
-
-If a sweep collects nothing, the reason is recorded per source in `source_sweep` rather than
-raised — including partition overflow, which is coverage lost with no error anywhere.
-
-## Sources
-
-Each source is two modules: `client.py` does network and nothing else, `normalize.py` is a pure
-versioned function from an archived payload to a canonical job. Adding a source is a package plus
-one registry entry — if it needs edits anywhere else, the abstraction has leaked.
-
-| Source | Coverage | Mechanism | Can retire postings? |
-|---|---|---|---|
-| Arbeitsagentur | Germany (~1.0M live, ~36k/day) | Public JSON API, no signup. Swept by occupational field, not keywords. | No — delta only |
-| Greenhouse | EU-wide, per company | Public board API, no auth. One request returns a tenant's complete board. | Yes, per board |
-
-The pair is deliberately mismatched: one is a partitioned delta search with a separate detail
-phase, the other a complete per-tenant dump with descriptions inline. An abstraction that survives
-both will survive the next ten.
-
-## Deploy
-
-Docker Compose: Postgres, the web UI behind Caddy for TLS, and a `runner` service that owns the
-scan schedule and is the only process that executes a scan. Push to `main` runs the tests, builds
-the image and deploys over SSH.
-
-Copy `compose.yaml`, `Caddyfile`, `backup.sh` and `.env.example` (as `.env`, `chmod 600`) to the
-host, fill in `.env`, then:
-
-```bash
-docker compose run --rm migrate   # web and runner assume the tables already exist
-docker compose up -d
-docker compose run --rm web trouveur create-user
-```
-
-Five things that are not guessable:
-
-- **Point DNS at the host before the first start.** Caddy cannot obtain a certificate otherwise.
-- **`ENCRYPTION_KEY` must be set and must never change.** It encrypts users' stored API keys;
-  losing it means every user has to re-enter theirs.
-- **`TROUVEUR_IMAGE` must match the image CI pushes**, which is `ghcr.io/<owner>/<repo>`. Make
-  that package public, or `docker login ghcr.io` on the host with a `read:packages` token.
-- **`docker compose run --rm migrate` on every deploy**, before the new containers start.
-- **Rollback is `TROUVEUR_TAG`**: set it to an older commit SHA in `.env` and `up -d` again. The
-  deploy writes the deployed SHA there.
-
-`deploy.yml` needs three repository secrets: `SSH_HOST`, `SSH_USER`, and `SSH_KEY` (the private
-half of a keypair whose public half is in that account's `authorized_keys`). Pushing the image
-uses the built-in `GITHUB_TOKEN`.
-
-`backup.sh` dumps the database out of the db container; cron it on the host.
+Deployment is Docker Compose: Postgres, the UI behind Caddy for TLS, and a runner that owns the
+schedule and is the only process that scans. A push to `main` tests, builds and deploys over SSH.
+`ENCRYPTION_KEY` must never change once set, as it encrypts users' stored API keys.
 
 ## Disclaimer
 
