@@ -8,17 +8,19 @@
 
 {% if request.query_params.get('saved') %}
   {% if request.query_params.get('rescore') == '1' %}
-    <p class="notice warn">Saved. A scoring field changed, so your cached scores were invalidated
-      and the next run will re-score. That costs money on your own key.</p>
+    <p class="notice warn">Saved. A scoring field changed, so a matching run has started and a new
+      edition will appear in <a href="/recommendations">Recommendations</a> shortly. Re-scoring
+      costs money on your own key.</p>
   {% else %}
     <p class="notice good">Saved. No scoring field changed, so nothing will be re-scored.</p>
   {% endif %}
 {% endif %}
 
 <p class="notice">
-  Everything on this page decides what a good match is, so changing any of it invalidates your
-  cached scores. Right now that would re-score about <strong>{{ rescore_estimate }}</strong>
-  postings. How many to retrieve and score per run lives in <a href="/settings">Settings</a>.
+  Everything on this page decides what a good match is, so changing any of it starts a fresh
+  matching run. Right now that would score about <strong>{{ rescore_estimate }}</strong>
+  postings again. Editions already published are kept, except today's, which is replaced &mdash;
+  you are asked first.
 </p>
 
 <form method="post" action="/profile" class="grid">

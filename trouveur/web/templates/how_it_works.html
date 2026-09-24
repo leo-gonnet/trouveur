@@ -67,8 +67,9 @@
     </svg>
   </figure>
   <p class="hint">A day's matching is published as an edition: one page per day, keyed on when a
-    posting became a recommendation for this user rather than on when it was posted, and never
-    rewritten afterwards. Two processes share the database and nothing else: the web app reads
+    posting became a recommendation for this user rather than on when it was posted. It is stored
+    rather than recalculated, so it is never rewritten &mdash; the one exception is today's,
+    which a profile change replaces once you agree to it. Two processes share the database and nothing else: the web app reads
     and enqueues, the runner sweeps, drains and matches. Either can be down without breaking the
     other.</p>
 </section>

@@ -7,6 +7,8 @@ matches. Seeding less would let a query pass by touching nothing.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 
 async def seed_corpus(gh_board, aa_listing, aa_detail):
     """Ingest the fixtures the way the pipeline does, and drain every queue."""
@@ -85,6 +87,16 @@ async def seed_scored_match(user_id: int, profile) -> int:
             [{
                 "job_id": job_id, "score": 92, "reason": "strong match",
                 "red_flags": ["probe flag"], "profile_version": profile.version,
+            }],
+        )
+        # Published as well as scored: Recommendations reads the edition table, so a scored row
+        # alone would still render an empty page and skip the card template.
+        await match_q.publish_edition(
+            conn,
+            [{
+                "user_id": user_id, "day": datetime.now(UTC).date(), "job_id": job_id,
+                "profile_version": profile.version, "llm_score": 92,
+                "llm_reason": "strong match", "llm_red_flags": ["probe flag"],
             }],
         )
     return job_id

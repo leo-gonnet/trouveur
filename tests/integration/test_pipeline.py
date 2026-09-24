@@ -159,11 +159,17 @@ async def test_scores_are_cached_and_spend_accumulates(
             conn, user_id, tokens_in=100, tokens_out=20, cost_usd=Decimal("0.02")
         )
         assert total == Decimal("0.03")
-        # Everything scored in one call lands in one edition, since scored_at is set by the
-        # same statement that writes the score.
+        # Everything one run scores is published as one edition, on the day it ran.
+        today = datetime.now(UTC).date()
+        await mq.publish_edition(
+            conn,
+            [{"user_id": user_id, "day": today, "job_id": row.job_id,
+              "profile_version": profile.version, "llm_score": 88, "llm_reason": "good",
+              "llm_red_flags": ["none"]} for row in to_score],
+        )
         days = await mq.editions(conn, user_id)
         assert len(days) == 1
-        assert len(await mq.edition(conn, user_id, days[0].day, 70)) == len(to_score)
+        assert len(await mq.edition(conn, user_id, days[0].day)) == len(to_score)
 
 
 async def test_bumping_a_version_refills_the_queue(clean_db, gh_board, aa_listing, aa_detail):

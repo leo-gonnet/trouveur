@@ -12,7 +12,6 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from trouveur.db.schema import (
     app_user,
-    user_job_match,
     user_llm_credential,
     user_llm_spend,
     user_profile,
@@ -97,41 +96,34 @@ async def get_profile(conn: AsyncConnection, user_id: int) -> sa.Row | None:
     ).one_or_none()
 
 
-async def save_profile(
-    conn: AsyncConnection, user_id: int, values: dict[str, Any]
-) -> tuple[int, bool]:
-    """Persist a profile. Returns (version, whether cached scores were invalidated)."""
-    current = await get_profile(conn, user_id)
-    rescore = current is None or any(
+def changes_scoring(current: sa.Row | None, values: dict[str, Any]) -> bool:
+    """Whether saving `values` would change what a good match is, and so bump the version.
+
+    Separate from save_profile because the form has to ask before it saves: a bump replaces the
+    day's edition, and that is the user's call to make.
+    """
+    return current is None or any(
         field in values and values[field] != current._mapping[field]
         for field in SCORING_FIELDS
     )
+
+
+async def save_profile(
+    conn: AsyncConnection, user_id: int, values: dict[str, Any]
+) -> tuple[int, bool]:
+    """Persist a profile. Returns (version, whether a re-score was triggered)."""
+    current = await get_profile(conn, user_id)
+    rescore = changes_scoring(current, values)
     version = (current.version if current else 0) + (1 if rescore else 0)
     await conn.execute(
         user_profile.update()
         .where(user_profile.c.user_id == user_id)
         .values(**values, version=max(version, 1), updated_at=sa.func.now())
     )
-    if rescore and current is not None:
-        await reset_scores(conn, user_id)
+    # Nothing is erased here. The bump alone is enough to queue a re-score, because retrieval no
+    # longer re-stamps user_job_match.profile_version, and published editions are rows of their
+    # own that a re-score cannot reach.
     return max(version, 1), rescore
-
-
-async def reset_scores(conn: AsyncConnection, user_id: int) -> None:
-    """Forget every score this user holds, keeping what they did about them.
-
-    The version check in pending_rerank is not enough on its own: retrieval re-stamps
-    profile_version on every row it finds again, before reranking runs, so the rows most worth
-    re-scoring were the ones that looked current. state and notified_at survive -- un-dismissing a
-    job or re-sending a digest entry because the profile changed would be the user's history lost.
-    """
-    await conn.execute(
-        user_job_match.update()
-        .where(user_job_match.c.user_id == user_id)
-        .values(
-            llm_score=None, llm_reason=None, llm_red_flags=None, scored_at=None,
-        )
-    )
 
 
 async def has_credential(conn: AsyncConnection, user_id: int) -> bool:

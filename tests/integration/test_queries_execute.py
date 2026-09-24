@@ -104,7 +104,6 @@ def _arguments(ctx: dict) -> dict[str, dict]:
         "admin.recent_runs": {},
         "admin.active_run": {},
         "admin.pending_match_run": {"user_id": user_id},
-        "admin.last_match_for_user": {"user_id": user_id},
         "admin.fail_orphaned_runs": {},
         "admin.facet_breakdown": {},
         "admin.queue_depth": {},
@@ -150,7 +149,12 @@ def _arguments(ctx: dict) -> dict[str, dict]:
             "fresh_since": _cutoff(),
         },
         "match.editions": {"user_id": user_id},
-        "match.edition": {"user_id": user_id, "day": _today(), "limit": 5},
+        "match.edition": {"user_id": user_id, "day": _today()},
+        "match.edition_size": {"user_id": user_id, "day": _today()},
+        "match.clear_stale_edition": {
+            "user_id": user_id, "day": _today(), "profile_version": 1,
+        },
+        "match.publish_edition": {"rows": [ctx["edition_row"]]},
         "match.upsert_matches": {"rows": [ctx["match_row"]]},
         "match.pending_rerank": {"user_id": user_id, "profile_version": 1, "limit": 5},
         "match.count_pending_rerank": {"user_id": user_id, "profile_version": 1},
@@ -183,7 +187,6 @@ def _arguments(ctx: dict) -> dict[str, dict]:
         },
         "users.get_profile": {"user_id": user_id},
         "users.save_profile": {"user_id": user_id, "values": {"title": "Probe"}},
-        "users.reset_scores": {"user_id": user_id},
         "users.has_credential": {"user_id": user_id},
         "users.get_credential": {"user_id": user_id},
         "users.save_credential": {
@@ -256,6 +259,13 @@ async def context(seeded):
         "score_row": {
             "job_id": row.id, "score": 80, "reason": "probe", "red_flags": ["probe"],
             "profile_version": 1,
+        },
+        # A profile version of its own: the edition table refuses one posting twice under one
+        # version, and the seeded fixture already published this job at version 1.
+        "edition_row": {
+            "user_id": seeded["user_id"], "day": _today(), "job_id": row.id,
+            "profile_version": 99, "llm_score": 80, "llm_reason": "probe",
+            "llm_red_flags": [],
         },
     }
 

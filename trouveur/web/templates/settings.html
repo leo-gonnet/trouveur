@@ -22,8 +22,9 @@
       {% endif %}
       <p class="hint">Scored with <code>{{ model }}</code>{% if provider %} on <code>{{ provider }}</code>{% endif %}.
         The model is chosen by evaluation, not per user, so every score here is comparable.</p>
-      <label>Monthly ceiling <span class="hint">US dollars, the currency OpenRouter bills in. Checked before every batch, not after.</span>
-        <input name="monthly_budget_usd" value="{{ credential.monthly_budget_usd if credential else '5' }}"></label>
+      <p class="hint">Monthly ceiling <strong>${{ monthly_budget_usd }}</strong>,
+        in US dollars, the currency OpenRouter bills in. Checked before every batch, not after.
+        It is an installation setting, like the model: the switch below is what you control.</p>
       <p class="actions">
         <button class="primary" type="submit">Save</button>
         {% if credential %}
@@ -34,13 +35,18 @@
   </section>
 
   <section class="section">
-    <div class="section-head"><h2>Volume</h2></div>
+    <div class="section-head"><h2>Scoring</h2></div>
     <p class="hint">After every scan, a matching run for you: search pulls candidates out of the
-      corpus for free, and the model reads and scores the best of them on your key. Only scored postings reach
-      <a href="/recommendations">Recommendations</a>.</p>
-    <form method="post" action="/settings/volume">
-      <label>Recommendations per run <span class="hint">how many postings the model scores each run, best candidates first. This is the only paid step and it is the length of your list. Changing it never re-scores anything; 0 pauses scoring.</span>
-        <input name="rerank_limit" type="number" min="0" max="1000" value="{{ profile.rerank_limit }}"></label>
+      corpus for free, and the model reads and scores the best {{ rerank_limit }} of them on your
+      key. Only scored postings reach <a href="/recommendations">Recommendations</a>.</p>
+    <form method="post" action="/settings/scoring">
+      <div class="checks">
+        <label class="check"><input type="checkbox" name="scoring_enabled" value="on"
+          {% if profile.scoring_enabled %}checked{% endif %}>Score new postings</label>
+      </div>
+      <span class="hint">Turning this off stops every paid call, not only the scoring: the query
+        expansion is billed too. Search and the rest of the page keep working, and your existing
+        editions are untouched. Turning it back on starts a run straight away.</span>
       <p class="actions"><button class="primary" type="submit">Save</button></p>
     </form>
   </section>

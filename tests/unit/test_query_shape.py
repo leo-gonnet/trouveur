@@ -66,7 +66,7 @@ def test_search_left_joins_match_state_so_unmatched_jobs_still_appear():
     assert re.search(r"LEFT JOIN job_facet", _SEARCH_SQL)
 
 
-def test_an_edition_shows_everything_that_was_scored_that_day():
+def test_an_edition_shows_everything_it_holds():
     """Still narrower than Search -- scored only -- but with no cut-off inside the day.
 
     A threshold hid postings the user had already paid to have scored, behind a number they had
@@ -75,39 +75,68 @@ def test_an_edition_shows_everything_that_was_scored_that_day():
     import inspect
 
     body = inspect.getsource(edition)
-    assert "m.llm_score IS NOT NULL" in body or "_EDITION_FILTER" in body
     assert ":threshold" not in body
     assert "llm_score >=" not in body
+    assert "LIMIT" not in body, "an edition is bounded by what was scored, not by a page size"
 
 
-def test_an_edition_is_keyed_on_when_a_posting_became_a_recommendation():
-    """Not on when it was published.
+def test_an_edition_is_read_from_its_own_table_not_derived_from_a_score():
+    """An edition is a published record, so it is stored rather than recomputed.
 
-    Keying on posted_at loses postings outright: Greenhouse's p90 discovery lag is 146 days, so
-    a posting published in April and found in September would belong to an edition published
-    five months earlier -- and would therefore appear in none at all.
+    Derived from `user_job_match.scored_at`, a re-score moved a posting out of the day it was
+    published in: yesterday's page silently lost a row. Reading the score from that table again
+    would bring the same bug back through the columns instead of the WHERE clause.
     """
     import inspect
 
     for query in (edition, editions):
         body = inspect.getsource(query)
-        assert "m.scored_at" in body, f"{query.__name__} does not key on scored_at"
+        assert "user_edition_item" in body, f"{query.__name__} does not read the edition table"
+        assert "m.scored_at" not in body, f"{query.__name__} still buckets by scored_at"
+        assert "m.llm_score" not in body, (
+            f"{query.__name__} reads the current score, not the published one"
+        )
         assert not re.search(r"WHERE[^;]*j\.posted_at::date", body), (
             f"{query.__name__} buckets by publication date"
         )
 
 
-def test_a_closed_posting_is_never_recommended_whatever_it_once_scored():
-    from trouveur.db.queries.match import _EDITION_FILTER
+def test_a_published_edition_keeps_a_posting_that_has_since_closed():
+    """An edition that shrinks as the world moves on is not a record of anything.
 
-    assert "j.closed_at IS NULL" in _EDITION_FILTER
+    The card already marks a closed posting; dropping the row instead would also make the day's
+    count in the dropdown disagree with the rows under it.
+    """
+    import inspect
+
+    for query in (edition, editions):
+        assert "closed_at IS NULL" not in inspect.getsource(query), (
+            f"{query.__name__} drops postings that closed after the edition was published"
+        )
+
+
+def test_an_edition_and_its_count_agree_about_dismissed_postings():
+    """The reader curating their own page is fine; the two queries disagreeing is not.
+
+    Sharing one clause is the point: written out twice, the list and the dropdown's count drift
+    apart and a day reads "23 postings" above 19 rows.
+    """
+    import inspect
+
+    from trouveur.db.queries.match import _NOT_DISMISSED
+
+    assert "dismissed" in _NOT_DISMISSED
+    for query in (edition, editions):
+        assert "_NOT_DISMISSED" in inspect.getsource(query), (
+            f"{query.__name__} does not share the dismissed filter"
+        )
 
 
 def test_an_edition_is_ordered_by_score_descending():
     """Within a day the page is a ranking, and the order is the whole product."""
     import inspect
 
-    assert re.search(r"ORDER BY\s+m\.llm_score DESC", inspect.getsource(edition))
+    assert re.search(r"ORDER BY\s+e\.llm_score DESC", inspect.getsource(edition))
 
 
 def test_the_digest_is_bounded_by_count_and_not_by_score():

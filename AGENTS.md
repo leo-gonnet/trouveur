@@ -410,10 +410,10 @@ Before any commit: `git status` must be clean of the above.
 **There is no installation-wide API key.** Reranking runs on each user's own OpenRouter credential,
 so the deployment has no LLM spend of its own and one user's exhausted budget cannot affect another.
 
-- **Retrieval runs first and is free; `rerank_limit` is what makes the paid stage small.** There
-  is deliberately no deterministic cut between the two any more: a rule that rejected a posting
-  before scoring hid it from the user with no way to find out, and what it saved was a fraction
-  of a cent already bounded by `rerank_limit`. Internships, working-student roles and staffing
+- **Retrieval runs first and is free; `rerank.RERANK_LIMIT` is what makes the paid stage small.**
+  There is deliberately no deterministic cut between the two any more: a rule that rejected a
+  posting before scoring hid it from the user with no way to find out, and what it saved was a
+  fraction of a cent already bounded by the limit. Internships, working-student roles and staffing
   agencies are the reranker's to penalise, in the system prompt.
 - **Always cache by `(content_hash, user, profile_version)`.** A posting is scored once per profile,
   ever. Re-scoring an unchanged posting is a bug, not an inefficiency.
@@ -421,8 +421,8 @@ so the deployment has no LLM spend of its own and one user's exhausted budget ca
   something to discover from the user. Spend is metered in **USD**, the currency OpenRouter bills
   in — an EUR column would put a stale exchange rate between the meter and the cap.
 - **Bump `profile.version` only for fields that change what a good match is** (`SCORING_FIELDS`). A
-  volume setting such as `rerank_limit` must not invalidate a cache and bill a re-score.
-- **Text the reranker reads is multiplied by `rerank_limit`; text expansion reads is not.** This
+  cost setting such as `scoring_enabled` must not invalidate a cache and bill a re-score.
+- **Text the reranker reads is multiplied by `RERANK_LIMIT`; text expansion reads is not.** This
   is why `profile.background` reaches the two stages differently: expansion sees the whole field,
   because that call is billed once per profile version, while the reranker sees a distillation
   derived by the same cached, versioned stage (`user_query_expansion.background_summary`).
@@ -432,7 +432,9 @@ so the deployment has no LLM spend of its own and one user's exhausted budget ca
   under it. Guarded by a test.
 - **Query expansion costs one call per profile version, not per job**, and is cached. The
   deterministic expansion is the floor, not a degraded fallback: retrieval must work fully with no
-  key at all.
+  key at all. **Only a full expansion is cached**, though: a run with no key, or with scoring
+  paused, produces the floor, and storing that would pin the profile version to it for ever, so
+  adding a key later would silently buy nothing.
 - **A malformed response leaves a batch unscored, never scored 0.** Scoring garbage as 0 caches a
   wrong verdict and hides good jobs permanently.
 - **Always send `reasoning: {"enabled": false}`.** Without it a reasoning model spends the whole
@@ -443,28 +445,35 @@ so the deployment has no LLM spend of its own and one user's exhausted budget ca
 - Changing the default model is an eval question, not a taste question. **The model and the
   provider pin are installation settings** (`default_llm_model`, `default_llm_provider`), never
   a per-user field: a user-chosen model makes scores incomparable across users and lets the pin
-  be cleared. The Settings page shows them read-only. Volume lives on Settings next to the
-  ceiling, not on Profile: it is a cost dial, not part of what a good match is, and every field
-  left on Profile is a `SCORING_FIELDS` member.
-- **The user sets one volume number, `rerank_limit`.** Retrieval depth is the constant
-  `retrieve.RETRIEVAL_LIMIT`, not a setting: rerank takes the top `rerank_limit` by retrieval
-  score whatever was fetched, and retrieval is free, so a per-user value was a number with no
-  effect to explain. `rerank_limit = 0` is the pause; there is deliberately no separate toggle,
-  because "auto-match off" would starve the digest silently while 0 says what it does.
-- **Recommendations shows no lifetime pipeline counts.** `retrieved`/`passed`/`scored` over all
-  history are diagnostics and live on the dashboard; the page states the *last run* in the user's
-  terms from `pipeline_run.report.matches` (which is why the runner records `passed` there).
+  be cleared. The Settings page shows them read-only. **The monthly ceiling is one of them**
+  (`monthly_budget_usd`), copied onto the credential when it is saved so the batch check reads it
+  off the row it already has: a ceiling the spender can raise is not a ceiling. Every field left
+  on Profile is a `SCORING_FIELDS` member.
+- **The user's one cost control is `scoring_enabled`, a switch.** Retrieval depth is the constant
+  `retrieve.RETRIEVAL_LIMIT` and scoring depth is `rerank.RERANK_LIMIT`; neither is a setting,
+  because retrieval is free and rerank takes the top N by retrieval score whatever was fetched,
+  so a per-user number had no effect to explain. `rerank_limit` was three things at once — list
+  length, bill and pause — and it read as a volume dial while being the only way to stop
+  spending. Off means **no paid call at all** runs for that user, expansion included, which is
+  why `run_for_user` drops the credential rather than gating the rerank alone.
+- **Recommendations shows no run statistics at all.** `retrieved`/`passed`/`scored` and the cost
+  of the last run are diagnostics; they live on the dashboard. The page is a reading list, and
+  "450 candidates" is not a sentence a reader can act on.
 - **A missing key is a full-width `.banner warn` on every page**, set by the session middleware
-  (`request.state.needs_key`) so no route can forget it. The Match now button is never blocked by
-  it: the free stages still run, and the hint says nothing will be scored.
-- **A scoring change forgets the user's scores** (`users.reset_scores`, called from
-  `save_profile`). The `profile_version < current` test in `pending_rerank` cannot do this alone:
-  retrieval re-stamps `profile_version` on every row it finds again *before* reranking, so the
-  rows most worth re-scoring were exactly the ones that looked current, and old scores survived a
-  profile change labelled as new. `state` and `notified_at` are kept — they are the user's history.
-- **"Match now" is a match-only run** (`pipeline_run.match_user_id`), queued by the web app and
-  executed by the runner like any other run. It sweeps nothing and sends no digest. One per user
-  at a time; a second click while one is pending must not queue another paid run.
+  (`request.state.needs_key`) so no route can forget it. It says what to do about it; the free
+  stages still run regardless.
+- **A scoring change erases nothing.** The version bump alone queues the re-score, because
+  retrieval **must not re-stamp** `user_job_match.profile_version` — that column records the
+  profile a posting was SCORED under, and retrieval runs first on every row it finds again, so
+  re-stamping made the rows most worth re-scoring look current and `profile_version < :current`
+  matched nothing. The repair for that used to be `reset_scores`, which nulled every score and
+  `scored_at` the user had — and since an edition was derived from `scored_at`, editing a profile
+  wiped the whole Recommendations history while the page promised the opposite. Guarded by a test.
+- **Matching is started by the scan, by a profile change and by adding a key**, never by a button.
+  Each queues a match-only run (`pipeline_run.match_user_id`) that the runner executes like any
+  other: it sweeps nothing and sends no digest. One per user at a time — a second must not queue
+  another paid run. A button asking "match now" could not say whether it would do anything,
+  because with no backlog it retrieves, scores nothing, costs nothing and changes no pixel.
 
 ## Web UI
 
@@ -476,10 +485,10 @@ so the deployment has no LLM spend of its own and one user's exhausted budget ca
   the query layer, not just the UI.
 - **There is no score threshold, and re-adding one is a regression.** It hid postings the user had
   already paid to have scored, behind a number they had to guess — and guessing it low enough to
-  see them made it meaningless. Volume is bounded once, by `rerank_limit`, which is also the only
-  setting that costs money. The page shows what was paid for and the reader draws their own line,
-  so **the ordering is the product**: `ORDER BY m.llm_score DESC` is load-bearing, not cosmetic.
-  The digest is bounded the same way, by count rather than by score.
+  see them made it meaningless. Volume is bounded once, by `rerank.RERANK_LIMIT`. The page shows
+  what was paid for and the reader draws their own line, so **the ordering is the product**:
+  `ORDER BY e.llm_score DESC` is load-bearing, not cosmetic. The digest is bounded the same way,
+  by count rather than by score.
 - **The score is the first thing on a row and it is coloured** (`score_pill`, `.score.high/.mid/
   .low`). The band names in the macro and in `app.css` must match: they did not, and every score
   of 65 and over rendered with no colour at all for as long as that went unnoticed.
@@ -495,6 +504,28 @@ so the deployment has no LLM spend of its own and one user's exhausted budget ca
   them, so `Wien` and `Vienna` coexist and a `f.cities && :cities` clause would silently lose
   one of them, plus every suburb and every multi-site posting. The prompt carries them instead
   and the system prompt says they are a preference. Do not "finish" the filter.
+- **An edition is stored, not derived, and never rewritten** (`user_edition_item`). It holds the
+  score, reason and flags the reader was SHOWN; `user_job_match` holds the current verdict. That
+  duplication is the feature. Derived by grouping `scored_at::date`, a posting re-scored later
+  left the day it was published in and yesterday's page silently lost a row — and a closed
+  posting dropped out of a day whose count still counted it. So: a closed posting **stays** in
+  its edition with the card's `closed` tag, and only a posting the reader **dismissed** leaves,
+  from the list and the count together (`_NOT_DISMISSED`, shared by both queries so they cannot
+  disagree).
+- **Only today's edition may be replaced, and only after the user says so.** A save that bumps
+  the profile version shows a confirm page first when an edition already exists for today
+  (`profile_confirm.html`, which re-posts the form verbatim); the run then clears that day's rows
+  at the old version and publishes the new ones in the same transaction, so a failed run leaves
+  the old edition standing. Every older edition is a published record and is never touched.
+- **A posting reaches a user once per profile version, ever.** Only a profile change can bring it
+  back, and the database enforces it (`uq_edition_item_once_per_version`) rather than trusting
+  `pending_rerank`'s WHERE clause — a posting silently recommended twice reads as the system
+  repeating itself.
+- **Recommendations has no heading, no status line and no button.** The nav says which page it
+  is, and the edition dropdown carries the only two facts the page needs: which day (today's says
+  `Today`, not a date the reader has to check against a calendar) and whether it was read under a
+  profile since changed. A current-profile edition says nothing extra — silence means "this is
+  you". Everything else that was there was pipeline vocabulary.
 - **Templates never re-derive.** Read stored facets. A template that parses a location or infers a
   work mode is a second implementation of a question `derive.py` already answered.
 - **The dashboard must surface what fails silently**: partition overflow, sweep completeness, the
@@ -645,8 +676,9 @@ still holds the old readings and no re-derive has been scheduled.
     envelope appearing later shows up as an empty sweep rather than a TypeError.
   - **An Ashby board may be named after a domain** (`mistral.ai`, `roadsurfer.com`), and the same
     string is still rejected for every other source, where it means a pasted homepage.
-  - Every source package is registered; `schema.py` and the migration agree; no SQL outside
-    `db/queries/`; no source name used as a value downstream.
+  - Every source package is registered; `schema.py` and the migration **chain** agree (every
+    `upgrade()` in revision order, not just the baseline); no SQL outside `db/queries/`; no
+    source name used as a value downstream.
   - **Every route rejects an anonymous caller** (`tests/unit/test_web_auth.py`, parametrized over
     the router, so a new route is covered the moment it exists).
   - **Every query in `db/queries/` executes** against a real server, and adding one without an
@@ -654,6 +686,14 @@ still holds the old readings and no re-derive has been scheduled.
   - **Every Postgres enum has a Python counterpart and the members match** — Python ↔ `schema.py`
     offline, `schema.py` ↔ server in integration.
   - A stored API key never appears in a rendered page.
+  - **A profile change leaves every published edition standing**, and re-scoring a posting does
+    not move it out of the day it was published in.
+  - **Retrieval never re-stamps the profile version a posting was scored under**, or the rows
+    most in need of a re-score look current and nothing is ever re-scored.
+  - **A posting cannot enter two editions under one profile version** — the constraint, not the
+    query, is what refuses it.
+  - **A closed posting stays in its edition** and the dropdown's count still matches the rows.
+  - **Recommendations carries no heading, no run statistics and no button.**
 
 ## Retrieval evaluation
 

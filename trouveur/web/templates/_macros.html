@@ -1,3 +1,16 @@
+{# The dropdown is the whole header of the Recommendations page, so it carries the only two
+   facts that page needs: which day, and whether that day was read under a profile the user has
+   since changed. A current-profile edition says nothing extra -- silence means "this is you". #}
+{% macro edition_label(row, today, current_version) %}
+  {%- if row.day == today -%}Today
+  {%- else -%}{{ row.day.strftime('%a %d %b %Y') }}{%- endif %}
+  &mdash; {{ row.postings }} posting{{ '' if row.postings == 1 else 's' }}
+  {%- if row.profile_version != current_version or row.profile_version_max != current_version %}
+    &middot; older profile (v{{ row.profile_version }}
+    {%- if row.profile_version_max != row.profile_version %}&ndash;v{{ row.profile_version_max }}{% endif %})
+  {%- endif -%}
+{% endmacro %}
+
 {% macro places(job) %}
   {%- set names = (job.cities or []) | list -%}
   {%- if names -%}{{ names | join(', ') }}{%- endif -%}

@@ -332,25 +332,6 @@ async def enqueue_run(
     ).scalar_one()
 
 
-async def last_match_for_user(conn: AsyncConnection, user_id: int) -> sa.Row | None:
-    """When this user was last matched and what that run did for them, from the run's report."""
-    return (
-        await conn.execute(
-            sa.text(
-                """
-                SELECT r.finished_at, m.value AS match
-                FROM pipeline_run r, jsonb_array_elements(r.report -> 'matches') m
-                WHERE r.status = 'success'
-                  AND (m.value ->> 'user_id')::bigint = :user_id
-                ORDER BY r.finished_at DESC
-                LIMIT 1
-                """
-            ),
-            {"user_id": user_id},
-        )
-    ).one_or_none()
-
-
 async def pending_match_run(conn: AsyncConnection, user_id: int) -> sa.Row | None:
     """The match-only run this user already has queued or running, if any. One is enough: a
     second would re-read the same rows on the same key and bill for it."""

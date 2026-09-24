@@ -1,11 +1,13 @@
-"""Recommendations published one day at a time.
+"""Recommendations published one day at a time, and never rewritten.
 
 The page used to be one list that only grew, ordered by score, so a strong posting from three
 weeks ago outranked everything that arrived this morning and stayed there until it was
 dismissed. An edition gives the page a time axis without a score cut: the day is the cut.
 
-What has to hold for that to be worth anything: a day's edition is fixed once published, a day
-that is missed leaves no hole, and nothing a user was shown becomes unreachable.
+An edition used to be DERIVED, by grouping `user_job_match` on `scored_at::date`. A row carries
+one scored_at, so re-scoring a posting moved it out of the day it was published in -- and
+`reset_scores` nulled the column outright on a profile change, erasing every edition the user
+had while the page promised the opposite. These tests are what stops that coming back.
 """
 
 from __future__ import annotations
@@ -17,28 +19,32 @@ import sqlalchemy as sa
 
 from trouveur.db.engine import connect
 from trouveur.db.queries import match as mq
+from trouveur.db.queries import users as users_q
 
 pytestmark = pytest.mark.asyncio
 
 
-async def _rescore_on(user_id: int, job_ids: list[int], day: date, version: int = 1) -> None:
-    """Put an existing match into a given edition, the way apply_scores would have."""
+async def _publish(user_id: int, job_ids: list[int], day: date, version: int = 1) -> None:
+    """Publish an edition the way a match run would."""
     async with connect() as conn:
-        await conn.execute(
-            sa.text(
-                "UPDATE user_job_match SET llm_score = 80, scored_at = CAST(:day AS date), "
-                "profile_version = :version "
-                "WHERE user_id = :user AND job_id = ANY(CAST(:ids AS bigint[]))"
-            ),
-            {"day": day, "version": version, "user": user_id, "ids": job_ids},
+        await mq.publish_edition(
+            conn,
+            [
+                {
+                    "user_id": user_id, "day": day, "job_id": job_id,
+                    "profile_version": version, "llm_score": 80,
+                    "llm_reason": "probe", "llm_red_flags": [],
+                }
+                for job_id in job_ids
+            ],
         )
 
 
 async def _all_match_ids(user_id: int) -> list[int]:
     """Every posting in the seeded corpus, matched to this user.
 
-    The `seeded` fixture scores exactly one, which is enough to render a card and not enough to
-    split across two days -- so the rest are matched here.
+    The `seeded` fixture publishes exactly one, which is enough to render a card and not enough
+    to split across two days -- so the rest are matched here, and none of them is published.
     """
     async with connect() as conn:
         jobs = await conn.execute(sa.text("SELECT id FROM job ORDER BY id"))
@@ -53,17 +59,20 @@ async def _all_match_ids(user_id: int) -> list[int]:
                 for job_id in job_ids
             ],
         )
+        await conn.execute(
+            sa.text("DELETE FROM user_edition_item WHERE user_id = :user"), {"user": user_id}
+        )
     return job_ids
 
 
-async def test_postings_scored_on_different_days_land_in_different_editions(seeded):
+async def test_postings_published_on_different_days_land_in_different_editions(seeded):
     user_id = seeded["user_id"]
     ids = await _all_match_ids(user_id)
     assert len(ids) >= 2, "need at least two matches to split across two days"
 
     monday, tuesday = date(2026, 9, 14), date(2026, 9, 15)
-    await _rescore_on(user_id, ids[:1], monday)
-    await _rescore_on(user_id, ids[1:], tuesday)
+    await _publish(user_id, ids[:1], monday)
+    await _publish(user_id, ids[1:], tuesday)
 
     async with connect() as conn:
         days = await mq.editions(conn, user_id)
@@ -77,8 +86,8 @@ async def test_an_edition_records_the_profile_version_that_produced_it(seeded):
     user_id = seeded["user_id"]
     ids = await _all_match_ids(user_id)
     monday, tuesday = date(2026, 9, 14), date(2026, 9, 15)
-    await _rescore_on(user_id, ids[:1], monday, version=1)
-    await _rescore_on(user_id, ids[1:], tuesday, version=2)
+    await _publish(user_id, ids[:1], monday, version=1)
+    await _publish(user_id, ids[1:], tuesday, version=2)
 
     async with connect() as conn:
         by_day = {row.day: row for row in await mq.editions(conn, user_id)}
@@ -86,17 +95,59 @@ async def test_an_edition_records_the_profile_version_that_produced_it(seeded):
     assert by_day[tuesday].profile_version == 2
 
 
-async def test_a_posting_never_scored_belongs_to_no_edition(seeded):
-    """Retrieval is cumulative and rerank_limit caps scoring; unscored is not a recommendation."""
+async def test_changing_the_profile_leaves_every_published_edition_standing(seeded):
+    """The regression that made this file necessary.
+
+    `reset_scores` nulled llm_score and scored_at for every row whenever a scoring field
+    changed, and the edition read required both to be set -- so editing a profile emptied the
+    Recommendations page of every day the user had ever been sent.
+    """
     user_id = seeded["user_id"]
+    ids = await _all_match_ids(user_id)
+    monday = date(2026, 9, 14)
+    await _publish(user_id, ids, monday)
+
     async with connect() as conn:
-        await conn.execute(
-            sa.text(
-                "UPDATE user_job_match SET llm_score = NULL, scored_at = NULL "
-                "WHERE user_id = :user"
-            ),
-            {"user": user_id},
+        version, rescore = await users_q.save_profile(
+            conn, user_id, {"title": "Something Else Entirely"}
         )
+        assert rescore, "changing the title must count as a scoring change"
+        assert version > 1
+        rows = await mq.edition(conn, user_id, monday)
+        assert len(rows) == len(ids), "a profile change erased a published edition"
+
+
+async def test_re_scoring_a_posting_does_not_move_it_out_of_its_edition(seeded):
+    """The other half: a posting scored again lands in the new day and stays in the old one."""
+    user_id = seeded["user_id"]
+    ids = await _all_match_ids(user_id)
+    monday, friday = date(2026, 9, 14), date(2026, 9, 18)
+    await _publish(user_id, ids[:1], monday, version=1)
+    await _publish(user_id, ids[:1], friday, version=2)
+
+    async with connect() as conn:
+        assert len(await mq.edition(conn, user_id, monday)) == 1, "monday lost its posting"
+        assert len(await mq.edition(conn, user_id, friday)) == 1
+
+
+async def test_a_posting_cannot_be_recommended_twice_under_one_profile_version(seeded):
+    """Only a profile change may bring a posting back; a repeat reads as the system stuttering.
+
+    pending_rerank already declines to re-score it, but that is a WHERE clause someone can edit.
+    """
+    user_id = seeded["user_id"]
+    ids = await _all_match_ids(user_id)
+    await _publish(user_id, ids[:1], date(2026, 9, 14), version=1)
+
+    with pytest.raises(Exception, match="uq_edition_item_once_per_version"):
+        await _publish(user_id, ids[:1], date(2026, 9, 15), version=1)
+
+
+async def test_a_posting_never_published_belongs_to_no_edition(seeded):
+    """Retrieval is cumulative and RERANK_LIMIT caps scoring; unscored is not a recommendation."""
+    user_id = seeded["user_id"]
+    await _all_match_ids(user_id)
+    async with connect() as conn:
         assert await mq.editions(conn, user_id) == []
 
 
@@ -105,8 +156,8 @@ async def test_a_day_with_no_scoring_simply_has_no_edition(seeded):
     user_id = seeded["user_id"]
     ids = await _all_match_ids(user_id)
     monday, wednesday = date(2026, 9, 14), date(2026, 9, 16)
-    await _rescore_on(user_id, ids[:1], monday)
-    await _rescore_on(user_id, ids[1:], wednesday)
+    await _publish(user_id, ids[:1], monday)
+    await _publish(user_id, ids[1:], wednesday)
 
     async with connect() as conn:
         days = [row.day for row in await mq.editions(conn, user_id)]
@@ -123,7 +174,7 @@ async def test_an_edition_survives_its_postings_ageing_past_the_horizon(seeded):
     user_id = seeded["user_id"]
     ids = await _all_match_ids(user_id)
     long_ago = date(2026, 1, 5)
-    await _rescore_on(user_id, ids, long_ago)
+    await _publish(user_id, ids, long_ago)
     async with connect() as conn:
         await conn.exec_driver_sql(
             "UPDATE job SET posted_at = now() - interval '300 days', "
@@ -131,3 +182,36 @@ async def test_an_edition_survives_its_postings_ageing_past_the_horizon(seeded):
         )
         rows = await mq.edition(conn, user_id, long_ago)
     assert len(rows) == len(ids)
+
+
+async def test_a_posting_that_closes_stays_in_the_edition_it_was_published_in(seeded):
+    """Otherwise a published day shrinks as the world moves on, and its count stops matching.
+
+    The card marks it closed; the row does not vanish.
+    """
+    user_id = seeded["user_id"]
+    ids = await _all_match_ids(user_id)
+    monday = date(2026, 9, 14)
+    await _publish(user_id, ids, monday)
+
+    async with connect() as conn:
+        await conn.exec_driver_sql("UPDATE job SET closed_at = now()")
+        rows = await mq.edition(conn, user_id, monday)
+        counted = {row.day: row.postings for row in await mq.editions(conn, user_id)}
+    assert len(rows) == len(ids), "closing a posting emptied a published edition"
+    assert counted[monday] == len(rows), "the dropdown count and the list disagree"
+
+
+async def test_clearing_a_day_only_touches_rows_from_another_profile(seeded):
+    """Replacing today's edition must not restart a day that is simply still being filled."""
+    user_id = seeded["user_id"]
+    ids = await _all_match_ids(user_id)
+    today = date(2026, 9, 24)
+    await _publish(user_id, ids[:1], today, version=1)
+    await _publish(user_id, ids[1:], today, version=2)
+
+    async with connect() as conn:
+        removed = await mq.clear_stale_edition(conn, user_id, today, profile_version=2)
+        remaining = await mq.edition(conn, user_id, today)
+    assert removed == 1, "the old-profile row was not replaced"
+    assert len(remaining) == len(ids) - 1, "rows at the current version were destroyed too"
