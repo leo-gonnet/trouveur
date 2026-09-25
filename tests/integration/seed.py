@@ -7,7 +7,7 @@ matches. Seeding less would let a query pass by touching nothing.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from trouveur import clock
 
 
 async def seed_corpus(gh_board, aa_listing, aa_detail):
@@ -94,7 +94,7 @@ async def seed_scored_match(user_id: int, profile) -> int:
         await match_q.publish_edition(
             conn,
             [{
-                "user_id": user_id, "day": datetime.now(UTC).date(), "job_id": job_id,
+                "user_id": user_id, "day": clock.today(), "job_id": job_id,
                 "profile_version": profile.version, "llm_score": 92,
                 "llm_reason": "strong match", "llm_red_flags": ["probe flag"],
             }],

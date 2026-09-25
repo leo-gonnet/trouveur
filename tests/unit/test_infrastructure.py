@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 
 from trouveur.ingest.embed import EMBEDDING_DIM, DeterministicProvider, version_of
 from trouveur.ingest.embed.text import embedding_text
-from trouveur.runner.service import is_scheduled_run_due
+from trouveur.runner.service import is_scheduled_run_due, slot_today
 from trouveur.work import WorkKind
 from trouveur.work.queue import _stale_query
 
@@ -178,18 +179,43 @@ def test_only_embedding_is_bounded_by_age():
         assert "first_seen_at" not in sql
 
 
-def test_a_missed_schedule_slot_runs_once_when_the_runner_returns():
+@pytest.fixture
+def vienna(monkeypatch):
+    """Pin the zone: these assertions are about a wall-clock hour, so they must not quietly
+    re-read as UTC if the default ever changes."""
+    monkeypatch.setenv("TIMEZONE", "Europe/Vienna")
+
+
+def test_the_scan_hour_is_a_wall_clock_hour_and_does_not_drift_with_dst(vienna):
+    """`run_hour = 7` is "seven in the morning", in January and in July alike.
+
+    Resolved on a UTC clock it was seven UTC -- nine in Vienna in summer, eight in winter -- so
+    the scan moved by an hour twice a year, on a form whose only label was "Hour".
+    """
     schedule = _Schedule(run_hour=7)
+
+    winter = slot_today(schedule, datetime(2026, 1, 15, 3, 0, tzinfo=UTC))
+    summer = slot_today(schedule, datetime(2026, 7, 15, 3, 0, tzinfo=UTC))
+
+    assert winter.astimezone(ZoneInfo("Europe/Vienna")).hour == 7
+    assert summer.astimezone(ZoneInfo("Europe/Vienna")).hour == 7
+    # The same wall-clock hour is a different instant on either side of the change.
+    assert (winter.hour, summer.hour) == (6, 5), "the slot did not follow the offset"
+
+
+def test_a_missed_schedule_slot_runs_once_when_the_runner_returns(vienna):
+    schedule = _Schedule(run_hour=7)
+    # September in Vienna is UTC+2, so the 07:00 slot falls at 05:00 UTC.
     now = datetime(2026, 9, 8, 11, 0, tzinfo=UTC)
     # Runner was down over the 07:00 slot: it should run now...
-    assert is_scheduled_run_due(schedule, now, datetime(2026, 9, 7, 7, 0, tzinfo=UTC)) is True
+    assert is_scheduled_run_due(schedule, now, datetime(2026, 9, 7, 5, 0, tzinfo=UTC)) is True
     # ...but exactly once, not repeatedly to "catch up".
-    assert is_scheduled_run_due(schedule, now, datetime(2026, 9, 8, 7, 30, tzinfo=UTC)) is False
+    assert is_scheduled_run_due(schedule, now, datetime(2026, 9, 8, 5, 30, tzinfo=UTC)) is False
 
 
-def test_schedule_does_not_fire_before_its_slot():
+def test_schedule_does_not_fire_before_its_slot(vienna):
     schedule = _Schedule(run_hour=7)
-    before = datetime(2026, 9, 8, 6, 59, tzinfo=UTC)
+    before = datetime(2026, 9, 8, 4, 59, tzinfo=UTC)  # 06:59 in Vienna
     assert is_scheduled_run_due(schedule, before, None) is False
 
 

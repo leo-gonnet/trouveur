@@ -8,11 +8,12 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from trouveur import clock
 from trouveur.config import Settings, get_settings
 from trouveur.crypto import CredentialError, decrypt
 from trouveur.db.engine import connect
@@ -252,9 +253,10 @@ async def _publish(
     The clear and the insert share this transaction on purpose: a run that dies between them
     would otherwise delete a published day and put nothing back in its place.
     """
-    # UTC on both sides. The page computes "today" the same way, so the newest edition is
-    # labelled Today exactly when it was published today.
-    day = datetime.now(UTC).date()
+    # The reader's day, not the server's: an edition published at 01:00 in Vienna belongs to
+    # that morning's reading, not to the day UTC was still on. Decided here and stored, because
+    # the page must not recompute a published day.
+    day = clock.today()
     await match_q.clear_stale_edition(conn, profile.user_id, day, profile.version)
     report.published = await match_q.publish_edition(
         conn,

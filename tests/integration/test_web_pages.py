@@ -11,7 +11,7 @@ reaches the same code a browser would for a fraction of the maintenance.
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime
+from datetime import date
 from decimal import Decimal
 
 import httpx
@@ -19,6 +19,7 @@ import pytest
 import sqlalchemy as sa
 
 from tests.integration.test_editions import _all_match_ids, _publish
+from trouveur import clock
 from trouveur.db.engine import connect
 from trouveur.db.queries import match as match_q
 from trouveur.db.queries import users as users_q
@@ -551,7 +552,7 @@ async def test_todays_edition_is_labelled_today_and_older_ones_are_dated(client,
     """A date the reader has to compare against a calendar is not an answer to "is this new?"."""
     user_id = seeded["user_id"]
     ids = await _all_match_ids(user_id)
-    today = datetime.now(UTC).date()
+    today = clock.today()
     await _publish(user_id, ids[:1], date(2026, 9, 14))
     await _publish(user_id, ids[1:], today, version=2)
 

@@ -144,6 +144,24 @@ query.** Sources sweep by their own structure; users select over the corpus.
   archive reproduce the original result.
 - **Nothing downstream of normalisation may name a source.** If a change needs edits in the matcher
   or the web layer as well as in a source, the abstraction has leaked. Enforced by a test.
+- **Store UTC; convert at the edge, through `trouveur/clock.py` and nowhere else.** Every column
+  is `timestamptz`, the server runs `Etc/UTC` and asyncpg returns aware UTC datetimes -- none of
+  that changes. `settings.timezone` is what UTC becomes at the two edges that involve a person:
+  a displayed time (`| localtime`, never a bare `strftime` on an instant -- rendered raw, a scan
+  that ran at 09:00 in Vienna reads 07:00 and the page says nothing about why), and a day or an
+  hour somebody *chose*. `run_hour` is a wall-clock hour, so it is resolved in that zone or it
+  slides by one at every DST change, silently, on a form whose only label was "Hour". Dates that
+  are already stored as `date` are not instants and must not be converted. The archive export is
+  deliberately exempt: its partitions key on `fetched_at::date` in the database's UTC, and those
+  are storage partitions rather than a day a reader would name. One timezone per installation,
+  not per user -- the nightly scan is shared, so its hour needs a single answer; `clock.today()`
+  is the seam a per-user zone would plug into if that ever changes.
+- **An edition's day is decided once, at publish, and stored.** `clock.today()` in `_publish`,
+  never recomputed while rendering: the day is part of `user_edition_item`'s key and of the
+  constraint that stops a posting being recommended twice, so a day that moved with the viewer's
+  clock would make an immutable record viewer-dependent. Whatever decides it must be the same
+  call everywhere -- publish, `clear_stale_edition` and the profile-confirm check -- or near
+  midnight they disagree and today's edition is replaced without anyone being asked.
 - **Typed enums, not raw strings**, with an `UNKNOWN` member wherever a source could surprise us.
 - **Specific exceptions with complete-sentence messages.** Never `raise Exception(...)`, never
   `except Exception: pass`. The sanctioned broad catches are per-source isolation in
@@ -707,6 +725,13 @@ still holds the old readings and no re-derive has been scheduled.
     query, is what refuses it.
   - **A closed posting stays in its edition** and the dropdown's count still matches the rows.
   - **Recommendations carries no heading, no run statistics and no button.**
+  - **The scan hour is a wall-clock hour and does not drift with DST** -- `run_hour = 7` is seven
+    in the morning in January and in July alike.
+  - **A posting's age is counted in calendar days, not elapsed hours**: measured as elapsed
+    time, something posted at 23:00 last night read "posted today" all through this morning.
+  - **An unknown `TIMEZONE` is refused at the first read**, never quietly treated as UTC -- a
+    fallback would cut every edition on the wrong day and nothing could tell it apart from a
+    correct installation.
 
 ## Retrieval evaluation
 

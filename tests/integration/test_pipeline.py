@@ -11,6 +11,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from tests.integration.seed import seed_corpus, seed_user
+from trouveur import clock
 
 # The integration conftest neutralises the horizon so fixtures with fixed dates stay usable.
 # Where a test is about retrieval rather than about freshness, it says so by passing this.
@@ -160,7 +161,7 @@ async def test_scores_are_cached_and_spend_accumulates(
         )
         assert total == Decimal("0.03")
         # Everything one run scores is published as one edition, on the day it ran.
-        today = datetime.now(UTC).date()
+        today = clock.today()
         await mq.publish_edition(
             conn,
             [{"user_id": user_id, "day": today, "job_id": row.job_id,

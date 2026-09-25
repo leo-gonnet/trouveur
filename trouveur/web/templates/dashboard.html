@@ -24,7 +24,7 @@
     {% for row in health %}
     <tr>
       <td>{{ row.source }}</td>
-      <td>{{ row.started_at.strftime('%Y-%m-%d %H:%M') }}</td>
+      <td>{{ row.started_at | localtime }}</td>
       <td class="num">{{ '{:,}'.format(row.documents_seen) }}</td>
       <td class="num">{{ row.partitions_done }}/{{ row.partitions_total }}</td>
       <td class="num">{% if row.partitions_overflowed %}<span class="pill bad">{{ row.partitions_overflowed }}</span>{% else %}0{% endif %}</td>
@@ -83,7 +83,7 @@
       <tr><th>Kind</th><th class="num">Pending</th><th>Oldest</th></tr>
       {% for row in queues %}
         <tr><td>{{ row.kind }}</td><td class="num">{{ '{:,}'.format(row.total) }}</td>
-            <td>{{ row.oldest.strftime('%Y-%m-%d %H:%M') if row.oldest else '—' }}</td></tr>
+            <td>{{ row.oldest | localtime }}</td></tr>
       {% endfor %}
     </table>
     {% else %}<p class="empty">All queues drained.</p>{% endif %}
@@ -131,7 +131,7 @@
         {% else %}<span class="pill">{{ 'candidate' if row.origin == 'discovered' else 'disabled' }}</span>{% endif %}
       </td>
       <td class="num">{{ '{:,}'.format(row.last_documents or 0) }}</td>
-      <td>{{ row.last_ok_at.strftime('%Y-%m-%d %H:%M') if row.last_ok_at else 'never' }}</td>
+      <td>{{ row.last_ok_at | localtime('%Y-%m-%d %H:%M') if row.last_ok_at else 'never' }}</td>
       <td class="num">
         {% if row.consecutive_failures %}
           <span class="pill bad">{{ row.consecutive_failures }}</span>

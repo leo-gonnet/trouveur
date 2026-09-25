@@ -10,6 +10,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from trouveur import clock
 from trouveur.db.schema import (
     app_user,
     user_llm_credential,
@@ -194,8 +195,12 @@ async def delete_credential(conn: AsyncConnection, user_id: int) -> None:
 
 
 def _month(when: date | None = None) -> date:
-    today = when or date.today()
-    return today.replace(day=1)
+    """The month spend is metered into, on the installation's clock rather than the server's.
+
+    `date.today()` is the process's local date, which is UTC in the container and the operator's
+    zone anywhere else -- so the month boundary moved with where this ran.
+    """
+    return (when or clock.today()).replace(day=1)
 
 
 async def month_spend(conn: AsyncConnection, user_id: int) -> sa.Row | None:

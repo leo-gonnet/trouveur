@@ -23,7 +23,8 @@
         <input type="checkbox" name="enabled" value="true" {% if schedule.enabled %}checked{% endif %}>
         run daily
       </label>
-      <label>Hour<input name="run_hour" type="number" min="0" max="23" value="{{ schedule.run_hour }}"></label>
+      <label>Hour <span class="hint">wall clock in {{ timezone }}, the same zone every time on this page is shown in</span>
+        <input name="run_hour" type="number" min="0" max="23" value="{{ schedule.run_hour }}"></label>
       <label>Minute<input name="run_minute" type="number" min="0" max="59" value="{{ schedule.run_minute }}"></label>
       <p class="actions"><button class="primary" type="submit">Save schedule</button></p>
     </form>
@@ -63,7 +64,7 @@
     {% for s in sweeps %}
       <tr>
         <td>{{ s.source }}</td>
-        <td>{{ s.started_at.strftime('%m-%d %H:%M') }}</td>
+        <td>{{ s.started_at | localtime('%m-%d %H:%M') }}</td>
         <td class="num">{{ '{:,}'.format(s.documents_seen) }}</td>
         <td class="num">{{ '{:,}'.format(s.jobs_upserted) }}</td>
         <td class="num">{{ s.jobs_closed }}</td>

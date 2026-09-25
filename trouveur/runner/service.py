@@ -11,6 +11,7 @@ import logging
 from dataclasses import asdict
 from datetime import UTC, datetime
 
+from trouveur import clock
 from trouveur.config import Settings, get_settings
 from trouveur.db.engine import connect
 from trouveur.db.queries import admin as admin_q
@@ -30,9 +31,19 @@ _DETAIL_PER_TICK = 40
 
 
 def slot_today(schedule, now: datetime) -> datetime:
-    return now.replace(
+    """The instant today's slot falls at, from the wall-clock hour the operator typed.
+
+    Resolved in the installation's timezone rather than in UTC: `run_hour = 7` is "seven in the
+    morning", and computed on a UTC clock it drifts to eight when the clocks change -- twice a
+    year, silently, on a page whose only label is "Hour".
+
+    On the spring-forward day an hour that does not exist locally resolves to the instant after
+    the gap. The slot still passes exactly once, which is all this has to guarantee.
+    """
+    local = clock.to_local(now).replace(
         hour=schedule.run_hour, minute=schedule.run_minute, second=0, microsecond=0
     )
+    return local.astimezone(UTC)
 
 
 def is_scheduled_run_due(schedule, now: datetime, last_queued_at: datetime | None) -> bool:

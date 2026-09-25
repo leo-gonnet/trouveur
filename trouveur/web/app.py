@@ -23,6 +23,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from jinja2 import StrictUndefined
 
+from trouveur import clock
 from trouveur.config import get_settings
 from trouveur.crypto import encrypt, fingerprint
 from trouveur.db.engine import connect
@@ -56,7 +57,17 @@ app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")
 # suite.
 templates = Jinja2Templates(directory=BASE / "templates")
 templates.env.undefined = StrictUndefined
+def _localtime(value, fmt: str = "%Y-%m-%d %H:%M") -> str:
+    """A stored UTC instant, on the reader's wall clock. Every displayed time goes through this:
+    rendered raw, a scan that ran at 09:00 in Vienna reads 07:00 and says nothing about why."""
+    if value is None:
+        return "\u2014"
+    return clock.to_local(value).strftime(fmt)
+
+
+templates.env.filters["localtime"] = _localtime
 templates.env.globals["version"] = importlib.metadata.version("trouveur")
+templates.env.globals["timezone"] = get_settings().timezone
 
 REPO_URL = "https://github.com/leo-gonnet/trouveur"
 _SHA = re.compile(r"\A[0-9a-f]{7,40}\Z")
@@ -104,10 +115,15 @@ templates.env.globals["commit"], templates.env.globals["commit_url"] = commit_li
 
 def _posted_age(value) -> str:
     """How old a posting is, in words. On every card, because an edition is keyed on the day a
-    posting became a recommendation, not the day it was published."""
+    posting became a recommendation, not the day it was published.
+
+    Calendar days in the reader's zone, not elapsed hours: measured as elapsed time, something
+    posted at 23:00 last night was "posted today" all through this morning, because only eleven
+    hours had passed.
+    """
     if value is None:
         return "date not stated"
-    days = (datetime.now(UTC) - value).days
+    days = (clock.today() - clock.to_local(value).date()).days
     if days <= 0:
         return "posted today"
     if days == 1:
@@ -251,7 +267,7 @@ async def recommendations(request: Request, edition: str = ""):
             "paused": profile_row is not None and not profile_row.scoring_enabled,
             "profile_version": profile_row.version if profile_row else 1,
             "username": session["u"],
-            "today": datetime.now(UTC).date(),
+            "today": clock.today(),
         },
     )
 
@@ -424,7 +440,7 @@ async def profile_save(
     async with connect() as conn:
         current = await users_q.get_profile(conn, session["uid"])
         rescore = users_q.changes_scoring(current, values)
-        today = datetime.now(UTC).date()
+        today = clock.today()
         # Today's edition is the only one a save may replace, and only with the user's word for
         # it. Every older edition is a published record and is never touched, so there is
         # nothing to ask about on a day that has not been published yet.

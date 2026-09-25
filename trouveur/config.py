@@ -16,6 +16,12 @@ USER_AGENT = "trouveur/0.2 (+self-hosted job search; contact via repository owne
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=None, extra="ignore")
 
+    # The wall clock this installation reads. Every timestamp is STORED in UTC and stays that
+    # way; this is what UTC is turned into at the edges -- displayed times, the scan hour the
+    # operator typed, and the day an edition is published into. Not per user: the nightly scan is
+    # shared, so its hour needs one answer, and the corpus is one region's boards.
+    timezone: str = "Europe/Vienna"
+
     # What the deploy pulled. deploy.yml rewrites this in .env to the pushed commit and compose
     # resolves the image tag from it, so it cannot disagree with the code that is running: a
     # footer showing the wrong commit would mean the wrong container is up.
