@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import importlib.metadata
 import logging
+import re
+import subprocess
 from collections.abc import Iterable
 from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
@@ -55,6 +57,49 @@ app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")
 templates = Jinja2Templates(directory=BASE / "templates")
 templates.env.undefined = StrictUndefined
 templates.env.globals["version"] = importlib.metadata.version("trouveur")
+
+REPO_URL = "https://github.com/leo-gonnet/trouveur"
+_SHA = re.compile(r"\A[0-9a-f]{7,40}\Z")
+
+
+def _deployed_commit() -> str:
+    """Which commit this instance is running.
+
+    `TROUVEUR_TAG` is what deploy.yml writes into `.env` on the host AND what compose resolves
+    the image tag from, so the footer cannot drift from the running code: a wrong commit here
+    would mean a wrong container. The package version is static and says nothing about a deploy.
+
+    A local run has no tag, so it falls back to the working tree. The image has no `.git`
+    (`.dockerignore` excludes it), which is why this is a fallback and not the source.
+    """
+    tag = get_settings().trouveur_tag.strip()
+    if tag:
+        return tag
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(BASE.parent.parent), "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=2, check=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return result.stdout.strip()
+
+
+def commit_links(raw: str) -> tuple[str, str]:
+    """What the footer shows for `raw`, and where it links -- no link when there is nowhere real.
+
+    A tag that is not a commit (`latest`, on a fresh install) is shown as it is: "latest" is the
+    honest answer to "which commit is this?", and linking it would go to a 404.
+    """
+    if _SHA.match(raw):
+        return raw[:7], f"{REPO_URL}/commit/{raw}"
+    return raw, ""
+
+
+templates.env.globals["repo_url"] = REPO_URL
+templates.env.globals["commit"], templates.env.globals["commit_url"] = commit_links(
+    _deployed_commit()
+)
 
 
 def _posted_age(value) -> str:

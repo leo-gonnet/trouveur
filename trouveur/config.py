@@ -16,6 +16,11 @@ USER_AGENT = "trouveur/0.2 (+self-hosted job search; contact via repository owne
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=None, extra="ignore")
 
+    # What the deploy pulled. deploy.yml rewrites this in .env to the pushed commit and compose
+    # resolves the image tag from it, so it cannot disagree with the code that is running: a
+    # footer showing the wrong commit would mean the wrong container is up.
+    trouveur_tag: str = ""
+
     database_url: str = "postgresql+asyncpg://trouveur@127.0.0.1:5432/trouveur"
     session_secret: str = "dev-only-insecure-secret"
     encryption_key: str = "dev-only-insecure-encryption-key"

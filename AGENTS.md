@@ -550,6 +550,12 @@ so the deployment has no LLM spend of its own and one user's exhausted budget ca
   mid-source has seen part of its live set, and `closable_scopes` is read straight off it — so an
   interrupted source that reached the closing step could retire postings that are still live. A
   cancelled run also stops before matching, so it never spends a user's LLM credit.
+- **The footer names the deployed commit, and `TROUVEUR_TAG` is where it comes from.** deploy.yml
+  rewrites that value in the host's `.env` and compose resolves the image tag from the same
+  variable, so the footer cannot drift from the running code -- a wrong commit there means a
+  wrong container, not a wrong template. Do not add a build arg or bake a file for this: the
+  value already exists and a second source could disagree with the first. The package version
+  is static and says nothing about a deploy. A tag that is not a commit is shown unlinked.
 - **Styling lives in one file:** `web/static/app.css`, light only, one system sans-serif, the
   logo's navy on white. The logo's red-orange is used in the logo and nowhere else, and there
   is no display font: that combination read as another product's theme. No inline `<style>`
