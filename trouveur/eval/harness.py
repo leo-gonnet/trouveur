@@ -201,7 +201,7 @@ async def _rerank_needles(
       - the gap between the worst positive and the best negative is how much room a reader has
         before the two kinds start interleaving.
 
-    Reuses `rerank.score_batch`, so the prompt, the model and the provider pin are the ones
+    Reuses `rerank.score_one`, so the prompt, the model and the provider pin are the ones
     production sends. A copy of the prompt here would grade something the user never runs.
     """
     from trouveur.match import expand, llm, rerank
