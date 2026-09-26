@@ -66,6 +66,7 @@ class UserProfile(BaseModel):
     employment_types: list[EmploymentType] = Field(default_factory=list)
     min_salary_eur_year: Decimal = Decimal(0)
 
-    # Reranking is the one paid stage, so this is the one knob that decides the bill -- and, since
-    # everything reranked is shown, it is also how long the Recommendations page is.
-    rerank_limit: int = 150
+    # The user's pause on spending. Off, no paid call runs for them at all; retrieval is free
+    # and keeps going, so Search still works. Never a SCORING_FIELD: it decides whether we spend,
+    # not what a good match is, so toggling it must not invalidate a cached score.
+    scoring_enabled: bool = True

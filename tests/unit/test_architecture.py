@@ -17,7 +17,7 @@ from trouveur.db.schema import metadata
 from trouveur.sources.registry import NORMALIZERS
 
 ROOT = Path(__file__).resolve().parents[2]
-MIGRATION = ROOT / "alembic" / "versions" / "0001_pipeline_v2.py"
+MIGRATIONS = ROOT / "alembic" / "versions"
 
 
 def test_every_source_normalizer_is_registered():
@@ -34,9 +34,23 @@ def test_every_source_normalizer_is_registered():
     )
 
 
+def _tables_after_migrations() -> set[str]:
+    """Every table the chain leaves behind, applying each upgrade() in revision order.
+
+    The whole chain, not just the baseline: a table added by a later migration is as real as one
+    created in 0001, and reading only the baseline would report it as drift.
+    """
+    tables: set[str] = set()
+    for path in sorted(MIGRATIONS.glob("[0-9]*.py")):
+        upgrade = path.read_text().split("def downgrade")[0]
+        tables |= set(re.findall(r"CREATE TABLE (?:IF NOT EXISTS )?(\w+)", upgrade))
+        tables -= set(re.findall(r"DROP TABLE (?:IF EXISTS )?(\w+)", upgrade))
+    return tables
+
+
 def test_schema_and_migration_declare_the_same_tables():
     """schema.py builds queries, the migration builds the database; a drift breaks one silently."""
-    in_migration = set(re.findall(r"CREATE TABLE (\w+)", MIGRATION.read_text()))
+    in_migration = _tables_after_migrations()
     assert in_migration == set(metadata.tables), (
         f"only in migration: {sorted(in_migration - set(metadata.tables))}; "
         f"only in schema.py: {sorted(set(metadata.tables) - in_migration)}"

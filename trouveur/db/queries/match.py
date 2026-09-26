@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from trouveur.db.queries import freshness
 from trouveur.db.schema import (
     llm_score_cache,
+    user_edition_item,
     user_job_match,
     user_query_expansion,
 )
@@ -138,7 +139,11 @@ async def upsert_matches(conn: AsyncConnection, rows: Sequence[dict]) -> int:
     stmt = stmt.on_conflict_do_update(
         index_elements=[user_job_match.c.user_id, user_job_match.c.job_id],
         set_={
-            "profile_version": stmt.excluded.profile_version,
+            # NOT profile_version. It records the profile a posting was SCORED under, and
+            # retrieval runs before scoring on every row it finds again -- re-stamping it here
+            # made the rows most in need of a re-score look current, so `profile_version <
+            # :current` in pending_rerank matched nothing and a profile change kept its old
+            # scores. The repair for that used to be wiping every score the user had.
             "retrieval_score": stmt.excluded.retrieval_score,
             "dense_rank": stmt.excluded.dense_rank,
             "lexical_rank": stmt.excluded.lexical_rank,
@@ -278,43 +283,39 @@ async def apply_scores(conn: AsyncConnection, user_id: int, rows: Sequence[dict]
     )
 
 
-# An edition is keyed on `scored_at`, NOT `posted_at`. Greenhouse's discovery lag is 146 days at
-# p90, so a posting published in April and found in September would belong to an edition five
-# months old and appear in none at all. It also makes an edition self-healing.
-_EDITION_COLUMNS = """
-    j.id, j.public_id, j.url, j.title, j.company, j.posted_at, j.source,
-    j.closed_at, j.locations, f.countries, f.cities,
-    f.work_mode::text AS work_mode,
-    f.salary_min_eur_year, f.salary_max_eur_year, f.skills,
-    m.llm_score, m.llm_reason, m.llm_red_flags, m.state::text AS state
+# An edition is READ here and WRITTEN below; it is never derived. Keyed on the day it was
+# published rather than on posted_at, because Greenhouse's discovery lag is 146 days at p90 and a
+# posting published in April but found in September belongs to September's reading list.
+#
+# A closed posting stays in its edition, with the card's `closed` tag. Dropping it would shrink a
+# published day every time the world moved on, which is the opposite of what an edition is for.
+# A posting the user DISMISSED is dropped from both the list and the count, so the two agree:
+# the reader curating their own page is not the system rewriting history.
+_EDITION_STATE = """
+    LEFT JOIN user_job_match m ON m.user_id = e.user_id AND m.job_id = e.job_id
 """
-
-_EDITION_FILTER = """
-    m.user_id = :user_id
-    AND m.llm_score IS NOT NULL
-    AND m.scored_at IS NOT NULL
-    AND m.state <> 'dismissed'
-    AND j.closed_at IS NULL
-"""
+_NOT_DISMISSED = "coalesce(m.state::text, 'new') <> 'dismissed'"
 
 
 async def editions(conn: AsyncConnection, user_id: int) -> list[sa.Row]:
-    """Every day this user has recommendations for, newest first, with the profile version each
-    was scored under: editing a profile does not rewrite what Monday recommended."""
+    """Every day this user has an edition for, newest first.
+
+    The profile version comes back so the page can mark a day that was read under a profile the
+    user has since changed; a day can span two versions if the profile changed mid-day.
+    """
     return list(
         await conn.execute(
             sa.text(
                 f"""
-                SELECT m.scored_at::date AS day,
+                SELECT e.day,
                        count(*) AS postings,
-                       max(m.llm_score) AS best_score,
-                       min(m.profile_version) AS profile_version,
-                       max(m.profile_version) AS profile_version_max
-                FROM user_job_match m
-                JOIN job j ON j.id = m.job_id
-                WHERE {_EDITION_FILTER}
-                GROUP BY 1
-                ORDER BY 1 DESC
+                       min(e.profile_version) AS profile_version,
+                       max(e.profile_version) AS profile_version_max
+                FROM user_edition_item e
+                {_EDITION_STATE}
+                WHERE e.user_id = :user_id AND {_NOT_DISMISSED}
+                GROUP BY e.day
+                ORDER BY e.day DESC
                 """
             ),
             {"user_id": user_id},
@@ -322,27 +323,98 @@ async def editions(conn: AsyncConnection, user_id: int) -> list[sa.Row]:
     )
 
 
-async def edition(
-    conn: AsyncConnection, user_id: int, day: date, limit: int = 1000
-) -> list[sa.Row]:
-    """One day's recommendations, best first. No score cut: the day is the cut."""
+async def edition(conn: AsyncConnection, user_id: int, day: date) -> list[sa.Row]:
+    """One day's edition, best first. No score cut: the day is the cut.
+
+    The score, reason and red flags are the EDITION's, not user_job_match's -- that row holds the
+    current verdict, and reading it here would let a later re-score rewrite what this day said.
+    """
     return list(
         await conn.execute(
             sa.text(
                 f"""
-                SELECT {_EDITION_COLUMNS}
-                FROM user_job_match m
-                JOIN job j ON j.id = m.job_id
+                SELECT j.id, j.public_id, j.url, j.title, j.company, j.posted_at, j.source,
+                       j.closed_at, j.locations, f.countries, f.cities,
+                       f.work_mode::text AS work_mode,
+                       f.salary_min_eur_year, f.salary_max_eur_year,
+                       e.llm_score, e.llm_reason, e.llm_red_flags,
+                       coalesce(m.state::text, 'new') AS state
+                FROM user_edition_item e
+                JOIN job j ON j.id = e.job_id
                 JOIN job_facet f ON f.job_id = j.id
-                WHERE {_EDITION_FILTER}
-                  AND m.scored_at::date = CAST(:day AS date)
-                ORDER BY m.llm_score DESC, j.posted_at DESC NULLS LAST
-                LIMIT :limit
+                {_EDITION_STATE}
+                WHERE e.user_id = :user_id
+                  AND e.day = CAST(:day AS date)
+                  AND {_NOT_DISMISSED}
+                ORDER BY e.llm_score DESC, j.posted_at DESC NULLS LAST
                 """
             ),
-            {"user_id": user_id, "day": day, "limit": limit},
+            {"user_id": user_id, "day": day},
         )
     )
+
+
+async def edition_size(conn: AsyncConnection, user_id: int, day: date) -> int:
+    """How many postings a day's edition holds, so the profile form can say what a save costs."""
+    return int(
+        (
+            await conn.execute(
+                sa.text(
+                    """
+                    SELECT count(*) FROM user_edition_item
+                    WHERE user_id = :user_id AND day = CAST(:day AS date)
+                    """
+                ),
+                {"user_id": user_id, "day": day},
+            )
+        ).scalar_one()
+        or 0
+    )
+
+
+async def clear_stale_edition(
+    conn: AsyncConnection, user_id: int, day: date, profile_version: int
+) -> int:
+    """Drop `day`'s edition if it was published under a profile the user has since changed.
+
+    Only ever called for the current day, and only after the user agreed to lose it on the
+    profile form: an edition already published is a record, and a past one is never touched.
+    Rows at the CURRENT version survive, so a second run on the same day adds to the day
+    rather than restarting it.
+    """
+    return (
+        await conn.execute(
+            sa.text(
+                """
+                DELETE FROM user_edition_item
+                WHERE user_id = :user_id
+                  AND day = CAST(:day AS date)
+                  AND profile_version <> :profile_version
+                """
+            ),
+            {"user_id": user_id, "day": day, "profile_version": profile_version},
+        )
+    ).rowcount or 0
+
+
+async def publish_edition(conn: AsyncConnection, rows: Sequence[dict]) -> int:
+    """Add scored postings to a day's edition.
+
+    Conflicts on (user, day, job) do nothing, so re-running a day is idempotent. A conflict on
+    the version constraint is NOT swallowed: that one means a posting is being recommended twice
+    under one profile, which is a bug upstream rather than a repeat.
+    """
+    if not rows:
+        return 0
+    stmt = pg_insert(user_edition_item).values(list(rows))
+    stmt = stmt.on_conflict_do_nothing(
+        index_elements=[
+            user_edition_item.c.user_id,
+            user_edition_item.c.day,
+            user_edition_item.c.job_id,
+        ]
+    )
+    return (await conn.execute(stmt)).rowcount or 0
 
 
 # Every scraped posting, whatever the filters decided. Adding a score filter here would destroy

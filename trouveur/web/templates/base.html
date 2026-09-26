@@ -41,8 +41,10 @@
 {% endif %}
 <main>{% block content %}{% endblock %}</main>
 <footer class="foot">
-  <span>Trouveur {{ version }}</span>
-  <a href="https://github.com/leo-gonnet/trouveur">Source</a>
+  <span>Trouveur {{ version }}{% if commit %} &middot;
+    {%- if commit_url %} <a href="{{ commit_url }}">{{ commit }}</a>
+    {%- else %} {{ commit }}{% endif %}{% endif %}</span>
+  <a href="{{ repo_url }}">Source</a>
 </footer>
 </body>
 </html>

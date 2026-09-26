@@ -1,48 +1,11 @@
 {% extends "base.html" %}{% import "_macros.html" as m %}
 {% block title %}Recommendations · Trouveur{% endblock %}
 {% block content %}
-<div class="page-head">
-  <h1>Recommendations</h1>
-  {% if edition %}
-    <p class="hint">
-      Postings that became recommendations for you on
-      <strong>{{ edition.day.strftime('%A %d %B %Y') }}</strong>{% if is_latest %}
-      <span class="pill live">latest edition</span>{% endif %}.
-      Best first. An advert may have been published earlier — each card says how old it is.
-    </p>
-    <p class="hint">
-      {{ edition.postings }} posting{{ '' if edition.postings == 1 else 's' }}, scored under
-      profile v{{ edition.profile_version }}{% if edition.profile_version_max != edition.profile_version %}–v{{ edition.profile_version_max }}{% endif %}.
-      An edition is published once: changing your profile shapes the next one and leaves this one
-      as it was.
-    </p>
-  {% endif %}
-  <p class="hint">
-    {% if last_match %}
-      {%- set r = last_match.match %}
-      Last matched {{ last_match.finished_at.strftime('%d.%m. %H:%M') }}: {{ r.retrieved }} candidates, {{ r.scored }} scored, ${{ r.cost_usd }}.
-      {%- if r.stopped_on_budget %} Stopped at your monthly ceiling.{% endif %}
-    {% else %}
-      Not matched yet.
-    {% endif %}
-  </p>
-  <form method="post" action="/recommendations/run" class="actions">
-    <button class="primary" type="submit" {% if pending_run %}disabled{% endif %}>Match now</button>
-    {% if pending_run %}
-      <span class="hint">Matching is {{ pending_run.status }}; this page updates when it finishes.</span>
-    {% elif request.state.needs_key or paused %}
-      <span class="hint">Runs search only; nothing is scored until
-        {% if paused %}scoring is unpaused{% else %}a key is set{% endif %} in <a href="/settings">Settings</a>.</span>
-    {% else %}
-      <span class="hint">Re-rank the postings already collected, without waiting for the next scan.
-        Only postings not yet scored for your current profile cost anything.</span>
-    {% endif %}
-  </form>
-</div>
-
+{# No heading and no button: the nav already says where you are, and matching is started by the
+   daily scan, by a profile change and by adding a key -- never by pressing something here. #}
 {% if paused %}
-<p class="notice warn">Scoring is paused: Recommendations per run is 0 in
-  <a href="/settings">Settings</a>. Nothing is spent and this page stays as it is.</p>
+<p class="notice warn">Scoring is off in <a href="/settings">Settings</a>, so nothing new is being
+  scored and no money is spent. The editions below stay as they are.</p>
 {% endif %}
 
 {% if editions %}
@@ -52,7 +15,7 @@
   <select onchange="location = '/recommendations?edition=' + this.value">
     {% for row in editions %}
       <option value="{{ row.day }}" {% if edition and row.day == edition.day %}selected{% endif %}>
-        {{ row.day.strftime('%a %d %b %Y') }} — {{ row.postings }} posting{{ '' if row.postings == 1 else 's' }}
+        {{ m.edition_label(row, today, profile_version) }}
       </option>
     {% endfor %}
   </select>
@@ -67,15 +30,15 @@
   </div>
 {% elif editions %}
 <p class="empty">
-  Nothing in this edition. Nothing is lost — pick another day above, or
+  Every posting in this edition was dismissed. Nothing is lost — pick another day above, or
   <a href="/search">Search</a> shows everything collected.
 </p>
 {% else %}
 <p class="empty">
-  No editions yet. Matching runs after every scan, or now with the button above. Retrieval is
-  free and runs without a key; scoring needs an OpenRouter key in
-  <a href="/settings">Settings</a>. Meanwhile <a href="/search">Search</a> shows everything
-  collected.
+  No editions yet. One is published whenever matching runs: after the nightly scan, when you
+  change your profile, and when you add a key. Search is free and needs no key; scoring needs an
+  OpenRouter key in <a href="/settings">Settings</a>. Meanwhile <a href="/search">Search</a>
+  shows everything collected.
 </p>
 {% endif %}
 {% endblock %}

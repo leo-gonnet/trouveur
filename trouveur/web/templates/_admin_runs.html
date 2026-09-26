@@ -3,7 +3,7 @@
   <tr><th>Queued</th><th>Trigger</th><th>Status</th><th>Scope</th><th>Result</th></tr>
   {% for run in runs %}
   <tr>
-    <td>{{ run.queued_at.strftime('%m-%d %H:%M') }}</td>
+    <td>{{ run.queued_at | localtime('%m-%d %H:%M') }}</td>
     <td>{{ run.trigger }}</td>
     <td>
       <span class="pill {% if run.status == 'success' %}good{% elif run.status == 'failed' %}bad{% endif %}">

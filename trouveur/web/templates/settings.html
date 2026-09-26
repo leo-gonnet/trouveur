@@ -22,8 +22,6 @@
       {% endif %}
       <p class="hint">Scored with <code>{{ model }}</code>{% if provider %} on <code>{{ provider }}</code>{% endif %}.
         The model is chosen by evaluation, not per user, so every score here is comparable.</p>
-      <label>Monthly ceiling <span class="hint">US dollars, the currency OpenRouter bills in. Checked before every batch, not after.</span>
-        <input name="monthly_budget_usd" value="{{ credential.monthly_budget_usd if credential else '5' }}"></label>
       <p class="actions">
         <button class="primary" type="submit">Save</button>
         {% if credential %}
@@ -34,14 +32,23 @@
   </section>
 
   <section class="section">
-    <div class="section-head"><h2>Volume</h2></div>
-    <p class="hint">After every scan, a matching run for you: search pulls candidates out of the
-      corpus for free, and the model reads and scores the best of them on your key. Only scored postings reach
-      <a href="/recommendations">Recommendations</a>.</p>
-    <form method="post" action="/settings/volume">
-      <label>Recommendations per run <span class="hint">how many postings the model scores each run, best candidates first. This is the only paid step and it is the length of your list. Changing it never re-scores anything; 0 pauses scoring.</span>
-        <input name="rerank_limit" type="number" min="0" max="1000" value="{{ profile.rerank_limit }}"></label>
-      <p class="actions"><button class="primary" type="submit">Save</button></p>
+    <div class="section-head"><h2>Recommendations</h2></div>
+    <form method="post" action="/settings/scoring">
+      {# Submits itself: a switch that needed a Save button would be a tick box. #}
+      <label class="switch">
+        <input type="checkbox" name="scoring_enabled" value="on" onchange="this.form.submit()"
+               {% if profile.scoring_enabled %}checked{% endif %}><span class="track"></span>
+        Score new postings for me
+      </label>
+      <span class="hint">Off, nothing is scored and nothing is spent. Search keeps working.</span>
+      <label>Monthly ceiling
+        <span class="hint">US dollars. Checked before every batch, not after.</span>
+        <input name="monthly_budget_usd" inputmode="decimal"
+               value="{{ '%.2f' % credential.monthly_budget_usd if credential else monthly_budget_usd }}"
+               {% if not profile.scoring_enabled %}disabled{% endif %}></label>
+      {% if profile.scoring_enabled %}
+        <p class="actions"><button class="primary" type="submit">Save ceiling</button></p>
+      {% endif %}
     </form>
   </section>
 

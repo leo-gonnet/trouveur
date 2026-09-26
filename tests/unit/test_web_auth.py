@@ -86,3 +86,18 @@ async def test_healthz_needs_no_session():
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         assert (await client.get("/healthz")).status_code == 200
+
+
+def test_the_footer_links_a_commit_and_never_invents_a_link_for_a_tag():
+    """The footer says which commit is deployed, so a reader can check it against the repository.
+
+    `TROUVEUR_TAG` is whatever the host's .env holds: the deploy writes a commit there, but a
+    fresh install ships `latest`. Linking that would send the reader to a 404, and dropping it
+    would leave the footer silent about an instance that is not pinned to a commit at all.
+    """
+    from trouveur.web.app import REPO_URL, commit_links
+
+    sha = "9f1c2ab3d4e5f60718293a4b5c6d7e8f90a1b2c3"
+    assert commit_links(sha) == ("9f1c2ab", f"{REPO_URL}/commit/{sha}")
+    assert commit_links("latest") == ("latest", "")
+    assert commit_links("") == ("", "")

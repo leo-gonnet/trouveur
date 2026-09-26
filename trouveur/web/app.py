@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import importlib.metadata
 import logging
+import re
+import subprocess
 from collections.abc import Iterable
 from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
@@ -21,6 +23,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from jinja2 import StrictUndefined
 
+from trouveur import clock
 from trouveur.config import get_settings
 from trouveur.crypto import encrypt, fingerprint
 from trouveur.db.engine import connect
@@ -28,6 +31,7 @@ from trouveur.db.queries import admin as admin_q
 from trouveur.db.queries import freshness
 from trouveur.db.queries import match as match_q
 from trouveur.db.queries import users as users_q
+from trouveur.match import rerank
 from trouveur.match.pipeline import profile_from_row
 from trouveur.models import (
     BACKGROUND_MAX_CHARS,
@@ -53,15 +57,73 @@ app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")
 # suite.
 templates = Jinja2Templates(directory=BASE / "templates")
 templates.env.undefined = StrictUndefined
+def _localtime(value, fmt: str = "%Y-%m-%d %H:%M") -> str:
+    """A stored UTC instant, on the reader's wall clock. Every displayed time goes through this:
+    rendered raw, a scan that ran at 09:00 in Vienna reads 07:00 and says nothing about why."""
+    if value is None:
+        return "\u2014"
+    return clock.to_local(value).strftime(fmt)
+
+
+templates.env.filters["localtime"] = _localtime
 templates.env.globals["version"] = importlib.metadata.version("trouveur")
+templates.env.globals["timezone"] = get_settings().timezone
+
+REPO_URL = "https://github.com/leo-gonnet/trouveur"
+_SHA = re.compile(r"\A[0-9a-f]{7,40}\Z")
+
+
+def _deployed_commit() -> str:
+    """Which commit this instance is running.
+
+    `TROUVEUR_TAG` is what deploy.yml writes into `.env` on the host AND what compose resolves
+    the image tag from, so the footer cannot drift from the running code: a wrong commit here
+    would mean a wrong container. The package version is static and says nothing about a deploy.
+
+    A local run has no tag, so it falls back to the working tree. The image has no `.git`
+    (`.dockerignore` excludes it), which is why this is a fallback and not the source.
+    """
+    tag = get_settings().trouveur_tag.strip()
+    if tag:
+        return tag
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(BASE.parent.parent), "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=2, check=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return result.stdout.strip()
+
+
+def commit_links(raw: str) -> tuple[str, str]:
+    """What the footer shows for `raw`, and where it links -- no link when there is nowhere real.
+
+    A tag that is not a commit (`latest`, on a fresh install) is shown as it is: "latest" is the
+    honest answer to "which commit is this?", and linking it would go to a 404.
+    """
+    if _SHA.match(raw):
+        return raw[:7], f"{REPO_URL}/commit/{raw}"
+    return raw, ""
+
+
+templates.env.globals["repo_url"] = REPO_URL
+templates.env.globals["commit"], templates.env.globals["commit_url"] = commit_links(
+    _deployed_commit()
+)
 
 
 def _posted_age(value) -> str:
     """How old a posting is, in words. On every card, because an edition is keyed on the day a
-    posting became a recommendation, not the day it was published."""
+    posting became a recommendation, not the day it was published.
+
+    Calendar days in the reader's zone, not elapsed hours: measured as elapsed time, something
+    posted at 23:00 last night was "posted today" all through this morning, because only eleven
+    hours had passed.
+    """
     if value is None:
         return "date not stated"
-    days = (datetime.now(UTC) - value).days
+    days = (clock.today() - clock.to_local(value).date()).days
     if days <= 0:
         return "posted today"
     if days == 1:
@@ -177,24 +239,19 @@ async def logout():
 
 @app.get("/recommendations", response_class=HTMLResponse)
 async def recommendations(request: Request, edition: str = ""):
-    """One day's recommendations. The latest by default; older ones stay reachable.
+    """One day's edition. The latest by default; older ones stay reachable and never change.
 
     A day rather than one growing list, which had no time axis: a strong posting from three weeks
-    ago outranked everything that arrived this morning until it was dismissed.
+    ago outranked everything that arrived this morning until it was dismissed. There is nothing
+    to press here -- matching is started by the daily scan, by a profile change and by adding a
+    key, so the page is a reading list rather than a console.
     """
     session = request.state.session
     async with connect() as conn:
         profile_row = await users_q.get_profile(conn, session["uid"])
-        # Everything reranked is shown: volume is bounded once, by rerank_limit. There is no
-        # score threshold, and re-adding one is a regression.
-        limit = profile_row.rerank_limit if profile_row else 150
         available = await match_q.editions(conn, session["uid"])
         chosen = _chosen_edition(edition, available)
-        jobs = (
-            await match_q.edition(conn, session["uid"], chosen.day, limit) if chosen else []
-        )
-        pending_run = await admin_q.pending_match_run(conn, session["uid"])
-        last_match = await admin_q.last_match_for_user(conn, session["uid"])
+        jobs = await match_q.edition(conn, session["uid"], chosen.day) if chosen else []
     days = [row.day for row in available]
     index = days.index(chosen.day) if chosen else -1
     return templates.TemplateResponse(
@@ -207,12 +264,10 @@ async def recommendations(request: Request, edition: str = ""):
             "edition": chosen,
             "older": days[index + 1] if 0 <= index < len(days) - 1 else None,
             "newer": days[index - 1] if index > 0 else None,
-            "is_latest": index == 0,
-            "paused": limit == 0,
-            "pending_run": pending_run,
-            "last_match": last_match,
+            "paused": profile_row is not None and not profile_row.scoring_enabled,
+            "profile_version": profile_row.version if profile_row else 1,
             "username": session["u"],
-            "today": datetime.now(UTC).date(),
+            "today": clock.today(),
         },
     )
 
@@ -232,16 +287,11 @@ def _chosen_edition(requested: str, available: list):
     return available[0]
 
 
-@app.post("/recommendations/run")
-async def recommendations_run(request: Request):
-    """Queue a match-only run for this user. The runner executes it; the web app never matches."""
-    session = request.state.session
-    async with connect() as conn:
-        if await admin_q.pending_match_run(conn, session["uid"]) is None:
-            await admin_q.enqueue_run(
-                conn, trigger=RunTrigger.MANUAL, match_user_id=session["uid"]
-            )
-    return RedirectResponse("/recommendations", status_code=303)
+async def _queue_match(conn, user_id: int) -> None:
+    """Ask the runner to match this user. One at a time: a second would re-read the same rows
+    on the same key and bill for it. The web app never matches, it only enqueues."""
+    if await admin_q.pending_match_run(conn, user_id) is None:
+        await admin_q.enqueue_run(conn, trigger=RunTrigger.MANUAL, match_user_id=user_id)
 
 
 @app.get("/search", response_class=HTMLResponse)
@@ -385,8 +435,40 @@ async def profile_save(
         }
     except (UnknownChoice, FieldTooLong) as exc:
         return HTMLResponse(str(exc), status_code=400)
+
+    form = await request.form()
     async with connect() as conn:
+        current = await users_q.get_profile(conn, session["uid"])
+        rescore = users_q.changes_scoring(current, values)
+        today = clock.today()
+        # Today's edition is the only one a save may replace, and only with the user's word for
+        # it. Every older edition is a published record and is never touched, so there is
+        # nothing to ask about on a day that has not been published yet.
+        replacing = await match_q.edition_size(conn, session["uid"], today) if rescore else 0
+        if replacing and form.get("confirm") != "yes":
+            pending = await match_q.count_pending_rerank(
+                conn, session["uid"], (current.version if current else 0) + 1
+            )
+            return templates.TemplateResponse(
+                request,
+                "profile_confirm.html",
+                {
+                    "active": "profile",
+                    "username": session["u"],
+                    "replacing": replacing,
+                    "rescore_estimate": pending,
+                    # Re-posted verbatim, so nothing the user typed is lost on the way through
+                    # this page and no field list has to be kept in step with the form.
+                    "fields": [
+                        (key, value)
+                        for key, value in form.multi_items()
+                        if key != "confirm" and isinstance(value, str)
+                    ],
+                },
+            )
         version, rescore = await users_q.save_profile(conn, session["uid"], values)
+        if rescore:
+            await _queue_match(conn, session["uid"])
     log.info(
         "profile saved for user %s (version %d, rescore=%s)", session["uid"], version, rescore
     )
@@ -409,6 +491,8 @@ async def settings_form(request: Request):
             "active": "settings",
             "model": settings.default_llm_model,
             "provider": settings.default_llm_provider or "",
+            "rerank_limit": rerank.RERANK_LIMIT,
+            "monthly_budget_usd": settings.monthly_budget_usd,
             "profile": profile,
             # Never the key itself, not even to the user who set it.
             "credential": credential,
@@ -420,40 +504,63 @@ async def settings_form(request: Request):
 
 
 @app.post("/settings", response_class=HTMLResponse)
-async def settings_save(
-    request: Request,
-    api_key: str = Form(""),
-    monthly_budget_usd: str = Form("5"),
-):
+async def settings_save(request: Request, api_key: str = Form("")):
+    """Store a key. The ceiling is not a form field: it is an installation setting, copied onto
+    the credential here so the batch check has it on the row it already reads."""
     session = request.state.session
     settings = get_settings()
     async with connect() as conn:
-        budget = _decimal(monthly_budget_usd, Decimal(5))
         key = api_key.strip()
-        if key:
-            await users_q.save_credential(
-                conn,
-                session["uid"],
-                api_key_encrypted=encrypt(key),
-                api_key_fingerprint=fingerprint(key),
-                model=settings.default_llm_model,
-                provider_pin=settings.default_llm_provider,
-                monthly_budget_usd=budget,
-            )
-        else:
-            # Empty means "leave the stored key alone", not "delete it".
-            existing = await users_q.get_credential(conn, session["uid"])
-            if existing is not None:
-                await users_q.update_budget(conn, session["uid"], budget)
+        # Empty means "leave the stored key alone", not "delete it".
+        if not key:
+            return RedirectResponse("/settings?saved=1", status_code=303)
+        existing = await users_q.get_credential(conn, session["uid"])
+        await users_q.save_credential(
+            conn,
+            session["uid"],
+            api_key_encrypted=encrypt(key),
+            api_key_fingerprint=fingerprint(key),
+            model=settings.default_llm_model,
+            provider_pin=settings.default_llm_provider,
+            # Replacing a key is not a reason to forget the ceiling the user set on it; the
+            # installation default is the starting value for a FIRST key only.
+            monthly_budget_usd=(
+                existing.monthly_budget_usd if existing else settings.monthly_budget_usd
+            ),
+        )
+        # Usually the last step of setting up, and the first thing that makes scoring
+        # possible at all. Without this the page stays empty until the next daily scan.
+        await _queue_match(conn, session["uid"])
     return RedirectResponse("/settings?saved=1", status_code=303)
 
 
-@app.post("/settings/volume", response_class=HTMLResponse)
-async def settings_volume_save(request: Request, rerank_limit: int = Form(150)):
+@app.post("/settings/scoring", response_class=HTMLResponse)
+async def settings_scoring_save(
+    request: Request,
+    scoring_enabled: str = Form(""),
+    monthly_budget_usd: str = Form(""),
+):
+    """The switch and the ceiling it governs. Neither is a SCORING_FIELD, so saving here never
+    bumps the profile version or bills a re-score."""
     session = request.state.session
-    values = {"rerank_limit": min(max(rerank_limit, 0), 1000)}
+    enabled = scoring_enabled == "on"
     async with connect() as conn:
-        await users_q.save_profile(conn, session["uid"], values)
+        previous = await users_q.get_profile(conn, session["uid"])
+        was_enabled = previous.scoring_enabled if previous else True
+        await users_q.save_profile(conn, session["uid"], {"scoring_enabled": enabled})
+
+        # The form disables the ceiling while scoring is off, and a disabled input submits
+        # nothing at all -- so an absent value means "keep it", never "reset it to the default".
+        # Refused outright while scoring is off, rather than only hidden in the markup.
+        if enabled and monthly_budget_usd.strip():
+            credential = await users_q.get_credential(conn, session["uid"])
+            if credential is not None:
+                ceiling = _decimal(monthly_budget_usd, credential.monthly_budget_usd)
+                await users_q.update_budget(conn, session["uid"], max(ceiling, Decimal(0)))
+
+        # Only the switch turning back on is a reason to run; editing the ceiling is not.
+        if enabled and not was_enabled:
+            await _queue_match(conn, session["uid"])
     return RedirectResponse("/settings?saved=1", status_code=303)
 
 

@@ -19,6 +19,12 @@ from trouveur.models import UserProfile
 log = logging.getLogger(__name__)
 
 BATCH_SIZE = 10
+
+# How many postings the model reads per run, best retrieval score first, and so also how long the
+# Recommendations page is. A constant rather than a per-user setting: it was one number doing
+# three jobs -- list length, bill and pause -- and the bill is already capped, in dollars, by the
+# user's monthly ceiling. What is left, stopping spending, is now an explicit switch.
+RERANK_LIMIT = 150
 _DESCRIPTION_CHARS = 1500
 # Billed as generated, not as budgeted, so headroom is free.
 _MAX_TOKENS = 3000

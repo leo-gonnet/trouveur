@@ -1,0 +1,27 @@
+{% extends "base.html" %}{% block title %}Confirm · Trouveur{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Replace today's edition?</h1>
+</div>
+
+<p class="notice warn">
+  You changed something that decides what a good match is, and today's edition already holds
+  <strong>{{ replacing }}</strong> posting{{ '' if replacing == 1 else 's' }} read under your old
+  profile. Saving replaces them with what the new profile picks. Every earlier edition is kept.
+</p>
+
+<p class="hint">
+  About <strong>{{ rescore_estimate }}</strong> postings would be scored again on your own key.
+  A posting already scored under the new profile is never scored twice.
+</p>
+
+{# Posted back exactly as they arrived, so passing through this page cannot alter the profile. #}
+<form method="post" action="/profile" class="actions">
+  {% for name, value in fields %}
+    <input type="hidden" name="{{ name }}" value="{{ value }}">
+  {% endfor %}
+  <input type="hidden" name="confirm" value="yes">
+  <button class="primary" type="submit">Save and replace today's edition</button>
+  <a class="btn ghost" href="/profile">Cancel</a>
+</form>
+{% endblock %}

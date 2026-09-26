@@ -6,6 +6,8 @@ read a secret from a file inside the repo (see AGENTS.md).
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 USER_AGENT = "trouveur/0.2 (+self-hosted job search; contact via repository owner)"
@@ -13,6 +15,17 @@ USER_AGENT = "trouveur/0.2 (+self-hosted job search; contact via repository owne
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=None, extra="ignore")
+
+    # The wall clock this installation reads. Every timestamp is STORED in UTC and stays that
+    # way; this is what UTC is turned into at the edges -- displayed times, the scan hour the
+    # operator typed, and the day an edition is published into. Not per user: the nightly scan is
+    # shared, so its hour needs one answer, and the corpus is one region's boards.
+    timezone: str = "Europe/Vienna"
+
+    # What the deploy pulled. deploy.yml rewrites this in .env to the pushed commit and compose
+    # resolves the image tag from it, so it cannot disagree with the code that is running: a
+    # footer showing the wrong commit would mean the wrong container is up.
+    trouveur_tag: str = ""
 
     database_url: str = "postgresql+asyncpg://trouveur@127.0.0.1:5432/trouveur"
     session_secret: str = "dev-only-insecure-secret"
@@ -24,6 +37,11 @@ class Settings(BaseSettings):
     # Unpinned, OpenRouter spreads one model across backends at a wide price spread and differing
     # quantisation, so neither cost nor scores are reproducible.
     default_llm_provider: str | None = "deepinfra/fp8"
+    # The spending ceiling, in USD, the currency OpenRouter bills in -- an EUR setting would put a
+    # stale exchange rate between the meter and the cap. Installation-wide for the same reason as
+    # the model: the per-user control is the on/off switch, and a ceiling a user can raise is not
+    # a ceiling. Copied onto a credential when it is saved, which is what the batch check reads.
+    monthly_budget_usd: Decimal = Decimal(5)
     # Backends vary widely in latency, so http_timeout_seconds is far too short here.
     llm_timeout_seconds: float = 300.0
 

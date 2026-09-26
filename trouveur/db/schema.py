@@ -228,7 +228,11 @@ user_profile = sa.Table(
     sa.Column("seniorities", ARRAY(sa.Text), nullable=False, server_default="{}"),
     sa.Column("employment_types", ARRAY(sa.Text), nullable=False, server_default="{}"),
     sa.Column("min_salary_eur_year", sa.Numeric, nullable=False, server_default="0"),
-    sa.Column("rerank_limit", sa.Integer, nullable=False, server_default="150"),
+    # The one cost control the user touches. Off means no paid call of any kind runs for
+    # them -- scoring, and the query expansion that is also billed. Retrieval stays free and
+    # keeps working, so Search is unaffected. Not a SCORING_FIELD: it changes whether we
+    # spend, never what a good match is, so flipping it must not invalidate a cached score.
+    sa.Column("scoring_enabled", sa.Boolean, nullable=False, server_default="true"),
     sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False,
               server_default=sa.func.now()),
 )
@@ -284,6 +288,34 @@ user_job_match = sa.Table(
     sa.Column("state_changed_at", sa.DateTime(timezone=True)),
     sa.Column("created_at", sa.DateTime(timezone=True), nullable=False,
               server_default=sa.func.now()),
+)
+
+# A published edition: what this user was shown on one day, frozen.
+#
+# The score is copied here rather than read back from user_job_match, which holds only the
+# CURRENT verdict. That duplication is the whole point: re-scoring under a new profile must not
+# rewrite what an earlier day said. Keyed on the day it was published, never on posted_at --
+# Greenhouse's discovery lag is 146 days at p90, so a posting published in April and found in
+# September would otherwise belong to an edition five months old.
+user_edition_item = sa.Table(
+    "user_edition_item",
+    metadata,
+    sa.Column("user_id", sa.BigInteger, primary_key=True),
+    sa.Column("day", sa.Date, primary_key=True),
+    sa.Column("job_id", sa.BigInteger, primary_key=True),
+    sa.Column("profile_version", sa.Integer, nullable=False),
+    sa.Column("llm_score", sa.SmallInteger, nullable=False),
+    sa.Column("llm_reason", sa.Text, nullable=False, server_default=""),
+    sa.Column("llm_red_flags", JSONB, nullable=False, server_default=sa.text("'[]'::jsonb")),
+    sa.Column("created_at", sa.DateTime(timezone=True), nullable=False,
+              server_default=sa.func.now()),
+    # One posting reaches a user once per profile version, ever: only changing the profile can
+    # bring it back. pending_rerank already declines to re-score it, but that is a WHERE clause
+    # someone can edit, and a posting silently recommended twice reads as the system repeating
+    # itself. The database refuses it instead.
+    sa.UniqueConstraint(
+        "user_id", "job_id", "profile_version", name="uq_edition_item_once_per_version"
+    ),
 )
 
 # Cached by (content_hash, user, profile_version): a posting is scored once per profile, ever.

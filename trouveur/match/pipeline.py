@@ -13,6 +13,7 @@ from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from trouveur import clock
 from trouveur.config import Settings, get_settings
 from trouveur.crypto import CredentialError, decrypt
 from trouveur.db.engine import connect
@@ -33,6 +34,7 @@ class MatchReport:
     retrieved: int = 0
     scored: int = 0
     from_cache: int = 0
+    published: int = 0
     cost_usd: Decimal = Decimal(0)
     stopped_on_budget: bool = False
     errors: list[str] = field(default_factory=list)
@@ -41,6 +43,7 @@ class MatchReport:
         return (
             f"user={self.user_id} queries={self.queries} retrieved={self.retrieved} "
             f"scored={self.scored} cached={self.from_cache} "
+            f"published={self.published} "
             f"cost=${self.cost_usd:.4f}"
             + (" [budget reached]" if self.stopped_on_budget else "")
         )
@@ -80,6 +83,11 @@ async def run_for_user(user_id: int, settings: Settings | None = None) -> MatchR
             return report
         profile = profile_from_row(profile_row)
         credential = await users_q.get_credential(conn, user_id)
+        if not profile.scoring_enabled:
+            # The user's pause. Every paid path in this module is already gated on a credential,
+            # so dropping it here stops scoring AND the billed query expansion in one place.
+            # Retrieval is free and still runs, which is what keeps Search working while paused.
+            credential = None
         expansion = await _queries(conn, settings, profile, credential, report)
 
     queries, adverts = expansion.queries, expansion.adverts
@@ -178,7 +186,10 @@ async def _queries(
 
     combined = expand.combine(deterministic, generated)
     expansion = Expansion(queries=combined, adverts=adverts, background_summary=summary)
-    if combined:
+    # Only a full expansion is worth keeping. Caching the deterministic floor -- which is what a
+    # run with no key, or with scoring paused, produces -- would pin this profile version to it
+    # for ever, so adding a key later would silently buy nothing.
+    if combined and credential is not None:
         await match_q.put_query_expansion(
             conn, profile.user_id, profile.version, QUERY_EXPANSION_VERSION, expansion
         )
@@ -225,40 +236,93 @@ async def _rerank(
     *,
     background: str = "",
 ) -> None:
+    """Score what is pending, then publish the day's edition from whatever was scored."""
+    scored = await _score_pending(
+        conn, settings, profile, credential, report, background=background
+    )
+    if not scored:
+        return
+    await _publish(conn, profile, report, scored)
+
+
+async def _publish(
+    conn: AsyncConnection, profile: UserProfile, report, scored: list[dict]
+) -> None:
+    """Write today's edition.
+
+    The clear and the insert share this transaction on purpose: a run that dies between them
+    would otherwise delete a published day and put nothing back in its place.
+    """
+    # The reader's day, not the server's: an edition published at 01:00 in Vienna belongs to
+    # that morning's reading, not to the day UTC was still on. Decided here and stored, because
+    # the page must not recompute a published day.
+    day = clock.today()
+    await match_q.clear_stale_edition(conn, profile.user_id, day, profile.version)
+    report.published = await match_q.publish_edition(
+        conn,
+        [
+            {
+                "user_id": profile.user_id,
+                "day": day,
+                "job_id": row["job_id"],
+                "profile_version": profile.version,
+                "llm_score": row["score"],
+                "llm_reason": row["reason"],
+                "llm_red_flags": row["red_flags"],
+            }
+            for row in scored
+        ],
+    )
+
+
+async def _score_pending(
+    conn: AsyncConnection,
+    settings: Settings,
+    profile: UserProfile,
+    credential,
+    report,
+    *,
+    background: str = "",
+) -> list[dict]:
+    """Every posting this run put a score on, from the cache or from the model.
+
+    Returned rather than published here, so that a run cut short by the ceiling, a bad key or a
+    failed batch still publishes what it did manage to score.
+    """
+    scored: list[dict] = []
     pending = await match_q.pending_rerank(
-        conn, profile.user_id, profile.version, profile.rerank_limit
+        conn, profile.user_id, profile.version, rerank.RERANK_LIMIT
     )
     if not pending:
-        return
+        return scored
 
     cached = await match_q.cached_scores(
         conn, profile.user_id, profile.version, [row.content_hash for row in pending]
     )
     uncached = []
-    applied = []
     for row in pending:
         hit = cached.get(row.content_hash)
         if hit is None:
             uncached.append(row)
             continue
-        applied.append(
+        scored.append(
             {
                 "job_id": row.job_id, "score": hit.score, "reason": hit.reason,
                 "red_flags": hit.red_flags, "profile_version": profile.version,
             }
         )
-    if applied:
-        await match_q.apply_scores(conn, profile.user_id, applied)
-        report.from_cache = len(applied)
+    if scored:
+        await match_q.apply_scores(conn, profile.user_id, scored)
+        report.from_cache = len(scored)
 
     if not uncached:
-        return
+        return scored
 
     try:
         api_key = decrypt(credential.api_key_encrypted)
     except CredentialError as exc:
         report.errors.append(str(exc))
-        return
+        return scored
 
     spend_row = await users_q.month_spend(conn, profile.user_id)
     spent = Decimal(spend_row.cost_usd) if spend_row else Decimal(0)
@@ -319,3 +383,6 @@ async def _rerank(
         await match_q.apply_scores(conn, profile.user_id, updates)
         await match_q.put_cached_scores(conn, cache_rows)
         report.scored += len(updates)
+        scored.extend(updates)
+
+    return scored
