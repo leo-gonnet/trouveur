@@ -15,7 +15,6 @@ from collections.abc import Iterable
 from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Annotated
 
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -37,11 +36,8 @@ from trouveur.models import (
     BACKGROUND_MAX_CHARS,
     COUNTRY_NAMES,
     LANGUAGES,
-    EmploymentType,
     RunTrigger,
-    Seniority,
     UserState,
-    WorkMode,
 )
 from trouveur.sources.registry import NORMALIZERS
 from trouveur.web import auth
@@ -360,17 +356,6 @@ async def set_state(request: Request, job_id: int, state: str = Form(...)):
     )
 
 
-# UNKNOWN is offered on purpose: a hard filter drops every posting whose facet is unstated the
-# moment it is set, and this is how a user keeps them.
-_OPTIONS = {
-    enum: [
-        (member.value, "not stated" if member == "unknown" else member.replace("_", " "))
-        for member in enum
-    ]
-    for enum in (WorkMode, Seniority, EmploymentType)
-}
-
-
 @app.get("/profile", response_class=HTMLResponse)
 async def profile_form(request: Request):
     session = request.state.session
@@ -390,9 +375,6 @@ async def profile_form(request: Request):
             "country_names": COUNTRY_NAMES,
             "language_names": LANGUAGES,
             "background_max_chars": BACKGROUND_MAX_CHARS,
-            "work_mode_options": _OPTIONS[WorkMode],
-            "seniority_options": _OPTIONS[Seniority],
-            "employment_type_options": _OPTIONS[EmploymentType],
         },
     )
 
@@ -408,10 +390,8 @@ async def profile_save(
     must_have: str = Form(""),
     keywords: str = Form(""),
     countries: str = Form(""),
+    remote_anywhere: str = Form(""),
     cities: str = Form(""),
-    work_modes: Annotated[list[str] | None, Form()] = None,
-    seniorities: Annotated[list[str] | None, Form()] = None,
-    employment_types: Annotated[list[str] | None, Form()] = None,
     min_salary_eur_year: str = Form("0"),
 ):
     session = request.state.session
@@ -425,12 +405,10 @@ async def profile_save(
             "must_have": _lines(must_have),
             "keywords": _lines(keywords),
             "countries": _choices(_lines(countries), COUNTRY_NAMES, "country"),
+            # An unticked checkbox submits nothing, so absence is False here -- unlike the
+            # scoring ceiling, where a disabled input's absence means "keep what is set".
+            "remote_anywhere": remote_anywhere == "yes",
             "cities": _lines(cities),
-            "work_modes": _choices(work_modes or [], WorkMode, "work mode"),
-            "seniorities": _choices(seniorities or [], Seniority, "seniority"),
-            "employment_types": _choices(
-                employment_types or [], EmploymentType, "employment type"
-            ),
             "min_salary_eur_year": _decimal(min_salary_eur_year, Decimal(0)),
         }
     except (UnknownChoice, FieldTooLong) as exc:

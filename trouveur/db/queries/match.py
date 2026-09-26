@@ -21,20 +21,25 @@ from trouveur.db.schema import (
 )
 from trouveur.models import Expansion
 
-_HARD_FILTERS = f"""
+# The ONE filter applied before ranking, and deliberately the only one. Every other preference a
+# user states -- cities, salary, languages -- reaches the reranker as text instead, because a rule
+# that rejected a posting here hid it from the reader with no way to find out it existed. The four
+# enum filters this replaced (work mode, seniority, employment type, salary) each also dropped
+# every posting whose facet was unstated, which is why the form had to offer a "not stated" tick
+# box to undo the filter the user had just set.
+#
+# Unstated location passes: a posting nobody parsed a country out of is not a posting somewhere
+# else. Fully remote passes wherever it is, because for a role with no office the country named
+# says nothing about whether the reader can take it -- whether it is remote *for them* is in the
+# description, which the reranker reads.
+_ELIGIBLE = f"""
     j.closed_at IS NULL
     AND {freshness.sql("j")}
-    AND (cardinality(CAST(:countries AS text[])) = 0 OR f.countries && CAST(:countries AS text[]))
-    AND (cardinality(CAST(:work_modes AS text[])) = 0
-         OR f.work_mode::text = ANY(CAST(:work_modes AS text[])))
-    AND (cardinality(CAST(:seniorities AS text[])) = 0
-         OR f.seniority::text = ANY(CAST(:seniorities AS text[])))
-    AND (cardinality(CAST(:employment_types AS text[])) = 0
-         OR f.employment_type::text = ANY(CAST(:employment_types AS text[])))
     AND (
-        CAST(:min_salary AS numeric) <= 0
-        OR f.salary_max_eur_year IS NULL
-        OR f.salary_max_eur_year >= CAST(:min_salary AS numeric)
+        cardinality(CAST(:countries AS text[])) = 0
+        OR f.countries && CAST(:countries AS text[])
+        OR cardinality(f.countries) = 0
+        OR (CAST(:remote_anywhere AS boolean) AND f.work_mode = 'remote')
     )
 """
 
@@ -52,7 +57,7 @@ SELECT j.id AS job_id
 FROM job_embedding e
 JOIN job j ON j.id = e.job_id
 JOIN job_facet f ON f.job_id = j.id
-WHERE {_HARD_FILTERS}
+WHERE {_ELIGIBLE}
   AND e.{{column}} IS NOT NULL
 ORDER BY e.{{column}} <=> CAST(:vector AS halfvec)
 LIMIT :limit
@@ -70,7 +75,7 @@ _LEXICAL_SQL = f"""
 SELECT j.id AS job_id
 FROM job j
 JOIN job_facet f ON f.job_id = j.id
-WHERE {_HARD_FILTERS}
+WHERE {_ELIGIBLE}
   AND (
       j.search_de @@ websearch_to_tsquery('german', :query)
       OR j.search_fold LIKE '%' || lower(f_unaccent(:query)) || '%'
@@ -86,10 +91,7 @@ def _filter_params(profile: Any, fresh_since: datetime) -> dict[str, Any]:
     return {
         "fresh_since": fresh_since,
         "countries": list(profile.countries or []),
-        "work_modes": [str(mode) for mode in (profile.work_modes or [])],
-        "seniorities": [str(level) for level in (profile.seniorities or [])],
-        "employment_types": [str(kind) for kind in (profile.employment_types or [])],
-        "min_salary": float(profile.min_salary_eur_year or 0),
+        "remote_anywhere": bool(profile.remote_anywhere),
     }
 
 

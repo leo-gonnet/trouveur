@@ -7,7 +7,7 @@
    scrolls.
 
    Components: .topbar .nav .banner .page-head .section .section-head .grid .kpis .kpi table .pill
-   .score button/.btn(.primary .danger .ghost) label/input .field .tags .checks .switch
+   .score button/.btn(.primary .danger .ghost) label/input .field .tags .switch
    .notice .empty .bar
    .results .job .job-main .states .editions .pager .searchbar .login .foot
    .doc .diagram (the How it works page only) */
@@ -205,9 +205,6 @@ form.inline { display: inline; }
 .tags-field input[aria-invalid=true] { color: var(--bad); }
 .tags-field .pill button { all: unset; cursor: pointer; line-height: 1; padding: 0 2px; color: var(--fg-muted); }
 .tags-field .pill button:hover { color: var(--bad); }
-.checks { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-4); min-height: var(--control);
-          align-items: center; }
-.checks .check { margin: 0; font-weight: 400; }
 
 .searchbar { display: flex; gap: var(--space-3); flex-wrap: wrap; align-items: center;
              margin-bottom: var(--space-5); }

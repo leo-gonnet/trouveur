@@ -151,32 +151,55 @@ def test_the_digest_is_bounded_by_count_and_not_by_score():
 
 
 def test_retrieval_filters_exclude_closed_postings():
-    from trouveur.db.queries.match import _HARD_FILTERS
+    from trouveur.db.queries.match import _ELIGIBLE
 
-    assert "j.closed_at IS NULL" in _HARD_FILTERS
+    assert "j.closed_at IS NULL" in _ELIGIBLE
 
 
-def test_salary_filter_never_rejects_a_posting_that_stated_nothing():
-    """A missing salary is not a low salary.
+def test_location_is_the_only_hard_filter():
+    """Nothing but location may narrow the query before ranking.
 
-    Rejecting on absence would drop most of the corpus, since the majority of adverts state no
-    figure at all.
+    Each enum filter that used to sit here dropped every posting whose facet was unstated, which
+    hid postings the reader had no way to learn existed. Preferences reach the reranker as prompt
+    text instead, so reintroducing one of these is a silent recall loss, not a stricter search.
     """
-    from trouveur.db.queries.match import _HARD_FILTERS
+    from trouveur.db.queries.match import _ELIGIBLE
 
-    assert "f.salary_max_eur_year IS NULL" in _HARD_FILTERS
+    for facet in ("work_mode", "seniority", "employment_type", "salary"):
+        assert f":{facet}" not in _ELIGIBLE
+    assert "f.seniority" not in _ELIGIBLE
+    assert "f.employment_type" not in _ELIGIBLE
+    assert "f.salary" not in _ELIGIBLE
 
 
-def test_empty_profile_filters_match_everything():
-    """cardinality(...) = 0 must short-circuit each filter.
+def test_a_posting_that_states_no_country_is_kept():
+    """A posting nobody parsed a country out of is not a posting somewhere else."""
+    from trouveur.db.queries.match import _ELIGIBLE
+
+    assert "cardinality(f.countries) = 0" in _ELIGIBLE
+
+
+def test_fully_remote_is_admitted_wherever_it_was_posted():
+    """`remote_anywhere` is part of the location filter, not a work-mode filter.
+
+    A role with no office is in no country, so the country it was posted from cannot be used to
+    reject it. The only place the real restriction is written is the description, which the
+    reranker reads.
+    """
+    from trouveur.db.queries.match import _ELIGIBLE
+
+    assert "CAST(:remote_anywhere AS boolean) AND f.work_mode = 'remote'" in _ELIGIBLE
+
+
+def test_an_empty_country_list_matches_everything():
+    """cardinality(...) = 0 must short-circuit the filter.
 
     Without it an empty country list would match nothing rather than anything, and a new user
     would see an empty product with no indication why.
     """
-    from trouveur.db.queries.match import _HARD_FILTERS
+    from trouveur.db.queries.match import _ELIGIBLE
 
-    for field in ("countries", "work_modes", "seniorities", "employment_types"):
-        assert f"cardinality(CAST(:{field} AS text[])) = 0" in _HARD_FILTERS
+    assert "cardinality(CAST(:countries AS text[])) = 0" in _ELIGIBLE
 
 
 def test_no_query_bundles_two_statements():
@@ -209,9 +232,10 @@ def test_parameters_carry_explicit_types_where_context_cannot_infer_them():
     A bare placeholder compared against a literal, or used to build an ARRAY, raises
     "could not determine data type of parameter" at runtime rather than at import.
     """
-    from trouveur.db.queries.match import _HARD_FILTERS, _SEARCH_SQL
+    from trouveur.db.queries.match import _ELIGIBLE, _SEARCH_SQL
 
-    assert "CAST(:min_salary AS numeric)" in _HARD_FILTERS
+    assert "CAST(:remote_anywhere AS boolean)" in _ELIGIBLE
+    assert "CAST(:countries AS text[])" in _ELIGIBLE
     for cast in (
         "CAST(:query AS text)",
         "CAST(:country AS text)",

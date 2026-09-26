@@ -85,11 +85,3 @@
 {% if hint %}<span class="hint">{{ hint }}</span>{% endif %}
 {% endmacro %}
 
-{% macro checks(name, options, selected) %}
-<div class="checks">
-  {% for value, label in options %}
-    <label class="check"><input type="checkbox" name="{{ name }}" value="{{ value }}"
-      {% if value in selected %}checked{% endif %}>{{ label }}</label>
-  {% endfor %}
-</div>
-{% endmacro %}

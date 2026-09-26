@@ -24,8 +24,7 @@ from trouveur.db.schema import (
 SCORING_FIELDS = frozenset(
     {
         "title", "years_experience", "objectives", "background", "languages", "must_have",
-        "keywords", "countries", "cities", "work_modes",
-        "seniorities", "employment_types", "min_salary_eur_year",
+        "keywords", "countries", "remote_anywhere", "cities", "min_salary_eur_year",
     }
 )
 

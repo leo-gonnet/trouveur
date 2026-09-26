@@ -302,7 +302,7 @@ async def test_saving_a_scoring_field_bumps_the_profile_version(client, seeded):
     form = {
         "title": "Head of Operations", "years_experience": "9", "objectives": "",
         "languages": "de", "must_have": "", "keywords": "lean",
-        "countries": "DE\nAT", "cities": "", "work_modes": ["remote", "hybrid"],
+        "countries": "DE\nAT", "remote_anywhere": "yes", "cities": "",
         "min_salary_eur_year": "60000", "confirm": "yes",
     }
     assert (await client.post("/profile", data=form)).status_code == 303
@@ -499,10 +499,11 @@ async def test_cancelling_a_queued_run_ends_it_immediately(client):
 
 
 async def test_an_off_list_filter_value_is_refused_rather_than_saved(client, seeded):
-    """`work_modes` is a list of an enum. A free-text value that reached the table validated on
-    the next read instead, so the Profile page and the match run both failed for that user
-    from then on."""
-    form = {"title": "x", "work_modes": ["Remote"]}
+    """`countries` is validated against what derivation can produce. A free-text value that
+    reached the table validated on the next read instead, so the Profile page and the match run
+    both failed for that user from then on -- `Remote` was the one that did it, which is now a
+    checkbox on the same filter rather than a country somebody could type."""
+    form = {"title": "x", "countries": "Remote"}
     assert (await client.post("/profile", data=form)).status_code == 400
     assert (await client.get("/profile")).status_code == 200
 
@@ -523,13 +524,17 @@ async def test_an_over_long_background_is_refused_rather_than_truncated(client, 
     assert (await client.post("/profile", data=form)).status_code == 303
 
 
-async def test_the_profile_form_offers_every_filter_value_including_not_stated(client, seeded):
-    """Each hard filter drops postings whose facet is unknown once it is set; offering `unknown`
-    as a choice is how a user keeps them, so it must not be filtered out of the options."""
+async def test_the_profile_form_offers_location_and_nothing_else_to_filter_on(client, seeded):
+    """Location is the only hard filter, and fully-remote is part of it rather than a work mode.
+
+    The three enum pickers this replaced each needed a "not stated" tick box beside them, whose
+    only job was to undo the filter the user had just set. A picker reappearing here means a facet
+    has started dropping postings that state nothing for it again.
+    """
     body = (await client.get("/profile")).text
-    for name, value in (("work_modes", "unknown"), ("seniorities", "intern"),
-                        ("employment_types", "apprenticeship")):
-        assert f'name="{name}" value="{value}"' in body, (name, value)
+    assert 'name="remote_anywhere"' in body
+    for name in ("work_modes", "seniorities", "employment_types"):
+        assert f'name="{name}"' not in body, name
     assert '<option value="AT">Austria</option>' in body
     assert '<option value="de">German</option>' in body
 
