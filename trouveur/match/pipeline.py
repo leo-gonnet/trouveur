@@ -209,7 +209,7 @@ async def _retrieve(
     arms = await retrieve.retrieve_arms(
         conn, profile, queries, adverts or [], fresh_since=fresh_since
     )
-    fused = retrieve.fuse(arms, retrieve.RETRIEVAL_LIMIT)
+    fused = retrieve.fuse(arms, retrieve.FUSED_LIMIT)
     dense_rank, lexical_rank = retrieve.ranks(arms)
 
     rows = [

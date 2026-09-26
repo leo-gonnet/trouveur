@@ -14,10 +14,18 @@ from trouveur.ingest.embed import get_query_provider
 from trouveur.match.fuse import best_ranks, reciprocal_rank_fusion
 from trouveur.models import UserProfile
 
-MIN_PER_QUERY = 25
-# A constant, not a per-user setting: retrieval is free and rerank takes the top rerank_limit
-# whatever was fetched, so a per-user value would have no effect to explain.
-RETRIEVAL_LIMIT = 2000
+# How deep ONE query goes. Deliberately not derived from the fused limit: dividing a total budget
+# by the number of queries meant that improving expansion made every individual query shallower --
+# sixteen queries got 125 rows each where eight got 250 -- so a better set of search terms bought
+# worse coverage per term. The two numbers answer different questions and are now two constants.
+#
+# Depth is close to free since the dense arm became an exact scan: the scan reads every vector in
+# the horizon whatever the LIMIT, so raising this changes only how many rows are sorted out of it.
+PER_QUERY_DEPTH = 200
+
+# How many candidates survive fusion and are written to user_job_match. This is the real bound on
+# how much a run can score, now that nothing caps the paid stage downstream of it.
+FUSED_LIMIT = 2000
 
 
 @dataclass
@@ -54,16 +62,13 @@ async def retrieve_arms(
     provider = get_query_provider()
     dense_queries = [*queries, *adverts]
     vectors = await provider.embed_queries(dense_queries) if dense_queries else []
-    dense_budget = max(RETRIEVAL_LIMIT // max(len(dense_queries), 1), MIN_PER_QUERY)
-    lexical_budget = max(RETRIEVAL_LIMIT // max(len(queries), 1), MIN_PER_QUERY)
-
     return Arms(
         dense=[
-            await match_q.dense_candidates(conn, profile, vector, dense_budget, fresh_since)
+            await match_q.dense_candidates(conn, profile, vector, PER_QUERY_DEPTH, fresh_since)
             for vector in vectors
         ],
         lexical=[
-            await match_q.lexical_candidates(conn, profile, query, lexical_budget, fresh_since)
+            await match_q.lexical_candidates(conn, profile, query, PER_QUERY_DEPTH, fresh_since)
             for query in queries
         ],
     )
