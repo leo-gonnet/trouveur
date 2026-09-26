@@ -29,6 +29,18 @@ log = logging.getLogger(__name__)
 # how long the Recommendations page was -- so a user who changed their profile met their corpus 150
 # a day for a fortnight.
 
+# Scoring walks the retrieval order in blocks and stops once the scores run out, which is what
+# decides how long an edition is. Nothing else does: a rank cut is arbitrary, and a score
+# THRESHOLD hides postings the reader already paid for behind a number they have to guess. This
+# hides nothing -- everything scored is published; the rule only decides when to stop buying.
+#
+# Two consecutive weak blocks rather than one, because retrieval order correlates only loosely
+# with the model's verdict and a single weak block is noise. A dead day therefore costs 50 calls
+# and stops; a rich day keeps buying for as long as it keeps finding.
+BLOCK = 25
+SCORE_FLOOR = 30
+WEAK_BLOCKS_BEFORE_STOPPING = 2
+
 # How many of those calls are in flight at once. Wall clock, not money, is what a run of a few
 # thousand postings is bounded by -- sequentially, at roughly two seconds a call, it would take
 # over an hour. Kept modest because these go to one user's own OpenRouter key.

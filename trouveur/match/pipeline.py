@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import statistics
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -38,6 +39,7 @@ class MatchReport:
     published: int = 0
     cost_usd: Decimal = Decimal(0)
     stopped_on_budget: bool = False
+    stopped_on_scores: bool = False
     errors: list[str] = field(default_factory=list)
 
     def summary(self) -> str:
@@ -47,6 +49,7 @@ class MatchReport:
             f"published={self.published} "
             f"cost=${self.cost_usd:.4f}"
             + (" [budget reached]" if self.stopped_on_budget else "")
+            + (" [scores ran out]" if self.stopped_on_scores else "")
         )
 
 
@@ -355,30 +358,33 @@ async def _score_pending(
     # Pessimistic, not zero: a zero estimate would always pass the ceiling test.
     estimate = Decimal("0.002")
     failures: list[str] = []
+    weak_blocks = 0
+    gate = asyncio.Semaphore(rerank.CONCURRENCY)
 
     async def attempt(row):
         """One posting's call, with the one failure the caller can do something about caught.
 
-        Returned rather than raised so a wave survives a single timeout: at a few thousand calls a
-        run, ending the whole stage on the first blip would leave most of the corpus unscored. Only
-        LlmError is caught -- anything else is a bug and must not be swallowed per posting.
+        Returned rather than raised so a block survives a single timeout: at a few thousand calls
+        a run, ending the whole stage on the first blip would leave most of the corpus unscored.
+        Only LlmError is caught -- anything else is a bug and must not be swallowed per posting.
         """
-        try:
-            return await rerank.score_one(
-                settings, profile, row,
-                api_key=api_key, model=settings.default_llm_model,
-                provider_pin=settings.default_llm_provider,
-                background=background,
-            )
-        except llm.LlmError as exc:
-            return exc
+        async with gate:
+            try:
+                return await rerank.score_one(
+                    settings, profile, row,
+                    api_key=api_key, model=settings.default_llm_model,
+                    provider_pin=settings.default_llm_provider,
+                    background=background,
+                )
+            except llm.LlmError as exc:
+                return exc
 
-    for start in range(0, len(uncached), rerank.CONCURRENCY):
-        wave = uncached[start : start + rerank.CONCURRENCY]
-        # Before the wave goes out, and priced for the whole wave: its calls are issued together,
-        # so the ceiling has to be tested against what all of them can cost. Never after -- a
-        # retry loop on someone else's card is not something to discover from the user.
-        if rerank.would_exceed_budget(spent, budget, estimate * len(wave)):
+    for start in range(0, len(uncached), rerank.BLOCK):
+        block = uncached[start : start + rerank.BLOCK]
+        # Before the block goes out, and priced for the whole block: its calls are issued
+        # together, so the ceiling has to be tested against what all of them can cost. Never
+        # after -- a retry loop on someone else's card is not something to discover from the user.
+        if rerank.would_exceed_budget(spent, budget, estimate * len(block)):
             report.stopped_on_budget = True
             log.info(
                 "user %s reached the monthly ceiling ($%.2f of $%.2f); %d jobs left unscored",
@@ -386,12 +392,12 @@ async def _score_pending(
             )
             break
 
-        results = await asyncio.gather(*(attempt(row) for row in wave))
+        results = await asyncio.gather(*(attempt(row) for row in block))
 
         updates, cache_rows = [], []
         tokens_in = tokens_out = 0
         cost = Decimal(0)
-        for row, outcome in zip(wave, results, strict=True):
+        for row, outcome in zip(block, results, strict=True):
             if isinstance(outcome, llm.LlmError):
                 failures.append(str(outcome))
                 continue
@@ -430,11 +436,30 @@ async def _score_pending(
         report.scored += len(updates)
         scored.extend(updates)
 
-        # Every call in the wave failed: that is the key, the credit or the provider, not a blip,
-        # and the next wave would fail the same way on the user's own card.
+        # Every call in the block failed: that is the key, the credit or the provider, not a
+        # blip, and the next block would fail the same way on the user's own card.
         if all(isinstance(outcome, llm.LlmError) for outcome in results):
             log.warning("every scoring call failed for user %s; stopping", profile.user_id)
             break
+
+        # The scores have run out. Judged on the median of the block rather than on any one
+        # posting, and only after two blocks in a row, because retrieval order correlates loosely
+        # with the model's verdict and one weak block is noise. Nothing is hidden by this: what
+        # was scored is published whatever it scored -- the rule decides when to stop BUYING.
+        # An empty block counts as weak: every call was billed and none came back parseable,
+        # which is the model not returning JSON rather than a quiet day, and no reason to buy more.
+        block_scores = [row["score"] for row in updates]
+        if not block_scores or statistics.median(block_scores) < rerank.SCORE_FLOOR:
+            weak_blocks += 1
+            if weak_blocks >= rerank.WEAK_BLOCKS_BEFORE_STOPPING:
+                report.stopped_on_scores = True
+                log.info(
+                    "user %s: scores ran out after %d postings; %d left unscored",
+                    profile.user_id, start + len(block), len(uncached) - start - len(block),
+                )
+                break
+        else:
+            weak_blocks = 0
 
     if failures:
         report.errors.append(f"{len(failures)} scoring call(s) failed: {failures[0]}")

@@ -310,3 +310,82 @@ async def test_the_ceiling_stops_the_run_before_the_wave_is_sent(
         ) == []
     assert calls == []
     assert report.stopped_on_budget is True
+
+
+async def test_scoring_stops_when_two_blocks_in_a_row_score_badly(
+    clean_db, gh_board, aa_listing, aa_detail, monkeypatch
+):
+    """What decides how long an edition is: the scorer running out of good postings.
+
+    Not a rank cut, which is arbitrary, and not a score threshold, which hides postings the reader
+    already paid for. Everything scored is still published whatever it scored -- the rule only
+    decides when to stop buying.
+    """
+    from trouveur.config import get_settings
+    from trouveur.db.engine import connect
+    from trouveur.db.queries import match as mq
+    from trouveur.match import llm, pipeline, rerank
+
+    await seed_corpus(gh_board, aa_listing, aa_detail)
+    user_id, profile, credential, job_ids = await _credentialled_user(monkeypatch)
+    monkeypatch.setattr(rerank, "BLOCK", 1)
+    verdicts = iter([10, 10, 95])
+    calls = []
+
+    async def score_one(settings, prof, candidate, **kwargs):
+        calls.append(candidate.job_id)
+        return (
+            rerank._Score(score=next(verdicts), reason="x"),
+            llm.Usage(tokens_in=500, tokens_out=40, cost_usd=Decimal("0.0001")),
+        )
+
+    monkeypatch.setattr(rerank, "score_one", score_one)
+    report = pipeline.MatchReport(user_id=user_id)
+    async with connect() as conn:
+        scored = await pipeline._score_pending(
+            conn, get_settings(), profile, credential, report, job_ids
+        )
+        still_pending = await mq.pending_rerank(conn, user_id, profile.version, job_ids)
+
+    assert len(calls) == 2, "the third block was bought after the scores had run out"
+    assert report.stopped_on_scores is True
+    # Published anyway: the rule stops spending, it does not hide what was spent.
+    assert len(scored) == 2
+    assert len(still_pending) == 1
+
+
+async def test_one_good_block_resets_the_patience(
+    clean_db, gh_board, aa_listing, aa_detail, monkeypatch
+):
+    """Two blocks in a row, not two blocks in total.
+
+    Retrieval order correlates only loosely with the model's verdict, so a single weak block is
+    noise. Counting them cumulatively would cut a rich day short on the strength of two bad
+    postings that happened to be spread across it.
+    """
+    from trouveur.config import get_settings
+    from trouveur.db.engine import connect
+    from trouveur.match import llm, pipeline, rerank
+
+    await seed_corpus(gh_board, aa_listing, aa_detail)
+    user_id, profile, credential, job_ids = await _credentialled_user(monkeypatch)
+    monkeypatch.setattr(rerank, "BLOCK", 1)
+    verdicts = iter([10, 95, 10])
+    calls = []
+
+    async def score_one(settings, prof, candidate, **kwargs):
+        calls.append(candidate.job_id)
+        return (
+            rerank._Score(score=next(verdicts), reason="x"),
+            llm.Usage(tokens_in=500, tokens_out=40, cost_usd=Decimal("0.0001")),
+        )
+
+    monkeypatch.setattr(rerank, "score_one", score_one)
+    report = pipeline.MatchReport(user_id=user_id)
+    async with connect() as conn:
+        await pipeline._score_pending(
+            conn, get_settings(), profile, credential, report, job_ids
+        )
+
+    assert len(calls) == len(job_ids), "a good block did not reset the patience"
+    assert report.stopped_on_scores is False
