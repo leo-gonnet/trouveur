@@ -18,8 +18,9 @@
 
 <p class="notice">
   Everything on this page decides what a good match is, so changing any of it starts a fresh
-  matching run. Right now that would score about <strong>{{ rescore_estimate }}</strong>
-  postings again. Editions already published are kept, except today's, which is replaced &mdash;
+  matching run over the last week, scoring <strong>at most {{ rescore_estimate }}</strong>
+  postings on your own key &mdash; fewer in practice, since only what your new search terms find
+  is judged, and scoring stops once the scores run out. Editions already published are kept, except today's, which is replaced &mdash;
   you are asked first.
 </p>
 

@@ -55,7 +55,7 @@ def match(user_id: int | None) -> None:
 
     settings = get_settings()
     reports = (
-        [asyncio.run(run_for_user(user_id, settings))]
+        [asyncio.run(run_for_user(user_id, settings, whole_horizon=True))]
         if user_id
         else asyncio.run(run_all(settings))
     )

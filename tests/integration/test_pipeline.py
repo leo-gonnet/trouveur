@@ -35,8 +35,8 @@ async def test_german_search_finds_a_compound_and_folds_umlauts(
     user_id, profile = await seed_user(title="Process Engineer")
 
     async with connect() as conn:
-        assert await mq.lexical_candidates(conn, profile, "ingenieur", 10, _ANY_AGE)
-        assert await mq.lexical_candidates(conn, profile, "munchen", 10, _ANY_AGE)
+        assert await mq.lexical_candidates(conn, profile, "ingenieur", 10, _ANY_AGE, _ANY_AGE)
+        assert await mq.lexical_candidates(conn, profile, "munchen", 10, _ANY_AGE, _ANY_AGE)
         assert await mq.search_jobs(conn, user_id, query="ingenieur")
         assert await mq.search_jobs(conn, user_id, query="munchen")
 
@@ -52,7 +52,7 @@ async def test_dense_retrieval_runs(clean_db, gh_board, aa_listing, aa_detail):
     vector = (await get_provider().embed_queries(["Prozessoptimierung"]))[0]
 
     async with connect() as conn:
-        assert await mq.dense_candidates(conn, profile, vector, 10, _ANY_AGE)
+        assert await mq.dense_candidates(conn, profile, vector, 10, _ANY_AGE, _ANY_AGE)
 
 
 async def test_detail_arrival_changes_the_hash_and_a_replay_changes_nothing(
@@ -136,7 +136,7 @@ async def test_scores_are_cached_and_spend_accumulates(
                 for job_id in job_ids
             ],
         )
-        to_score = await mq.pending_rerank(conn, user_id, profile.version)
+        to_score = await mq.pending_rerank(conn, user_id, profile.version, job_ids)
         await mq.apply_scores(
             conn, user_id,
             [{"job_id": row.job_id, "score": 88, "reason": "good", "red_flags": ["none"],
@@ -241,9 +241,9 @@ async def test_one_failed_call_does_not_lose_the_rest_of_the_wave(
     report = pipeline.MatchReport(user_id=user_id)
     async with connect() as conn:
         scored = await pipeline._score_pending(
-            conn, get_settings(), profile, credential, report
+            conn, get_settings(), profile, credential, report, job_ids
         )
-        still_pending = await mq.pending_rerank(conn, user_id, profile.version)
+        still_pending = await mq.pending_rerank(conn, user_id, profile.version, job_ids)
 
     assert report.scored == len(job_ids) - 1
     assert {row["job_id"] for row in scored} == set(job_ids) - {doomed}
@@ -272,10 +272,10 @@ async def test_an_unparseable_response_leaves_a_posting_unscored_never_zero(
     report = pipeline.MatchReport(user_id=user_id)
     async with connect() as conn:
         assert await pipeline._score_pending(
-            conn, get_settings(), profile, credential, report
+            conn, get_settings(), profile, credential, report, job_ids
         ) == []
         # Billed, because the call was made -- but nothing cached, so the next run asks again.
-        pending = await mq.pending_rerank(conn, user_id, profile.version)
+        pending = await mq.pending_rerank(conn, user_id, profile.version, job_ids)
         assert len(pending) == len(job_ids)
         assert await mq.cached_scores(
             conn, user_id, profile.version, [row.content_hash for row in pending]
@@ -294,7 +294,7 @@ async def test_the_ceiling_stops_the_run_before_the_wave_is_sent(
     from trouveur.match import pipeline, rerank
 
     await seed_corpus(gh_board, aa_listing, aa_detail)
-    user_id, profile, credential, _ = await _credentialled_user(monkeypatch, budget="0")
+    user_id, profile, credential, job_ids = await _credentialled_user(monkeypatch, budget="0")
 
     calls = []
 
@@ -306,7 +306,7 @@ async def test_the_ceiling_stops_the_run_before_the_wave_is_sent(
     report = pipeline.MatchReport(user_id=user_id)
     async with connect() as conn:
         assert await pipeline._score_pending(
-            conn, get_settings(), profile, credential, report
+            conn, get_settings(), profile, credential, report, job_ids
         ) == []
     assert calls == []
     assert report.stopped_on_budget is True

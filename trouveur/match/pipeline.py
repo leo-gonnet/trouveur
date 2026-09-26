@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -73,7 +73,17 @@ async def run_all(settings: Settings | None = None) -> list[MatchReport]:
     return reports
 
 
-async def run_for_user(user_id: int, settings: Settings | None = None) -> MatchReport:
+async def run_for_user(
+    user_id: int, settings: Settings | None = None, *, whole_horizon: bool = False
+) -> MatchReport:
+    """One user's run.
+
+    `whole_horizon` widens the candidate window from the last sweep's additions to everything
+    still retained. The daily run after a sweep leaves it off: a posting gets one chance, on the
+    day it arrives. A run the USER caused -- a profile change, a key added, scoring switched back
+    on -- turns it on, because in each of those cases nothing has been judged under the terms that
+    now apply and the last seven days deserve a fresh look.
+    """
     settings = settings or get_settings()
     report = MatchReport(user_id=user_id)
 
@@ -99,15 +109,23 @@ async def run_for_user(user_id: int, settings: Settings | None = None) -> MatchR
         return report
     report.queries = len(queries) + len(adverts)
 
-    # One cutoff for the whole run, so the two arms cannot disagree about what is fresh.
+    # One pair of cutoffs for the whole run, so the two arms cannot disagree about either.
     fresh_since = freshness.fresh_since(settings.retrieval_horizon_days)
+    seen_since = (
+        fresh_since
+        if whole_horizon
+        else datetime.now(UTC) - timedelta(hours=retrieve.NEW_ARRIVALS_HOURS)
+    )
     async with connect() as conn:
-        await _retrieve(conn, profile, queries, report, adverts, fresh_since=fresh_since)
+        retrieved = await _retrieve(
+            conn, profile, queries, report, adverts,
+            fresh_since=fresh_since, seen_since=seen_since,
+        )
 
-    if credential is not None:
+    if credential is not None and retrieved:
         async with connect() as conn:
             await _rerank(
-                conn, settings, profile, credential, report,
+                conn, settings, profile, credential, report, retrieved,
                 background=expansion.background_summary or expand.truncated_background(profile),
             )
     log.info("match complete: %s", report.summary())
@@ -205,10 +223,12 @@ async def _retrieve(
     adverts: list[str] | None = None,
     *,
     fresh_since: datetime,
-) -> None:
+    seen_since: datetime,
+) -> list[int]:
     """Hybrid retrieval: dense searches per query and advert, lexical per query, fused by rank."""
     arms = await retrieve.retrieve_arms(
-        conn, profile, queries, adverts or [], fresh_since=fresh_since
+        conn, profile, queries, adverts or [],
+        fresh_since=fresh_since, seen_since=seen_since,
     )
     fused = retrieve.fuse(arms, retrieve.FUSED_LIMIT)
     dense_rank, lexical_rank = retrieve.ranks(arms)
@@ -226,6 +246,8 @@ async def _retrieve(
     ]
     await match_q.upsert_matches(conn, rows)
     report.retrieved = len(rows)
+    # Handed to the scorer, which scores what THIS run found and nothing else.
+    return [job_id for job_id, _ in fused]
 
 
 async def _rerank(
@@ -234,12 +256,13 @@ async def _rerank(
     profile: UserProfile,
     credential,
     report,
+    retrieved: list[int],
     *,
     background: str = "",
 ) -> None:
     """Score what is pending, then publish the day's edition from whatever was scored."""
     scored = await _score_pending(
-        conn, settings, profile, credential, report, background=background
+        conn, settings, profile, credential, report, retrieved, background=background
     )
     if not scored:
         return
@@ -282,6 +305,7 @@ async def _score_pending(
     profile: UserProfile,
     credential,
     report,
+    retrieved: list[int],
     *,
     background: str = "",
 ) -> list[dict]:
@@ -291,7 +315,9 @@ async def _score_pending(
     failed batch still publishes what it did manage to score.
     """
     scored: list[dict] = []
-    pending = await match_q.pending_rerank(conn, profile.user_id, profile.version)
+    pending = await match_q.pending_rerank(
+        conn, profile.user_id, profile.version, retrieved
+    )
     if not pending:
         return scored
 

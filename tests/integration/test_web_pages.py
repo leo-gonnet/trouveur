@@ -344,7 +344,9 @@ async def test_a_scoring_change_queues_a_re_score_without_erasing_anything(clien
         after = (await conn.execute(
             user_job_match.select().where(user_job_match.c.user_id == seeded["user_id"])
         )).one()
-        pending = await match_q.pending_rerank(conn, seeded["user_id"], profile.version)
+        pending = await match_q.pending_rerank(
+            conn, seeded["user_id"], profile.version, [seeded["job_id"]]
+        )
     assert after.llm_score == 92, "a profile edit destroyed the score it was meant to replace"
     assert after.state == "saved", "a profile edit must not touch the user's own decisions"
     assert [row.job_id for row in pending] == [seeded["job_id"]], "no re-score was queued"
@@ -375,7 +377,9 @@ async def test_retrieval_does_not_restamp_the_version_a_posting_was_scored_under
                 "dense_rank": 2, "lexical_rank": 2,
             }],
         )
-        pending = await match_q.pending_rerank(conn, seeded["user_id"], profile.version)
+        pending = await match_q.pending_rerank(
+            conn, seeded["user_id"], profile.version, [seeded["job_id"]]
+        )
     assert [row.job_id for row in pending] == [seeded["job_id"]], (
         "retrieval re-stamped the score's profile version and hid the pending re-score"
     )

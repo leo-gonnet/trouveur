@@ -142,11 +142,11 @@ def _arguments(ctx: dict) -> dict[str, dict]:
         # match
         "match.dense_candidates": {
             "profile": ctx["profile"], "vector": [0.01] * 384, "limit": 5,
-            "fresh_since": _cutoff(),
+            "fresh_since": _cutoff(), "seen_since": _cutoff(),
         },
         "match.lexical_candidates": {
             "profile": ctx["profile"], "query": "ingenieur", "limit": 5,
-            "fresh_since": _cutoff(),
+            "fresh_since": _cutoff(), "seen_since": _cutoff(),
         },
         "match.editions": {"user_id": user_id},
         "match.edition": {"user_id": user_id, "day": _today(), "limit": 50, "offset": 0},
@@ -156,8 +156,10 @@ def _arguments(ctx: dict) -> dict[str, dict]:
         },
         "match.publish_edition": {"rows": [ctx["edition_row"]]},
         "match.upsert_matches": {"rows": [ctx["match_row"]]},
-        "match.pending_rerank": {"user_id": user_id, "profile_version": 1},
-        "match.count_pending_rerank": {"user_id": user_id, "profile_version": 1},
+        "match.pending_rerank": {
+            "user_id": user_id, "profile_version": 1, "job_ids": [job_id],
+        },
+        "match.count_pending_rerank": {"user_id": user_id, "fresh_since": _cutoff()},
         "match.scoreable_rows": {"job_ids": [job_id]},
         "match.cached_scores": {
             "user_id": user_id, "profile_version": 1, "hashes": [ctx["content_hash"]],

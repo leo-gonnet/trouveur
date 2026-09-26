@@ -376,8 +376,11 @@ async def profile_form(request: Request):
     async with connect() as conn:
         row = await users_q.get_profile(conn, session["uid"])
         profile = profile_from_row(row)
-        # Priced before the edit, not billed after it.
-        pending = await match_q.count_pending_rerank(conn, session["uid"], profile.version + 1)
+        # Priced before the edit, not billed after it. An upper bound: what a re-score actually
+        # covers is whatever the NEW profile's queries retrieve, which needs the queries to run.
+        pending = await match_q.count_pending_rerank(
+            conn, session["uid"], freshness.fresh_since(get_settings().retrieval_horizon_days)
+        )
     return templates.TemplateResponse(
         request,
         "profile.html",
@@ -439,7 +442,8 @@ async def profile_save(
         replacing = await match_q.edition_size(conn, session["uid"], today) if rescore else 0
         if replacing and form.get("confirm") != "yes":
             pending = await match_q.count_pending_rerank(
-                conn, session["uid"], (current.version if current else 0) + 1
+                conn, session["uid"],
+                freshness.fresh_since(get_settings().retrieval_horizon_days),
             )
             return templates.TemplateResponse(
                 request,

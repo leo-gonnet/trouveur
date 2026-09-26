@@ -35,6 +35,11 @@ from trouveur.models import Expansion
 _ELIGIBLE = f"""
     j.closed_at IS NULL
     AND {freshness.sql("j")}
+    -- When WE got it, which is not how old the advert is. A run after a sweep considers that
+    -- sweep's additions and nothing else: a posting gets one chance, on the day it arrives. A
+    -- posting we first saw today but that was posted three days ago is a new arrival and belongs
+    -- in today's run, which is why this reads first_seen_at and the clause above reads COALESCE.
+    AND j.first_seen_at > :seen_since
     AND (
         cardinality(CAST(:countries AS text[])) = 0
         OR f.countries && CAST(:countries AS text[])
@@ -87,9 +92,12 @@ LIMIT :limit
 """
 
 
-def _filter_params(profile: Any, fresh_since: datetime) -> dict[str, Any]:
+def _filter_params(
+    profile: Any, fresh_since: datetime, seen_since: datetime
+) -> dict[str, Any]:
     return {
         "fresh_since": fresh_since,
+        "seen_since": seen_since,
         "countries": list(profile.countries or []),
         "remote_anywhere": bool(profile.remote_anywhere),
     }
@@ -101,10 +109,11 @@ async def dense_candidates(
     vector: list[float],
     limit: int,
     fresh_since: datetime,
+    seen_since: datetime,
 ) -> list[int]:
     """Nearest neighbours to one query vector, in rank order."""
     params = {
-        **_filter_params(profile, fresh_since),
+        **_filter_params(profile, fresh_since, seen_since),
         "vector": "[" + ",".join(f"{value:.6f}" for value in vector) + "]",
         "limit": limit,
     }
@@ -118,11 +127,20 @@ async def dense_candidates(
 
 
 async def lexical_candidates(
-    conn: AsyncConnection, profile: Any, query: str, limit: int, fresh_since: datetime
+    conn: AsyncConnection,
+    profile: Any,
+    query: str,
+    limit: int,
+    fresh_since: datetime,
+    seen_since: datetime,
 ) -> list[int]:
     rows = await conn.execute(
         sa.text(_LEXICAL_SQL),
-        {**_filter_params(profile, fresh_since), "query": query, "limit": limit},
+        {
+            **_filter_params(profile, fresh_since, seen_since),
+            "query": query,
+            "limit": limit,
+        },
     )
     return [row.job_id for row in rows]
 
@@ -152,15 +170,21 @@ async def upsert_matches(conn: AsyncConnection, rows: Sequence[dict]) -> int:
 
 
 async def pending_rerank(
-    conn: AsyncConnection, user_id: int, profile_version: int
+    conn: AsyncConnection, user_id: int, profile_version: int, job_ids: Sequence[int]
 ) -> list[sa.Row]:
-    """Jobs this user has retrieved and not yet been scored for, best first.
+    """What THIS run retrieved and has not scored at this profile version, best first.
 
-    Unbounded on purpose. A cap here decided how long the Recommendations page was as a side effect
-    of keeping the bill small, so after a profile change a user met their own corpus 150 postings a
-    day for a fortnight. What bounds the work now is how many candidates survive fusion, and what
-    bounds the spend is the user's monthly ceiling -- in dollars, where they set it.
+    Bounded by the run's own retrieval rather than by an age rule of its own, so the question
+    "how far back do we look" is answered in exactly one place -- the candidate window in
+    `_ELIGIBLE`. A posting the scorer stopped short of today is simply not retrieved tomorrow,
+    because tomorrow's window has moved past it, so it needs no separate expiry here.
+
+    That is also what makes a profile change work: it runs with the whole retained horizon as its
+    window, so the new profile's queries decide what is re-judged. A posting the new queries do
+    not find is not re-scored, which is the right answer -- it is not relevant to the new profile.
     """
+    if not job_ids:
+        return []
     return list(
         await conn.execute(
             sa.text(
@@ -172,12 +196,17 @@ async def pending_rerank(
                 JOIN job j ON j.id = m.job_id
                 JOIN job_facet f ON f.job_id = j.id
                 WHERE m.user_id = :user_id
+                  AND m.job_id = ANY(CAST(:job_ids AS bigint[]))
                   AND j.closed_at IS NULL
                   AND (m.llm_score IS NULL OR m.profile_version < :profile_version)
                 ORDER BY m.retrieval_score DESC NULLS LAST
                 """
             ),
-            {"user_id": user_id, "profile_version": profile_version},
+            {
+                "user_id": user_id,
+                "profile_version": profile_version,
+                "job_ids": list(job_ids),
+            },
         )
     )
 
@@ -207,22 +236,34 @@ async def scoreable_rows(conn: AsyncConnection, job_ids: Sequence[int]) -> list[
 
 
 async def count_pending_rerank(
-    conn: AsyncConnection, user_id: int, profile_version: int
+    conn: AsyncConnection, user_id: int, fresh_since: datetime
 ) -> int:
-    """How many jobs a re-score would cover, so the UI can price an edit before it happens."""
+    """An upper bound on what a profile change would score, so the form can price an edit.
+
+    An upper bound and not a count: what a re-score actually covers is whatever the NEW profile's
+    queries retrieve, which cannot be known without running them. This is every open posting in
+    the retained horizon that the user's location filter admits -- the largest that set could be.
+    """
     return int(
         (
             await conn.execute(
                 sa.text(
-                    """
-                    SELECT count(*) FROM user_job_match m
-                    JOIN job j ON j.id = m.job_id
-                    WHERE m.user_id = :user_id
-                      AND j.closed_at IS NULL
-                      AND (m.llm_score IS NULL OR m.profile_version < :profile_version)
+                    f"""
+                    SELECT count(*)
+                    FROM job j
+                    JOIN job_facet f ON f.job_id = j.id
+                    JOIN user_profile p ON p.user_id = :user_id
+                    WHERE j.closed_at IS NULL
+                      AND {freshness.sql("j")}
+                      AND (
+                          cardinality(p.countries) = 0
+                          OR f.countries && p.countries
+                          OR cardinality(f.countries) = 0
+                          OR (p.remote_anywhere AND f.work_mode = 'remote')
+                      )
                     """
                 ),
-                {"user_id": user_id, "profile_version": profile_version},
+                {"user_id": user_id, "fresh_since": fresh_since},
             )
         ).scalar_one()
         or 0

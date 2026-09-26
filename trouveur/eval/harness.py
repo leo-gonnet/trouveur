@@ -322,7 +322,9 @@ async def _evaluate_persona(
 
     async with connect() as conn:
         arms = await retrieve.retrieve_arms(
-            conn, profile, queries, fresh_since=EVAL_FRESH_SINCE
+            conn, profile, queries,
+            # The whole haystack, not one sweep's worth: recall over the corpus is the question.
+            fresh_since=EVAL_FRESH_SINCE, seen_since=EVAL_FRESH_SINCE,
         )
         fused = [job_id for job_id, _ in retrieve.fuse(arms, limit)]
 
