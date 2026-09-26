@@ -86,6 +86,27 @@ that runs periodically, plus a rich but simple web UI. Multi-user (for now, a fe
   app enqueues rows and reads status; it never fetches and never runs a scan. web and runner share
   nothing but the database, so either can be down without breaking the other.
 
+### Two windows, and they are not the same question
+
+- **`retrieval_horizon_days` is RETENTION**: how old an advert may be and how long `job_embedding`
+  keeps its vector. Seven days. Read by retrieval, the embed queue, the pruner and the dashboard,
+  which all have to agree.
+- **`retrieve.NEW_ARRIVALS_HOURS` is the CANDIDATE WINDOW**: how far back a run held after a sweep
+  looks. Twenty-five hours, so a run starting late cannot drop a sliver of the day. A posting gets
+  exactly one chance, on the day it arrives. It used to get seven, and since eligibility is a rank
+  cut, a quiet week promoted postings that two thousand others had beaten for six days running --
+  nothing about them had changed except the competition.
+- **A run the USER caused passes the whole retained horizon instead** (`whole_horizon=True`): a
+  profile change, a key added, scoring switched back on. In each case nothing has been judged under
+  the terms that now apply. The runner already distinguishes these by `pipeline_run.match_user_id`.
+- **The staleness bound reads `COALESCE(posted_at, first_seen_at)` and the candidate window reads
+  `first_seen_at`.** One asks how old the ADVERT is, the other asks when WE got it, and folding
+  them together drops every posting a board dated before we discovered it -- on the one run that
+  could ever have offered it. Guarded by a test.
+- **`pending_rerank` is bounded by what the run retrieved, not by an age rule of its own**, so
+  "how far back do we look" is answered in exactly one place. A posting the scorer stopped short of
+  is simply not retrieved tomorrow.
+
 ### Ingestion is user-agnostic; selection is per user
 
 This is the central design decision and the one most easily undone by accident.
@@ -481,9 +502,9 @@ so the deployment has no LLM spend of its own and one user's exhausted budget ca
 - **The user's two cost controls are the `scoring_enabled` switch and the ceiling it governs.**
   The switch submits itself (`.switch`, not a tick box: one that needed a Save button would be a
   tick box); the ceiling keeps a Save button. Retrieval depth is two constants,
-  `retrieve.PER_QUERY_DEPTH` (how deep one query goes) and `retrieve.FUSED_LIMIT` (how many survive
-  fusion); neither is a setting, because retrieval is free. There is no scoring depth at all any
-  more: everything retrieved and not yet scored is scored. `rerank_limit` was three things at once
+  `retrieve.PER_QUERY_DEPTH` (how deep one query goes) and `retrieve.FUSED_LIMIT` (a safety rail on
+  how many survive fusion); neither is a setting, because retrieval is free. Scoring depth is not a
+  number at all any more -- the scorer stops when the scores run out. `rerank_limit` was three things at once
   — list length, bill and pause — and it read as a volume dial while being the only way to stop
   spending. Off means **no paid call at all** runs for that user, expansion included, which is
   why `run_for_user` drops the credential rather than gating the rerank alone.
@@ -762,6 +783,10 @@ still holds the old readings and no re-derive has been scheduled.
   - **One failed scoring call does not lose the rest of its wave**, and the ceiling is tested before
     a wave is issued rather than after it is billed.
   - **An edition is paged, not cut**: `LIMIT ... OFFSET`, so every posting in the day is reachable.
+  - **A daily run sees only the last sweep's additions**, a new arrival is dated by when WE got it
+    rather than when it was posted, and a match-only run looks over the whole retained horizon.
+  - **Scoring stops after two CONSECUTIVE weak blocks, not two in total**, and everything it did
+    score is published.
   - **A posting cannot enter two editions under one profile version** — the constraint, not the
     query, is what refuses it. Under two DIFFERENT versions it may, which is what versioned
     editions are for.

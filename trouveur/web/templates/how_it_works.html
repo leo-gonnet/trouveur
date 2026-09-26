@@ -73,11 +73,17 @@
 
 <section class="section">
   <div class="section-head"><h2>A run &mdash; select from the corpus, score, publish</h2></div>
-  <p>A run reads the stored search terms and never writes new ones. It narrows the corpus to where
-    you would work, searches what is left twice over &mdash; once by meaning, once by word &mdash;
-    and merges the two by rank rather than by score, since the two arms have no common scale.
-    Everything that comes out is scored, one advert per call, except the postings already scored
-    under this version of your profile: a posting is paid for once, ever.</p>
+  <p>A run looks at what the last sweep added and nothing older. It narrows those to where you
+    would work, searches what is left twice over &mdash; once by meaning, once by word &mdash; and
+    merges the two by rank rather than by score, since the two arms have no common scale. What
+    comes out is scored one advert per call, in blocks, and the scoring stops once two blocks in a
+    row come back weak. So a strong day is longer than a quiet one, and a posting is paid for
+    once, ever.</p>
+  <p>A posting gets its chance on the day it arrives. Looking back over a whole week instead meant
+    that when a week went quiet, adverts that had been beaten by two thousand others for six days
+    running were suddenly good enough &mdash; nothing about them had changed except the
+    competition. Changing your profile is the exception: that reads the last seven days again,
+    because nothing has been judged under the new terms yet.</p>
   <figure class="diagram">
     <svg viewBox="0 0 960 240" role="img" aria-label="Filters, two search arms, fusion, scoring and an edition">
       <defs><marker id="a3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="arrowhead"/></marker></defs>
@@ -97,10 +103,10 @@
         <path d="M480 76 C500 76 500 116 520 116"/><path d="M480 148 C500 148 500 116 520 116"/>
         <path d="M610 116H650"/><path d="M770 116H810"/>
       </g>
-      <text x="245" y="190" class="note">your countries, plus fully</text>
-      <text x="245" y="206" class="note">remote roles — and the last 7 days</text>
-      <text x="710" y="190" class="note">one advert per call, minus anything</text>
-      <text x="710" y="206" class="note">already scored for this profile</text>
+      <text x="245" y="190" class="note">your countries, plus fully remote</text>
+      <text x="245" y="206" class="note">roles — and only the newest arrivals</text>
+      <text x="710" y="190" class="note">one advert per call, stopping</text>
+      <text x="710" y="206" class="note">once the scores run out</text>
       <text x="875" y="190" class="note">ordered by score,</text>
       <text x="875" y="206" class="note">with no cut-off</text>
     </svg>
