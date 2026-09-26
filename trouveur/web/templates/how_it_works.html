@@ -26,7 +26,7 @@
       <g class="node"><rect x="320" y="52" width="120" height="56" rx="4"/><text x="380" y="76">normalise (v)</text><text x="380" y="93" class="sub">structure only</text></g>
       <g class="node"><rect x="480" y="52" width="80" height="56" rx="4"/><text x="520" y="76">job</text><text x="520" y="93" class="sub">one row</text></g>
       <g class="node"><rect x="600" y="52" width="110" height="56" rx="4"/><text x="655" y="76">derive (v)</text><text x="655" y="93" class="sub">never guesses</text></g>
-      <g class="node"><rect x="750" y="52" width="110" height="56" rx="4"/><text x="805" y="76">facets</text><text x="805" y="93" class="sub">what filters read</text></g>
+      <g class="node"><rect x="750" y="52" width="110" height="56" rx="4"/><text x="805" y="76">facets</text><text x="805" y="93" class="sub">what selection reads</text></g>
       <g class="node"><rect x="600" y="124" width="110" height="56" rx="4"/><text x="655" y="148">embed (v)</text><text x="655" y="165" class="sub">local model</text></g>
       <g class="node"><rect x="750" y="124" width="110" height="56" rx="4"/><text x="805" y="148">vector</text><text x="805" y="165" class="sub">open and recent</text></g>
       <g class="edge" marker-end="url(#a1)">
@@ -73,11 +73,11 @@
 
 <section class="section">
   <div class="section-head"><h2>A run &mdash; select from the corpus, score, publish</h2></div>
-  <p>A run reads the stored search terms and never writes new ones. It filters the corpus in SQL,
-    searches what is left twice over &mdash; once by meaning, once by word &mdash; and merges the
-    two by rank rather than by score, since the two arms have no common scale. Only the top of that
-    list is sent to be scored, and only the postings not already scored under this version of your
-    profile: a posting is paid for once, ever.</p>
+  <p>A run reads the stored search terms and never writes new ones. It narrows the corpus to where
+    you would work, searches what is left twice over &mdash; once by meaning, once by word &mdash;
+    and merges the two by rank rather than by score, since the two arms have no common scale.
+    Everything that comes out is scored, one advert per call, except the postings already scored
+    under this version of your profile: a posting is paid for once, ever.</p>
   <figure class="diagram">
     <svg viewBox="0 0 960 240" role="img" aria-label="Filters, two search arms, fusion, scoring and an edition">
       <defs><marker id="a3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="arrowhead"/></marker></defs>
@@ -85,7 +85,7 @@
       <text x="20" y="28" class="lane-title">A RUN — after every scan, or if you change your profile</text>
       <g class="node"><rect x="20" y="52" width="130" height="48" rx="4"/><text x="85" y="72">search terms</text><text x="85" y="89" class="sub">from your profile</text></g>
       <g class="node"><rect x="20" y="124" width="130" height="48" rx="4"/><text x="85" y="144">facets, vectors</text><text x="85" y="161" class="sub">the shared corpus</text></g>
-      <g class="node"><rect x="190" y="88" width="110" height="56" rx="4"/><text x="245" y="112">hard filters</text><text x="245" y="129" class="sub">in SQL, first</text></g>
+      <g class="node"><rect x="190" y="88" width="110" height="56" rx="4"/><text x="245" y="112">where</text><text x="245" y="129" class="sub">in SQL, first</text></g>
       <g class="node"><rect x="340" y="52" width="140" height="48" rx="4"/><text x="410" y="72">meaning search</text><text x="410" y="89" class="sub">nearest vectors</text></g>
       <g class="node"><rect x="340" y="124" width="140" height="48" rx="4"/><text x="410" y="144">word search</text><text x="410" y="161" class="sub">full text + trigram</text></g>
       <g class="node"><rect x="520" y="88" width="90" height="56" rx="4"/><text x="565" y="112">merge</text><text x="565" y="129" class="sub">by rank</text></g>
@@ -97,9 +97,9 @@
         <path d="M480 76 C500 76 500 116 520 116"/><path d="M480 148 C500 148 500 116 520 116"/>
         <path d="M610 116H650"/><path d="M770 116H810"/>
       </g>
-      <text x="245" y="190" class="note">country, work mode, seniority,</text>
-      <text x="245" y="206" class="note">contract, salary floor, age</text>
-      <text x="710" y="190" class="note">the top 150, minus anything</text>
+      <text x="245" y="190" class="note">your countries, plus fully</text>
+      <text x="245" y="206" class="note">remote roles — and the last 7 days</text>
+      <text x="710" y="190" class="note">one advert per call, minus anything</text>
       <text x="710" y="206" class="note">already scored for this profile</text>
       <text x="875" y="190" class="note">ordered by score,</text>
       <text x="875" y="206" class="note">with no cut-off</text>

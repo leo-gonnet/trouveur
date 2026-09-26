@@ -95,9 +95,9 @@ INGEST  (shared corpus, no user involved)
   sweep ──> raw archive ──> job ──> facets ──> vector ──> lifecycle
 
 MATCH   (per user, cheap, re-runnable)
-  profile ──> expanded queries ──> hard filters
-          ──> dense ANN ─┐
-          ──> BM25/FTS  ─┴─ RRF fusion ──> LLM rerank ──> digest
+  profile ──> expanded queries ──> location filter
+          ──> dense KNN ─┐
+          ──> BM25/FTS  ─┴─ RRF fusion ──> LLM rerank ──> edition + digest
 ```
 
 V1 queried every source with the user's own keywords, which capped recall at whatever the user
@@ -428,33 +428,40 @@ Before any commit: `git status` must be clean of the above.
 **There is no installation-wide API key.** Reranking runs on each user's own OpenRouter credential,
 so the deployment has no LLM spend of its own and one user's exhausted budget cannot affect another.
 
-- **Retrieval runs first and is free; `rerank.RERANK_LIMIT` is what makes the paid stage small.**
-  There is deliberately no deterministic cut between the two any more: a rule that rejected a
-  posting before scoring hid it from the user with no way to find out, and what it saved was a
-  fraction of a cent already bounded by the limit. Internships, working-student roles and staffing
-  agencies are the reranker's to penalise, in the system prompt.
+- **Retrieval runs first and is free; nothing caps the paid stage but the user's ceiling.**
+  There is deliberately no deterministic cut between the two: a rule that rejected a posting before
+  scoring hid it from the user with no way to find out it existed. Internships, working-student
+  roles and staffing agencies are the reranker's to penalise, in the system prompt. What bounds the
+  work is `retrieve.FUSED_LIMIT` -- how many candidates survive fusion -- and what bounds the spend
+  is the monthly ceiling, in dollars, where the user set it. `RERANK_LIMIT` was neither: it kept the
+  bill small and, as a side effect, decided how long the Recommendations page was, so after a
+  profile change a user met their own corpus 150 postings a day for a fortnight.
 - **Always cache by `(content_hash, user, profile_version)`.** A posting is scored once per profile,
   ever. Re-scoring an unchanged posting is a bug, not an inefficiency.
-- **Check the ceiling before a batch, not after.** A retry loop on someone else's card is not
-  something to discover from the user. Spend is metered in **USD**, the currency OpenRouter bills
+- **Check the ceiling before the calls go out, not after, and price it for all of them.** Scoring
+  runs in waves of `rerank.CONCURRENCY`, issued together, so the test has to cover what the whole
+  wave can cost. A retry loop on someone else's card is not something to discover from the user. Spend is metered in **USD**, the currency OpenRouter bills
   in — an EUR column would put a stale exchange rate between the meter and the cap.
 - **Bump `profile.version` only for fields that change what a good match is** (`SCORING_FIELDS`). A
   cost setting such as `scoring_enabled` must not invalidate a cache and bill a re-score.
-- **Text the reranker reads is multiplied by `RERANK_LIMIT`; text expansion reads is not.** This
+- **Text the reranker reads is multiplied by every posting scored; text expansion reads is not.** This
   is why `profile.background` reaches the two stages differently: expansion sees the whole field,
   because that call is billed once per profile version, while the reranker sees a distillation
   derived by the same cached, versioned stage (`user_query_expansion.background_summary`).
   `rerank.build_prompt` takes the summary as an **argument** and must never read
   `profile.background` itself -- the two look identical in a diff, and the second one bills a
-  4,000-character CV fifteen times per run on the user's own card, besides burying the objectives
-  under it. Guarded by a test.
+  4,000-character CV once per posting scored -- thousands of times in a run -- on the user's own
+  card, besides burying the objectives under it. Guarded by a test.
 - **Query expansion costs one call per profile version, not per job**, and is cached. The
   deterministic expansion is the floor, not a degraded fallback: retrieval must work fully with no
   key at all. **Only a full expansion is cached**, though: a run with no key, or with scoring
   paused, produces the floor, and storing that would pin the profile version to it for ever, so
   adding a key later would silently buy nothing.
-- **A malformed response leaves a batch unscored, never scored 0.** Scoring garbage as 0 caches a
-  wrong verdict and hides good jobs permanently.
+- **A malformed response leaves that posting unscored, never scored 0.** Scoring garbage as 0
+  caches a wrong verdict and hides good jobs permanently. It is billed and left pending, so the
+  next run asks again. One failed call must not end the stage either: at a few thousand calls a run
+  a single timeout would leave most of the corpus unscored, so only a wave that failed **entirely**
+  stops the run -- that is the key, the credit or the provider rather than a blip.
 - **Always send `reasoning: {"enabled": false}`.** Without it a reasoning model spends the whole
   `max_tokens` budget on hidden thinking and returns empty content — batch lost *and* billed.
 - **Always pin a provider.** Unpinned, OpenRouter spreads one model across many backends at a wide
@@ -474,11 +481,11 @@ so the deployment has no LLM spend of its own and one user's exhausted budget ca
   trusting the markup to have disabled it.
 - **The user's two cost controls are the `scoring_enabled` switch and the ceiling it governs.**
   The switch submits itself (`.switch`, not a tick box: one that needed a Save button would be a
-  tick box); the ceiling keeps a Save button. Retrieval depth is the constant
-  `retrieve.RETRIEVAL_LIMIT` and scoring depth is `rerank.RERANK_LIMIT`; neither is a setting,
-  because retrieval is free and rerank takes the top N by retrieval score whatever was fetched,
-  so a per-user number had no effect to explain. `rerank_limit` was three things at once — list
-  length, bill and pause — and it read as a volume dial while being the only way to stop
+  tick box); the ceiling keeps a Save button. Retrieval depth is two constants,
+  `retrieve.PER_QUERY_DEPTH` (how deep one query goes) and `retrieve.FUSED_LIMIT` (how many survive
+  fusion); neither is a setting, because retrieval is free. There is no scoring depth at all any
+  more: everything retrieved and not yet scored is scored. `rerank_limit` was three things at once
+  — list length, bill and pause — and it read as a volume dial while being the only way to stop
   spending. Off means **no paid call at all** runs for that user, expansion included, which is
   why `run_for_user` drops the credential rather than gating the rerank alone.
 - **Recommendations shows no run statistics at all.** `retrieved`/`passed`/`scored` and the cost
@@ -510,20 +517,35 @@ so the deployment has no LLM spend of its own and one user's exhausted budget ca
   the query layer, not just the UI.
 - **There is no score threshold, and re-adding one is a regression.** It hid postings the user had
   already paid to have scored, behind a number they had to guess — and guessing it low enough to
-  see them made it meaningless. Volume is bounded once, by `rerank.RERANK_LIMIT`. The page shows
-  what was paid for and the reader draws their own line, so **the ordering is the product**:
+  see them made it meaningless. The page is paged, fifty at a time, walked with OFFSET rather than
+  cut — every posting in the day stays reachable, which is the property a threshold broke. The page
+  shows what was paid for and the reader draws their own line, so **the ordering is the product**:
   `ORDER BY e.llm_score DESC` is load-bearing, not cosmetic. The digest is bounded the same way,
   by count rather than by score.
 - **The score is the first thing on a row and it is coloured** (`score_pill`, `.score.high/.mid/
   .low`). The band names in the macro and in `app.css` must match: they did not, and every score
   of 65 and over rendered with no colour at all for as long as that went unnoticed.
-- **Profile list fields are picked, not typed.** `work_modes`, `seniorities` and
-  `employment_types` are lists of enums, and `countries` is validated against what derivation
+- **Profile list fields are picked, not typed.** `countries` is validated against what derivation
   can produce (`COUNTRY_NAMES`, pinned to `vocab.COUNTRIES` by a test). Free text there once
   saved `Remote` and then failed validation on every read: the Profile page and the match run
   both 500ed for that user until someone edited the row. `profile_save` refuses an off-list value
-  with a 400; the form offers `unknown` as "not stated" because a hard filter drops every
-  posting whose facet is unstated the moment it is set, and that is how a user keeps them.
+  with a 400. There is no "not stated" tick box any more, because there is no facet filter left
+  that would need one: a filter on an enum drops every posting whose facet is unstated the moment
+  it is set, and the control existed only to undo the filter the user had just set.
+- **Location is the only hard filter, and everything else on Profile is a preference.** The
+  reranker reads `cities`, `min_salary_eur_year`, `languages`, `must_have` and the objectives as
+  prompt text; none of them narrows the query. Work mode, seniority, employment type and a salary
+  floor were filters once and each dropped every posting whose facet was unstated, which is why the
+  form had a "not stated" tick box beside three of them — a control whose only job was to undo the
+  filter the user had just set. Do not add a fifth: a filter here hides a posting with no way for
+  the reader to learn it existed, while a preference in the prompt only moves it down the list.
+- **`remote_anywhere` belongs to the location filter, not to a work mode.** A fully remote role is
+  in no country, so the country it was posted from cannot be used to reject it; whether it is remote
+  *for the reader* is in the description, which the reranker reads. Onsite and hybrid are not
+  distinguished anywhere on purpose — both mean "you go there", which the country already says.
+- **A posting that states no location passes.** Not an escape clause on one arm of the filter but
+  how the filter works: a posting nobody parsed a country out of is not a posting somewhere else,
+  and dropping it would cost recall for a derivation gap.
 - **`cities` is a reranker preference, never a hard filter.** Countries can be filtered because
   derivation folds every spelling to one ISO code first; cities are stored as the source spelled
   them, so `Wien` and `Vienna` coexist and a `f.cities && :cities` clause would silently lose
@@ -605,8 +627,19 @@ so the deployment has no LLM spend of its own and one user's exhausted budget ca
     dropped every posting that arrived from a second source. Markers can be re-run; a merge cannot
     be undone.
 - **`job_embedding` holds open postings only.** Closing a job deletes its row in the same statement,
-  which is what keeps the ANN index proportional to the live corpus rather than to all history —
-  with no denormalised `is_open` flag to drift. This is an invariant, not an optimisation.
+  which is what keeps the table proportional to the live corpus rather than to all history — with no
+  denormalised `is_open` flag to drift. This is an invariant, not an optimisation, and it matters
+  more now that the dense arm scans the table rather than walking an index: its size *is* the cost
+  of a query.
+- **There is deliberately no ANN index on `job_embedding`, and the dense arm is exact.** An HNSW
+  index applies a query's WHERE clause after the graph walk, so a filtered search silently returns
+  fewer rows than it asked for, and the narrower the filter the worse it gets — `ef_search` and
+  over-fetching widen that window without closing it, and neither can be tuned against a selectivity
+  that depends on whose profile is running. With no index the filter is applied first by
+  construction. Measured on the production join shape at 250,000 vectors: 14ms when the filter
+  qualifies 565 rows, 80ms unfiltered. The cost is linear in vectors inside the horizon, so this is
+  a decision about corpus size: reinstate an index only if that count reaches several million, and
+  measure before doing it.
 - **Keep the two search paths in sync.** Searchable text is indexed twice on purpose: a `german`
   `tsvector` for stemming and weighting, and a `pg_trgm` index over an `unaccent`-folded column for
   substring matching inside German compounds. Neither alone is sufficient — `german` alone misses
@@ -721,6 +754,13 @@ still holds the old readings and no re-derive has been scheduled.
     not move it out of the day it was published in.
   - **Retrieval never re-stamps the profile version a posting was scored under**, or the rows
     most in need of a re-score look current and nothing is ever re-scored.
+  - **Location is the only hard filter**, a posting that states no location passes, and a fully
+    remote posting is admitted wherever it was posted.
+  - **The rerank prompt carries exactly one advert**, with the profile block before it — batching
+    moved scores by slot position, and profile-first is what a prompt-prefix cache reuses.
+  - **One failed scoring call does not lose the rest of its wave**, and the ceiling is tested before
+    a wave is issued rather than after it is billed.
+  - **An edition is paged, not cut**: `LIMIT ... OFFSET`, so every posting in the day is reachable.
   - **A posting cannot enter two editions under one profile version** — the constraint, not the
     query, is what refuses it.
   - **A closed posting stays in its edition** and the dropdown's count still matches the rows.
@@ -788,7 +828,7 @@ Other rules the harness depends on:
 - **Drain details before scoring.** The needles carry descriptions; a haystack of title-only
   postings is not the corpus production has, and the comparison would be between unlike things.
   The sharper reason: `persist` does not queue a posting for embedding until its description
-  arrives, so postings with an outstanding detail fetch are **absent from the ANN index**, not
+  arrives, so postings with an outstanding detail fetch are **absent from `job_embedding`**, not
   merely thin — the dense arm then competes against a fraction of what the lexical arm sees and
   its recall is flattered by that gap. Only Arbeitsagentur, Workday and Rippling have a detail
   phase, and for those a description costs one polite request per posting — so the drain is capped
@@ -829,10 +869,11 @@ reason precision is not measurable at retrieval.
   across five identical runs, but **slot 0 of a batch scores 8-15 points above slot 9**, and the
   same posting scored beside nine weak ones rather than nine strong ones moves 8-39 points. Both
   of the large effects are artifacts of putting ten postings in one prompt, and neither washes
-  out, because batches are filled in retrieval order. `BATCH_SIZE` is therefore a *quality*
-  setting, not only a cost one -- scoring one posting per call measured +0.07 to +0.09 nDCG@20
-  against a judged reference set, for a third of a US cent more per run. Treat a single run as a
-  signal, not a result. Evidence: `evalx/FINDINGS-RERANKER.md`.
+  out, because batches were filled in retrieval order. Batching was therefore a *quality* problem
+  and not only a cost one, and it is gone: scoring one posting per call measured +0.07 to +0.09
+  nDCG@20 against a judged reference set, for a third of a US cent more per run. **Do not put a
+  second advert back in that prompt** -- there is no batch size to set, and a test pins it. Treat a
+  single run as a signal, not a result. Evidence: `evalx/FINDINGS-RERANKER.md`.
 - **A judged reference set already exists; do not pay for relevance opinions twice.**
   `evalx/reference.json` holds 792 postings graded 0-3 against the three personas, and
   `evalx/rerank_lab.py` scores a configuration against it. Add to it rather than starting over.
