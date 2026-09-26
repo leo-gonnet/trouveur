@@ -303,13 +303,15 @@ async def test_saving_a_scoring_field_bumps_the_profile_version(client, seeded):
     form = {
         "title": "Head of Operations", "years_experience": "9", "objectives": "",
         "languages": "de", "must_have": "", "keywords": "lean",
-        "countries": "DE\nAT", "remote_anywhere": "yes", "cities": "",
-        "min_salary_eur_year": "60000",
+        "countries": "DE\nAT", "remote_anywhere": "yes", "city_ids": "2761369",
+        "radius_km": "40", "min_salary_eur_year": "60000",
     }
     assert (await client.post("/profile", data=form)).status_code == 303
     async with connect() as conn:
-        after_scoring = (await users_q.get_profile(conn, seeded["user_id"])).version
+        saved = await users_q.get_profile(conn, seeded["user_id"])
+    after_scoring = saved.version
     assert after_scoring > before
+    assert (saved.city_ids, saved.radius_km) == ([2761369], 40)
 
     assert (await client.post("/settings/scoring", data={})).status_code == 303
     async with connect() as conn:
@@ -520,6 +522,20 @@ async def test_an_off_list_filter_value_is_refused_rather_than_saved(client, see
 
     form = {"title": "x", "countries": "Austria"}
     assert (await client.post("/profile", data=form)).status_code == 400
+
+    # A city is a GeoNames id picked from the suggestions. A typed name is not guessed at.
+    for city in ("Wien", "999999999"):
+        form = {"title": "x", "city_ids": city}
+        assert (await client.post("/profile", data=form)).status_code == 400
+
+
+async def test_a_city_is_found_by_any_spelling_and_shown_by_name(client, seeded):
+    response = await client.get("/places", params={"q": "wien"})
+    assert '<option value="2761369">Vienna, AT</option>' in response.text
+
+    form = {"title": "x", "countries": "", "city_ids": "2761369"}
+    assert (await client.post("/profile", data=form)).status_code == 303
+    assert "Vienna, AT" in (await client.get("/profile")).text
 
 
 async def test_an_over_long_background_is_refused_rather_than_truncated(client, seeded):

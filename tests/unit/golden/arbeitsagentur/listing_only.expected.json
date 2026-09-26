@@ -1,5 +1,5 @@
 {
-  "derive_version": 3,
+  "derive_version": 4,
   "facets": {
     "cities": [
       "München"
@@ -10,6 +10,9 @@
     "employment_type": "full_time",
     "is_agency": null,
     "language": "de",
+    "place_ids": [
+      2867714
+    ],
     "regions": [
       "Bayern"
     ],
@@ -18,6 +21,7 @@
     "salary_min_eur_year": "62000.0",
     "seniority": "unknown",
     "skills": [],
+    "unplaced_countries": [],
     "work_mode": "onsite"
   },
   "job": {

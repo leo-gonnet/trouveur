@@ -1,5 +1,5 @@
 {
-  "derive_version": 3,
+  "derive_version": 4,
   "facets": {
     "cities": [
       "Wien",
@@ -9,6 +9,7 @@
     "employment_type": "unknown",
     "is_agency": null,
     "language": null,
+    "place_ids": [],
     "regions": [],
     "salary_annualised": false,
     "salary_max_eur_year": null,
@@ -18,6 +19,7 @@
       "airflow",
       "dbt"
     ],
+    "unplaced_countries": [],
     "work_mode": "remote"
   },
   "job": {

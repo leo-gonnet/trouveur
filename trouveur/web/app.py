@@ -30,11 +30,15 @@ from trouveur.db.queries import admin as admin_q
 from trouveur.db.queries import freshness
 from trouveur.db.queries import match as match_q
 from trouveur.db.queries import users as users_q
+from trouveur.ingest import places
 from trouveur.match.pipeline import profile_from_row
 from trouveur.models import (
     BACKGROUND_MAX_CHARS,
     COUNTRY_NAMES,
+    DEFAULT_RADIUS_KM,
     LANGUAGES,
+    MAX_RADIUS_KM,
+    MIN_RADIUS_KM,
     RunTrigger,
     UserState,
 )
@@ -158,6 +162,17 @@ def _choices(raw: list[str], allowed: Iterable[str], what: str) -> list[str]:
         if value not in allowed:
             raise UnknownChoice(f"Unknown {what}: {value!r}.")
     return list(dict.fromkeys(values))
+
+
+def _places(raw: list[str]) -> list[int]:
+    """Towns by GeoNames id, the only form the filter can match. A typed name never gets here:
+    the form posts the id of the suggestion that was picked."""
+    ids = []
+    for value in raw:
+        if not value.isdigit() or places.get(int(value)) is None:
+            raise UnknownChoice(f"Unknown city: {value!r}.")
+        ids.append(int(value))
+    return list(dict.fromkeys(ids))
 
 
 def _decimal(raw: str, default: Decimal) -> Decimal:
@@ -418,7 +433,7 @@ async def profile_form(request: Request):
         # Priced before the edit, not billed after it. An upper bound: what a re-score actually
         # covers is whatever the NEW profile's queries retrieve, which needs the queries to run.
         pending = await match_q.count_pending_rerank(
-            conn, session["uid"], freshness.fresh_since(get_settings().retrieval_horizon_days)
+            conn, profile, freshness.fresh_since(get_settings().retrieval_horizon_days)
         )
     return templates.TemplateResponse(
         request,
@@ -429,6 +444,10 @@ async def profile_form(request: Request):
             "rescore_estimate": pending,
             "username": session["u"],
             "country_names": COUNTRY_NAMES,
+            "city_names": {
+                place.id: place.label for place in map(places.get, profile.city_ids) if place
+            },
+            "radius_bounds": (MIN_RADIUS_KM, MAX_RADIUS_KM),
             "language_names": LANGUAGES,
             "background_max_chars": BACKGROUND_MAX_CHARS,
         },
@@ -446,8 +465,9 @@ async def profile_save(
     must_have: str = Form(""),
     keywords: str = Form(""),
     countries: str = Form(""),
+    city_ids: str = Form(""),
+    radius_km: int = Form(DEFAULT_RADIUS_KM),
     remote_anywhere: str = Form(""),
-    cities: str = Form(""),
     min_salary_eur_year: str = Form("0"),
 ):
     session = request.state.session
@@ -461,10 +481,11 @@ async def profile_save(
             "must_have": _lines(must_have),
             "keywords": _lines(keywords),
             "countries": _choices(_lines(countries), COUNTRY_NAMES, "country"),
+            "city_ids": _places(_lines(city_ids)),
+            "radius_km": min(max(radius_km, MIN_RADIUS_KM), MAX_RADIUS_KM),
             # An unticked checkbox submits nothing, so absence is False here -- unlike the
             # scoring ceiling, where a disabled input's absence means "keep what is set".
             "remote_anywhere": remote_anywhere == "yes",
-            "cities": _lines(cities),
             "min_salary_eur_year": _decimal(min_salary_eur_year, Decimal(0)),
         }
     except (UnknownChoice, FieldTooLong) as exc:
@@ -480,6 +501,13 @@ async def profile_save(
         "profile saved for user %s (version %d, rescore=%s)", session["uid"], version, rescore
     )
     return RedirectResponse(f"/profile?saved=1&rescore={int(rescore)}", status_code=303)
+
+
+@app.get("/places", response_class=HTMLResponse)
+async def place_options(request: Request, q: str = ""):
+    return templates.TemplateResponse(
+        request, "_place_options.html", {"places": places.suggest(q)}
+    )
 
 
 @app.get("/settings", response_class=HTMLResponse)

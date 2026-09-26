@@ -83,7 +83,7 @@ def _dossier(profile) -> str:
         f"current title: {profile.title or 'unstated'}\n"
         f"years of experience: {profile.years_experience}\n"
         f"languages: {', '.join(profile.languages) or 'unstated'}\n"
-        f"preferred cities: {', '.join(profile.cities) or 'none stated'}\n"
+        f"preferred cities: {', '.join(rerank.city_names(profile)) or 'none stated'}\n"
         f"objectives: {profile.objectives or 'unstated'}\n"
         f"background: {profile.background or 'unstated'}\n"
         f"must have: {'; '.join(profile.must_have) or 'none stated'}\n"

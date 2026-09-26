@@ -76,6 +76,8 @@ async def drain_derive(conn: AsyncConnection, limit: int = 500) -> int:
                 "countries": facets.countries,
                 "regions": facets.regions,
                 "cities": facets.cities,
+                "place_ids": facets.place_ids,
+                "unplaced_countries": facets.unplaced_countries,
                 "work_mode": facets.work_mode.value,
                 "seniority": facets.seniority.value,
                 "employment_type": facets.employment_type.value,

@@ -1,5 +1,5 @@
 {
-  "derive_version": 3,
+  "derive_version": 4,
   "facets": {
     "cities": [
       "Wien"
@@ -10,12 +10,16 @@
     "employment_type": "full_time",
     "is_agency": null,
     "language": "de",
+    "place_ids": [
+      2761369
+    ],
     "regions": [],
     "salary_annualised": true,
     "salary_max_eur_year": "72800",
     "salary_min_eur_year": "58800",
     "seniority": "unknown",
     "skills": [],
+    "unplaced_countries": [],
     "work_mode": "unknown"
   },
   "job": {

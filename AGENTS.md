@@ -140,6 +140,7 @@ query.** Sources sweep by their own structure; users select over the corpus.
 | `trouveur/ingest/persist.py` | The single write path from archive to `job`. |
 | `trouveur/ingest/derive.py` | Deterministic interpretation → facets. Pure. |
 | `trouveur/ingest/vocab.py` | **Every** vocabulary, once. |
+| `trouveur/ingest/places.py` | The city list (GeoNames): every spelling of a town to one id. |
 | `trouveur/ingest/embed/` | Provider seam; local ONNX default. |
 | `trouveur/ingest/pipeline.py` | Sweep orchestration. No parsing, no SQL. |
 | `trouveur/work/queue.py` | The one versioned work queue. |
@@ -554,7 +555,7 @@ so the deployment has no LLM spend of its own and one user's exhausted budget ca
   that would need one: a filter on an enum drops every posting whose facet is unstated the moment
   it is set, and the control existed only to undo the filter the user had just set.
 - **Location is the only hard filter, and everything else on Profile is a preference.** The
-  reranker reads `cities`, `min_salary_eur_year`, `languages`, `must_have` and the objectives as
+  reranker reads `min_salary_eur_year`, `languages`, `must_have` and the objectives as
   prompt text; none of them narrows the query. Work mode, seniority, employment type and a salary
   floor were filters once and each dropped every posting whose facet was unstated, which is why the
   form had a "not stated" tick box beside three of them — a control whose only job was to undo the
@@ -567,11 +568,27 @@ so the deployment has no LLM spend of its own and one user's exhausted budget ca
 - **A posting that states no location passes.** Not an escape clause on one arm of the filter but
   how the filter works: a posting nobody parsed a country out of is not a posting somewhere else,
   and dropping it would cost recall for a derivation gap.
-- **`cities` is a reranker preference, never a hard filter.** Countries can be filtered because
-  derivation folds every spelling to one ISO code first; cities are stored as the source spelled
-  them, so `Wien` and `Vienna` coexist and a `f.cities && :cities` clause would silently lose
-  one of them, plus every suburb and every multi-site posting. The prompt carries them instead
-  and the system prompt says they are a preference. Do not "finish" the filter.
+- **Cities are filtered by GeoNames id, never by name.** Cities as the source spelled them
+  (`job_facet.cities`) are for display only: `Wien` and `Vienna` coexist there, and a
+  `f.cities && :cities` clause would silently lose one of them, plus every suburb. Derivation
+  resolves each town to one id (`place_ids`) through `ingest/places.py`, the profile stores ids
+  picked from the same list (`city_ids`) with one `radius_km`, and the match run turns the circles
+  into the set of ids inside them. Both sides read the one list, so they cannot disagree.
+- **Countries and cities add up; they never narrow each other.** A posting passes if it is in one
+  of the user's countries OR inside one of their circles. Nothing picked at all means everywhere
+  -- but cities alone must not read as "no countries, so everywhere".
+- **A town that cannot be resolved falls back to its country, and is never guessed.** Resolving
+  needs the posting's country ("Vienna" alone may be Vienna, Virginia), and a name several towns
+  share resolves only when one is ten times bigger than the rest (`Frankfurt` yes, `Neustadt` no).
+  An unresolved town's country goes to `unplaced_countries`, and the filter keeps that posting
+  whenever the country is one the user's circles reach into -- "Germany" alone might be Lörrach,
+  inside a circle around Basel. A wrong id would put a posting in the wrong circle and hide it;
+  an unresolved one only costs precision, which the reranker recovers.
+- **`places.tsv.gz` is vocabulary, and the one generated file we commit.** Built by
+  `tools/build_places.py` from GeoNames (CC BY 4.0) via the `geonamescache` wheel, because
+  download.geonames.org is not reachable from every build environment. Committing it keeps
+  derivation pure and reproducible from the commit. Rebuilding it changes derived output for
+  every posting, so it comes with a `DERIVE_VERSION` bump, exactly like an edit to `vocab.py`.
 - **An edition is paged by cursor, and the order it pages by must be TOTAL.** `(llm_score,
   job_id)`, tiebroken on `job_id` because it is part of the key and therefore unique within an
   edition -- `posted_at` is nullable and repeats, so a page built on it can repeat or skip a row.
@@ -783,6 +800,9 @@ still holds the old readings and no re-derive has been scheduled.
     most in need of a re-score look current and nothing is ever re-scored.
   - **Location is the only hard filter**, a posting that states no location passes, and a fully
     remote posting is admitted wherever it was posted.
+  - **Every spelling of a town resolves to one id** (`Wien`, `Vienna`, `Wien 10., Favoriten`), an
+    ambiguous or country-less town is left unresolved rather than guessed, and a posting whose
+    town is unresolved passes when its country is one the user's circles reach into.
   - **The rerank prompt carries exactly one advert**, with the profile block before it — batching
     moved scores by slot position, and profile-first is what a prompt-prefix cache reuses.
   - **One failed scoring call does not lose the rest of its wave**, and the ceiling is tested before
@@ -941,6 +961,7 @@ uv run trouveur sweep                     # fetch sources into the corpus
 uv run trouveur sweep --source greenhouse # one source
 uv run trouveur drain                     # work the deferred queues once
 uv run trouveur refill --kind derive      # re-queue everything below the current version
+uv run --with geonamescache==3.0.2 python tools/build_places.py   # rebuild the city list
 uv run trouveur match --user 1            # retrieve, cut, rerank for one user
 uv run trouveur tenants list             # the crawl set, with per-tenant health
 uv run trouveur tenants add greenhouse n26   # accepts a slug or a full careers URL
@@ -978,7 +999,8 @@ chore(deploy): pin the postgres image to pg16
 ```
 
 Types: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`, `build`. Describe the problem and the
-evidence, not a diff summary. Never commit generated files or secrets.
+evidence, not a diff summary. Never commit generated files or secrets -- `places.tsv.gz` is the
+one exception, see Web UI.
 
 ## Keeping this file updated
 

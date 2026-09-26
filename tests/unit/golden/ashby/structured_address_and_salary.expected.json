@@ -1,5 +1,5 @@
 {
-  "derive_version": 3,
+  "derive_version": 4,
   "facets": {
     "cities": [
       "Vienna",
@@ -11,6 +11,9 @@
     "employment_type": "unknown",
     "is_agency": null,
     "language": null,
+    "place_ids": [
+      2761369
+    ],
     "regions": [],
     "salary_annualised": false,
     "salary_max_eur_year": "82000",
@@ -19,6 +22,7 @@
     "skills": [
       "kubernetes"
     ],
+    "unplaced_countries": [],
     "work_mode": "remote"
   },
   "job": {

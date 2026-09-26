@@ -157,7 +157,10 @@ def _arguments(ctx: dict) -> dict[str, dict]:
         "match.pending_rerank": {
             "user_id": user_id, "profile_version": 1, "job_ids": [job_id],
         },
-        "match.count_pending_rerank": {"user_id": user_id, "fresh_since": _cutoff()},
+        "match.count_pending_rerank": {
+            "profile": ctx["profile"].model_copy(update={"city_ids": [2761369]}),
+            "fresh_since": _cutoff(),
+        },
         "match.scoreable_rows": {"job_ids": [job_id]},
         "match.cached_scores": {
             "user_id": user_id, "profile_version": 1, "hashes": [ctx["content_hash"]],
@@ -242,7 +245,8 @@ async def context(seeded):
         },
         "facet_row": {
             "job_id": row.id, "derive_version": 1, "countries": ["DE"], "regions": [],
-            "cities": ["Berlin"], "work_mode": "remote", "seniority": "senior",
+            "cities": ["Berlin"], "place_ids": [2950159], "unplaced_countries": [],
+            "work_mode": "remote", "seniority": "senior",
             "employment_type": "full_time", "salary_min_eur_year": None,
             "salary_max_eur_year": None, "salary_annualised": False, "language": "de",
             "is_agency": None, "skills": ["python"], "derived_at": None,

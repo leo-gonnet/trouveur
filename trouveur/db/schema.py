@@ -101,6 +101,8 @@ job_facet = sa.Table(
     sa.Column("countries", ARRAY(sa.Text), nullable=False, server_default="{}"),
     sa.Column("regions", ARRAY(sa.Text), nullable=False, server_default="{}"),
     sa.Column("cities", ARRAY(sa.Text), nullable=False, server_default="{}"),
+    sa.Column("place_ids", ARRAY(sa.Integer), nullable=False, server_default="{}"),
+    sa.Column("unplaced_countries", ARRAY(sa.Text), nullable=False, server_default="{}"),
     sa.Column("work_mode", work_mode, nullable=False, server_default="unknown"),
     sa.Column("seniority", seniority, nullable=False, server_default="unknown"),
     sa.Column("employment_type", employment_type, nullable=False, server_default="unknown"),
@@ -222,12 +224,14 @@ user_profile = sa.Table(
     sa.Column("languages", ARRAY(sa.Text), nullable=False, server_default="{}"),
     sa.Column("must_have", ARRAY(sa.Text), nullable=False, server_default="{}"),
     sa.Column("keywords", ARRAY(sa.Text), nullable=False, server_default="{}"),
-    # The only hard filter, with the one case a country cannot express folded into it: a fully
-    # remote role is in no place, so it is admitted wherever it was posted.
+    # The only hard filter: whole countries, plus towns (GeoNames ids) with one radius around
+    # them, plus the one case neither can express -- a fully remote role is in no place, so it is
+    # admitted wherever it was posted.
     sa.Column("countries", ARRAY(sa.Text), nullable=False, server_default="{AT,DE,CH}"),
+    sa.Column("city_ids", ARRAY(sa.Integer), nullable=False, server_default="{}"),
+    sa.Column("radius_km", sa.Integer, nullable=False, server_default="30"),
     sa.Column("remote_anywhere", sa.Boolean, nullable=False, server_default="true"),
-    # Preferences the reranker reads as prompt text. Neither narrows the query.
-    sa.Column("cities", ARRAY(sa.Text), nullable=False, server_default="{}"),
+    # A preference the reranker reads as prompt text. It does not narrow the query.
     sa.Column("min_salary_eur_year", sa.Numeric, nullable=False, server_default="0"),
     # The one cost control the user touches. Off means no paid call of any kind runs for
     # them -- scoring, and the query expansion that is also billed. Retrieval stays free and

@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from decimal import Decimal
 
-from trouveur.ingest import vocab
+from trouveur.ingest import places, vocab
 from trouveur.models import (
     CanonicalJob,
     EmploymentType,
@@ -40,12 +40,16 @@ _SKILL_PATTERN = re.compile(
 def derive(item: CanonicalJob) -> JobFacets:
     title = fold(item.title)
     description = fold(item.description or "")
-    countries, regions, cities, location_says_remote = _places(item.locations)
+    countries, regions, cities, place_ids, unplaced, location_says_remote = _places(
+        item.locations
+    )
 
     return JobFacets(
         countries=countries,
         regions=regions,
         cities=cities,
+        place_ids=place_ids,
+        unplaced_countries=unplaced,
         work_mode=_work_mode(item, title, _location_text(item.locations), location_says_remote),
         seniority=_seniority(title),
         employment_type=_employment_type(item, title),
@@ -58,34 +62,48 @@ def derive(item: CanonicalJob) -> JobFacets:
     )
 
 
-def _places(locations: list[Location]) -> tuple[list[str], list[str], list[str], bool]:
+def _places(
+    locations: list[Location],
+) -> tuple[list[str], list[str], list[str], list[int], list[str], bool]:
     countries: list[str] = []
     regions: list[str] = []
     cities: list[str] = []
+    place_ids: list[int] = []
+    unplaced: list[str] = []
     says_remote = False
 
     for location in locations:
-        if location.country:
-            code = vocab.COUNTRIES.get(fold(location.country))
-            if code:
-                countries.append(code)
+        country = vocab.COUNTRIES.get(fold(location.country)) if location.country else None
+        city = _city(location.city) if location.city else None
         if location.region:
             region = vocab.REGIONS.get(fold(location.region))
             if region:
                 regions.append(region)
-        if location.city:
-            cities.append(_city(location.city))
 
         # Only parse free text where the source gave no structure.
         if not (location.country and location.city):
             parsed_country, parsed_city, remote = _parse_free_text(location.raw)
             says_remote = says_remote or remote
-            if parsed_country and not location.country:
-                countries.append(parsed_country)
-            if parsed_city and not location.city:
-                cities.append(parsed_city)
+            if not location.country:
+                country = parsed_country
+            if not location.city:
+                city = parsed_city
 
-    return _unique(countries), _unique(regions), _unique(cities), says_remote
+        if country:
+            countries.append(country)
+        if city:
+            cities.append(city)
+        place = places.resolve(city, country) if city and country else None
+        if place:
+            place_ids.append(place.id)
+        elif country:
+            # Known country, unknown town: the location filter can only judge it by the country.
+            unplaced.append(country)
+
+    return (
+        _unique(countries), _unique(regions), _unique(cities),
+        _unique(place_ids), _unique(unplaced), says_remote,
+    )
 
 
 def _parse_free_text(raw: str) -> tuple[str | None, str | None, bool]:
@@ -199,8 +217,8 @@ def _is_annualised(item: CanonicalJob) -> bool:
     )
 
 
-def _unique(values: list[str]) -> list[str]:
-    seen: dict[str, None] = {}
+def _unique[T](values: list[T]) -> list[T]:
+    seen: dict[T, None] = {}
     for value in values:
         if value:
             seen.setdefault(value, None)

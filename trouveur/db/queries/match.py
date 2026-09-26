@@ -19,19 +19,35 @@ from trouveur.db.schema import (
     user_job_match,
     user_query_expansion,
 )
+from trouveur.ingest import places
 from trouveur.models import Expansion
 
 # The ONE filter applied before ranking, and deliberately the only one. Every other preference a
-# user states -- cities, salary, languages -- reaches the reranker as text instead, because a rule
+# user states -- salary, languages -- reaches the reranker as text instead, because a rule
 # that rejected a posting here hid it from the reader with no way to find out it existed. The four
 # enum filters this replaced (work mode, seniority, employment type, salary) each also dropped
 # every posting whose facet was unstated, which is why the form had to offer a "not stated" tick
 # box to undo the filter the user had just set.
 #
 # Unstated location passes: a posting nobody parsed a country out of is not a posting somewhere
-# else. Fully remote passes wherever it is, because for a role with no office the country named
-# says nothing about whether the reader can take it -- whether it is remote *for them* is in the
-# description, which the reranker reads.
+# else. A posting whose town could not be resolved is judged by its country alone, against every
+# country the user's circles reach into -- it might be inside one. Fully remote passes wherever it
+# is, because for a role with no office the place named says nothing about whether the reader can
+# take it -- whether it is remote *for them* is in the description, which the reranker reads.
+#
+# Cities are never compared by name here: `place_ids` are GeoNames ids resolved by derivation, and
+# the circles are resolved from the same list, so `Wien` and `Vienna` are one id on both sides.
+_LOCATION = """
+    (
+        CAST(:anywhere AS boolean)
+        OR cardinality(f.countries) = 0
+        OR f.countries && CAST(:countries AS text[])
+        OR f.place_ids && CAST(:area_ids AS integer[])
+        OR f.unplaced_countries && CAST(:area_countries AS text[])
+        OR (CAST(:remote_anywhere AS boolean) AND f.work_mode = 'remote')
+    )
+"""
+
 _ELIGIBLE = f"""
     j.closed_at IS NULL
     AND {freshness.sql("j")}
@@ -40,12 +56,7 @@ _ELIGIBLE = f"""
     -- posting we first saw today but that was posted three days ago is a new arrival and belongs
     -- in today's run, which is why this reads first_seen_at and the clause above reads COALESCE.
     AND j.first_seen_at > :seen_since
-    AND (
-        cardinality(CAST(:countries AS text[])) = 0
-        OR f.countries && CAST(:countries AS text[])
-        OR cardinality(f.countries) = 0
-        OR (CAST(:remote_anywhere AS boolean) AND f.work_mode = 'remote')
-    )
+    AND {_LOCATION}
 """
 
 # There is deliberately NO ANN index on job_embedding, so this is an exact scan over the vectors
@@ -92,15 +103,24 @@ LIMIT :limit
 """
 
 
+def _location_params(profile: Any) -> dict[str, Any]:
+    countries = list(profile.countries or [])
+    city_ids = list(profile.city_ids or [])
+    area_ids, area_countries = places.area(city_ids, profile.radius_km)
+    return {
+        # Nothing picked at all accepts everywhere. Cities alone must not.
+        "anywhere": not countries and not city_ids,
+        "countries": countries,
+        "area_ids": area_ids,
+        "area_countries": area_countries,
+        "remote_anywhere": bool(profile.remote_anywhere),
+    }
+
+
 def _filter_params(
     profile: Any, fresh_since: datetime, seen_since: datetime
 ) -> dict[str, Any]:
-    return {
-        "fresh_since": fresh_since,
-        "seen_since": seen_since,
-        "countries": list(profile.countries or []),
-        "remote_anywhere": bool(profile.remote_anywhere),
-    }
+    return {"fresh_since": fresh_since, "seen_since": seen_since, **_location_params(profile)}
 
 
 async def dense_candidates(
@@ -236,7 +256,7 @@ async def scoreable_rows(conn: AsyncConnection, job_ids: Sequence[int]) -> list[
 
 
 async def count_pending_rerank(
-    conn: AsyncConnection, user_id: int, fresh_since: datetime
+    conn: AsyncConnection, profile: Any, fresh_since: datetime
 ) -> int:
     """An upper bound on what a profile change would score, so the form can price an edit.
 
@@ -252,18 +272,12 @@ async def count_pending_rerank(
                     SELECT count(*)
                     FROM job j
                     JOIN job_facet f ON f.job_id = j.id
-                    JOIN user_profile p ON p.user_id = :user_id
                     WHERE j.closed_at IS NULL
                       AND {freshness.sql("j")}
-                      AND (
-                          cardinality(p.countries) = 0
-                          OR f.countries && p.countries
-                          OR cardinality(f.countries) = 0
-                          OR (p.remote_anywhere AND f.work_mode = 'remote')
-                      )
+                      AND {_LOCATION}
                     """
                 ),
-                {"user_id": user_id, "fresh_since": fresh_since},
+                {"fresh_since": fresh_since, **_location_params(profile)},
             )
         ).scalar_one()
         or 0

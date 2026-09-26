@@ -75,11 +75,13 @@
 
 {# Without the script this is a one-per-line textarea, which is also what is posted; the script
    only renders the same value as chips. `options` restricts entries to a code -> name list. #}
-{% macro tags(name, values, hint='', options=none, placeholder='') %}
+{# `suggest` is a URL answering ?q= with <option>s, for a list too long to send with the page. #}
+{% macro tags(name, values, hint='', options=none, placeholder='', suggest='') %}
 <div class="tags">
   <textarea name="{{ name }}" rows="2" data-placeholder="{{ placeholder }}"
-            {% if options %}list="{{ name }}-options"{% endif %}>{{ values | join('\n') }}</textarea>
-  {% if options %}
+            {% if suggest %}data-suggest="{{ suggest }}"{% endif %}
+            {% if options is not none %}list="{{ name }}-options"{% endif %}>{{ values | join('\n') }}</textarea>
+  {% if options is not none %}
     <datalist id="{{ name }}-options">
       {% for code, label in options.items() %}<option value="{{ code }}">{{ label }}</option>{% endfor %}
     </datalist>

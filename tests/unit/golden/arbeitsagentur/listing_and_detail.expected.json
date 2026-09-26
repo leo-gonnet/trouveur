@@ -1,5 +1,5 @@
 {
-  "derive_version": 3,
+  "derive_version": 4,
   "facets": {
     "cities": [
       "München"
@@ -10,6 +10,9 @@
     "employment_type": "full_time",
     "is_agency": false,
     "language": "de",
+    "place_ids": [
+      2867714
+    ],
     "regions": [
       "Bayern"
     ],
@@ -23,6 +26,7 @@
       "sap",
       "six sigma"
     ],
+    "unplaced_countries": [],
     "work_mode": "onsite"
   },
   "job": {

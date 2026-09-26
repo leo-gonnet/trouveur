@@ -13,6 +13,7 @@ from decimal import Decimal
 from pydantic import BaseModel, Field, ValidationError
 
 from trouveur.config import Settings
+from trouveur.ingest import places
 from trouveur.match import llm
 from trouveur.models import UserProfile
 
@@ -94,6 +95,10 @@ class RerankReport:
     errors: list[str] = field(default_factory=list)
 
 
+def city_names(profile: UserProfile) -> list[str]:
+    return [place.name for place in map(places.get, profile.city_ids) if place]
+
+
 def build_prompt(profile: UserProfile, candidate, *, background: str = "") -> str:
     """The profile block, then the one advert being scored.
 
@@ -120,7 +125,7 @@ def build_prompt(profile: UserProfile, candidate, *, background: str = "") -> st
         f"current title: {profile.title or 'unstated'}\n"
         f"years of experience: {profile.years_experience}\n"
         f"languages: {', '.join(profile.languages) or 'unstated'}\n"
-        f"preferred cities: {', '.join(profile.cities) or 'none stated'}\n"
+        f"preferred cities: {', '.join(city_names(profile)) or 'none stated'}\n"
         f"objectives: {profile.objectives or 'unstated'}\n"
         f"background: {background or 'unstated'}\n"
         f"must have: {'; '.join(profile.must_have) or 'none stated'}\n"
