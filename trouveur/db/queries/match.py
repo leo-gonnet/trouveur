@@ -343,24 +343,22 @@ _NOT_DISMISSED = "coalesce(m.state::text, 'new') <> 'dismissed'"
 
 
 async def editions(conn: AsyncConnection, user_id: int) -> list[sa.Row]:
-    """Every day this user has an edition for, newest first.
+    """Every edition this user has, newest first.
 
-    The profile version comes back so the page can mark a day that was read under a profile the
-    user has since changed; a day can span two versions if the profile changed mid-day.
+    One per (day, profile version), not one per day: a profile change publishes a second edition
+    for the day beside the first rather than replacing it, so a day the profile changed on has two
+    and the reader can still see what they were shown before the change.
     """
     return list(
         await conn.execute(
             sa.text(
                 f"""
-                SELECT e.day,
-                       count(*) AS postings,
-                       min(e.profile_version) AS profile_version,
-                       max(e.profile_version) AS profile_version_max
+                SELECT e.day, e.profile_version, count(*) AS postings
                 FROM user_edition_item e
                 {_EDITION_STATE}
                 WHERE e.user_id = :user_id AND {_NOT_DISMISSED}
-                GROUP BY e.day
-                ORDER BY e.day DESC
+                GROUP BY e.day, e.profile_version
+                ORDER BY e.day DESC, e.profile_version DESC
                 """
             ),
             {"user_id": user_id},
@@ -369,9 +367,15 @@ async def editions(conn: AsyncConnection, user_id: int) -> list[sa.Row]:
 
 
 async def edition(
-    conn: AsyncConnection, user_id: int, day: date, *, limit: int, offset: int = 0
+    conn: AsyncConnection,
+    user_id: int,
+    day: date,
+    profile_version: int,
+    *,
+    limit: int,
+    offset: int = 0,
 ) -> list[sa.Row]:
-    """One page of one day's edition, best first. No score cut: the day is the cut.
+    """One page of one edition, best first. No score cut: the edition is the cut.
 
     The score, reason and red flags are the EDITION's, not user_job_match's -- that row holds the
     current verdict, and reading it here would let a later re-score rewrite what this day said.
@@ -397,65 +401,26 @@ async def edition(
                 {_EDITION_STATE}
                 WHERE e.user_id = :user_id
                   AND e.day = CAST(:day AS date)
+                  AND e.profile_version = :profile_version
                   AND {_NOT_DISMISSED}
                 ORDER BY e.llm_score DESC, j.posted_at DESC NULLS LAST
                 LIMIT :limit OFFSET :offset
                 """
             ),
-            {"user_id": user_id, "day": day, "limit": limit, "offset": offset},
+            {
+                "user_id": user_id, "day": day, "profile_version": profile_version,
+                "limit": limit, "offset": offset,
+            },
         )
     )
-
-
-async def edition_size(conn: AsyncConnection, user_id: int, day: date) -> int:
-    """How many postings a day's edition holds, so the profile form can say what a save costs."""
-    return int(
-        (
-            await conn.execute(
-                sa.text(
-                    """
-                    SELECT count(*) FROM user_edition_item
-                    WHERE user_id = :user_id AND day = CAST(:day AS date)
-                    """
-                ),
-                {"user_id": user_id, "day": day},
-            )
-        ).scalar_one()
-        or 0
-    )
-
-
-async def clear_stale_edition(
-    conn: AsyncConnection, user_id: int, day: date, profile_version: int
-) -> int:
-    """Drop `day`'s edition if it was published under a profile the user has since changed.
-
-    Only ever called for the current day, and only after the user agreed to lose it on the
-    profile form: an edition already published is a record, and a past one is never touched.
-    Rows at the CURRENT version survive, so a second run on the same day adds to the day
-    rather than restarting it.
-    """
-    return (
-        await conn.execute(
-            sa.text(
-                """
-                DELETE FROM user_edition_item
-                WHERE user_id = :user_id
-                  AND day = CAST(:day AS date)
-                  AND profile_version <> :profile_version
-                """
-            ),
-            {"user_id": user_id, "day": day, "profile_version": profile_version},
-        )
-    ).rowcount or 0
 
 
 async def publish_edition(conn: AsyncConnection, rows: Sequence[dict]) -> int:
     """Add scored postings to a day's edition.
 
-    Conflicts on (user, day, job) do nothing, so re-running a day is idempotent. A conflict on
-    the version constraint is NOT swallowed: that one means a posting is being recommended twice
-    under one profile, which is a bug upstream rather than a repeat.
+    Conflicts on the key do nothing, so re-running a day at the same version is idempotent. A
+    conflict on `uq_edition_item_once_per_version` is NOT swallowed: that one means a posting is
+    being recommended twice under one profile, which is a bug upstream rather than a repeat.
     """
     if not rows:
         return 0
@@ -464,6 +429,7 @@ async def publish_edition(conn: AsyncConnection, rows: Sequence[dict]) -> int:
         index_elements=[
             user_edition_item.c.user_id,
             user_edition_item.c.day,
+            user_edition_item.c.profile_version,
             user_edition_item.c.job_id,
         ]
     )

@@ -303,8 +303,11 @@ user_edition_item = sa.Table(
     metadata,
     sa.Column("user_id", sa.BigInteger, primary_key=True),
     sa.Column("day", sa.Date, primary_key=True),
+    # Part of the key: a day holds one edition per profile version. Changing a profile publishes
+    # a second edition for the day rather than replacing the first, so no published edition is
+    # ever destroyed and there is nothing to ask the user's permission for.
+    sa.Column("profile_version", sa.Integer, primary_key=True),
     sa.Column("job_id", sa.BigInteger, primary_key=True),
-    sa.Column("profile_version", sa.Integer, nullable=False),
     sa.Column("llm_score", sa.SmallInteger, nullable=False),
     sa.Column("llm_reason", sa.Text, nullable=False, server_default=""),
     sa.Column("llm_red_flags", JSONB, nullable=False, server_default=sa.text("'[]'::jsonb")),

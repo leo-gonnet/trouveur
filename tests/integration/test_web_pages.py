@@ -303,7 +303,7 @@ async def test_saving_a_scoring_field_bumps_the_profile_version(client, seeded):
         "title": "Head of Operations", "years_experience": "9", "objectives": "",
         "languages": "de", "must_have": "", "keywords": "lean",
         "countries": "DE\nAT", "remote_anywhere": "yes", "cities": "",
-        "min_salary_eur_year": "60000", "confirm": "yes",
+        "min_salary_eur_year": "60000",
     }
     assert (await client.post("/profile", data=form)).status_code == 303
     async with connect() as conn:
@@ -335,7 +335,7 @@ async def test_a_scoring_change_queues_a_re_score_without_erasing_anything(clien
 
     form = {
         "title": "Something else entirely", "years_experience": "9",
-        "countries": "DE\nAT", "confirm": "yes",
+        "countries": "DE\nAT",
     }
     assert (await client.post("/profile", data=form)).status_code == 303
 
@@ -362,7 +362,7 @@ async def test_retrieval_does_not_restamp_the_version_a_posting_was_scored_under
     """
     form = {
         "title": "Something else entirely", "years_experience": "9",
-        "countries": "DE\nAT", "confirm": "yes",
+        "countries": "DE\nAT",
     }
     assert (await client.post("/profile", data=form)).status_code == 303
 
@@ -385,25 +385,31 @@ async def test_retrieval_does_not_restamp_the_version_a_posting_was_scored_under
     )
 
 
-async def test_replacing_todays_edition_is_asked_about_before_it_happens(client, seeded):
-    """Today's edition is the only one a save may replace, so the save has to ask first."""
+async def test_saving_a_profile_destroys_no_edition_and_asks_nothing(client, seeded):
+    """There is no confirm step, because a save no longer destroys anything.
+
+    A profile change used to replace today's edition, so the form had to ask first. Now it
+    publishes a second edition for the day beside the first, which leaves nothing to agree to --
+    and removes the one exception to "an edition is never rewritten".
+    """
+    from datetime import date as _date
+
+    user_id = seeded["user_id"]
+    today = _date(2026, 9, 24)
+    ids = await _all_match_ids(user_id)
+    await _publish(user_id, ids, today, version=1)
+
+    async with connect() as conn:
+        before = (await users_q.get_profile(conn, user_id)).version
+
     form = {"title": "Something else entirely", "years_experience": "9", "countries": "DE\nAT"}
+    saved = await client.post("/profile", data=form)
+    assert saved.status_code == 303, "a save was interrupted by a page that no longer exists"
 
     async with connect() as conn:
-        before = (await users_q.get_profile(conn, seeded["user_id"])).version
-
-    asked = await client.post("/profile", data=form)
-    assert asked.status_code == 200, "a replace went through without asking"
-    assert "Replace today&#39;s edition?" in asked.text or "Replace today" in asked.text
-    async with connect() as conn:
-        assert (await users_q.get_profile(conn, seeded["user_id"])).version == before, (
-            "the profile was saved before the user agreed"
-        )
-
-    confirmed = await client.post("/profile", data={**form, "confirm": "yes"})
-    assert confirmed.status_code == 303
-    async with connect() as conn:
-        assert (await users_q.get_profile(conn, seeded["user_id"])).version > before
+        assert (await users_q.get_profile(conn, user_id)).version > before
+        kept = await match_q.edition(conn, user_id, today, 1, limit=100)
+    assert len(kept) == len(ids), "saving a profile destroyed a published edition"
 
 
 async def test_a_profile_change_queues_one_match_run_for_this_user_only(client, seeded):
@@ -411,9 +417,9 @@ async def test_a_profile_change_queues_one_match_run_for_this_user_only(client, 
     from trouveur.db.queries import admin as admin_q
 
     form = {"title": "Something else entirely", "years_experience": "9", "countries": "DE\nAT"}
-    assert (await client.post("/profile", data={**form, "confirm": "yes"})).status_code == 303
+    assert (await client.post("/profile", data=form)).status_code == 303
     assert (
-        await client.post("/profile", data={**form, "title": "A third title", "confirm": "yes"})
+        await client.post("/profile", data={**form, "title": "A third title"})
     ).status_code == 303
 
     async with connect() as conn:
@@ -524,7 +530,7 @@ async def test_an_over_long_background_is_refused_rather_than_truncated(client, 
     form = {"title": "x", "background": "a" * (BACKGROUND_MAX_CHARS + 1)}
     assert (await client.post("/profile", data=form)).status_code == 400
 
-    form = {"title": "x", "background": "a" * BACKGROUND_MAX_CHARS, "confirm": "yes"}
+    form = {"title": "x", "background": "a" * BACKGROUND_MAX_CHARS}
     assert (await client.post("/profile", data=form)).status_code == 303
 
 

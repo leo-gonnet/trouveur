@@ -275,16 +275,16 @@ async def _rerank(
 async def _publish(
     conn: AsyncConnection, profile: UserProfile, report, scored: list[dict]
 ) -> None:
-    """Write today's edition.
+    """Write today's edition, at this profile version.
 
-    The clear and the insert share this transaction on purpose: a run that dies between them
-    would otherwise delete a published day and put nothing back in its place.
+    Nothing is deleted here. A profile change publishes a second edition for the day beside the
+    one already there rather than replacing it, so a published edition is never destroyed and the
+    reader keeps what they were shown before the change.
     """
     # The reader's day, not the server's: an edition published at 01:00 in Vienna belongs to
     # that morning's reading, not to the day UTC was still on. Decided here and stored, because
     # the page must not recompute a published day.
     day = clock.today()
-    await match_q.clear_stale_edition(conn, profile.user_id, day, profile.version)
     report.published = await match_q.publish_edition(
         conn,
         [

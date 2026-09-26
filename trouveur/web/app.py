@@ -238,8 +238,11 @@ EDITION_PAGE = 50
 
 
 @app.get("/recommendations", response_class=HTMLResponse)
-async def recommendations(request: Request, edition: str = "", page: int = 1):
-    """One day's edition. The latest by default; older ones stay reachable and never change.
+async def recommendations(request: Request, edition: str = "", v: int = 0, page: int = 1):
+    """One edition. The latest by default; every earlier one stays reachable and never changes.
+
+    An edition is a (day, profile version) pair rather than a day, so changing a profile adds one
+    beside what you were already shown instead of replacing it.
 
     A day rather than one growing list, which had no time axis: a strong posting from three weeks
     ago outranked everything that arrived this morning until it was dismissed. There is nothing
@@ -252,16 +255,16 @@ async def recommendations(request: Request, edition: str = "", page: int = 1):
     async with connect() as conn:
         profile_row = await users_q.get_profile(conn, session["uid"])
         available = await match_q.editions(conn, session["uid"])
-        chosen = _chosen_edition(edition, available)
+        chosen = _chosen_edition(edition, v, available)
         jobs = (
             await match_q.edition(
-                conn, session["uid"], chosen.day, limit=limit, offset=(page - 1) * limit
+                conn, session["uid"], chosen.day, chosen.profile_version,
+                limit=limit, offset=(page - 1) * limit,
             )
             if chosen
             else []
         )
-    days = [row.day for row in available]
-    index = days.index(chosen.day) if chosen else -1
+    index = available.index(chosen) if chosen else -1
     return templates.TemplateResponse(
         request,
         "recommendations.html",
@@ -270,8 +273,8 @@ async def recommendations(request: Request, edition: str = "", page: int = 1):
             "jobs": jobs,
             "editions": available,
             "edition": chosen,
-            "older": days[index + 1] if 0 <= index < len(days) - 1 else None,
-            "newer": days[index - 1] if index > 0 else None,
+            "older": available[index + 1] if 0 <= index < len(available) - 1 else None,
+            "newer": available[index - 1] if index > 0 else None,
             "page": page,
             "has_more": len(jobs) == limit,
             "paused": profile_row is not None and not profile_row.scoring_enabled,
@@ -282,19 +285,28 @@ async def recommendations(request: Request, edition: str = "", page: int = 1):
     )
 
 
-def _chosen_edition(requested: str, available: list):
-    """The requested edition, or the latest. An unknown date falls back rather than 404s."""
+def _chosen_edition(requested: str, version: int, available: list):
+    """The requested edition, or the latest. An unknown one falls back rather than 404s.
+
+    A day alone still resolves -- to that day's newest edition -- so a link written before a
+    profile change keeps working instead of breaking on the day it is most likely to be followed.
+    """
     if not available:
         return None
-    if requested:
-        try:
-            wanted = date.fromisoformat(requested)
-        except ValueError:
-            return available[0]
-        for row in available:
-            if row.day == wanted:
-                return row
-    return available[0]
+    if not requested:
+        return available[0]
+    try:
+        wanted = date.fromisoformat(requested)
+    except ValueError:
+        return available[0]
+    same_day = [row for row in available if row.day == wanted]
+    if not same_day:
+        return available[0]
+    for row in same_day:
+        if row.profile_version == version:
+            return row
+    # Ordered newest version first by the query.
+    return same_day[0]
 
 
 async def _queue_match(conn, user_id: int) -> None:
@@ -431,37 +443,9 @@ async def profile_save(
     except (UnknownChoice, FieldTooLong) as exc:
         return HTMLResponse(str(exc), status_code=400)
 
-    form = await request.form()
+    # No confirm step: a save destroys nothing. A profile change publishes a second edition for
+    # today beside the one already there, so there is nothing to ask the user's permission for.
     async with connect() as conn:
-        current = await users_q.get_profile(conn, session["uid"])
-        rescore = users_q.changes_scoring(current, values)
-        today = clock.today()
-        # Today's edition is the only one a save may replace, and only with the user's word for
-        # it. Every older edition is a published record and is never touched, so there is
-        # nothing to ask about on a day that has not been published yet.
-        replacing = await match_q.edition_size(conn, session["uid"], today) if rescore else 0
-        if replacing and form.get("confirm") != "yes":
-            pending = await match_q.count_pending_rerank(
-                conn, session["uid"],
-                freshness.fresh_since(get_settings().retrieval_horizon_days),
-            )
-            return templates.TemplateResponse(
-                request,
-                "profile_confirm.html",
-                {
-                    "active": "profile",
-                    "username": session["u"],
-                    "replacing": replacing,
-                    "rescore_estimate": pending,
-                    # Re-posted verbatim, so nothing the user typed is lost on the way through
-                    # this page and no field list has to be kept in step with the form.
-                    "fields": [
-                        (key, value)
-                        for key, value in form.multi_items()
-                        if key != "confirm" and isinstance(value, str)
-                    ],
-                },
-            )
         version, rescore = await users_q.save_profile(conn, session["uid"], values)
         if rescore:
             await _queue_match(conn, session["uid"])

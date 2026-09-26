@@ -160,8 +160,7 @@ query.** Sources sweep by their own structure; users select over the corpus.
   never recomputed while rendering: the day is part of `user_edition_item`'s key and of the
   constraint that stops a posting being recommended twice, so a day that moved with the viewer's
   clock would make an immutable record viewer-dependent. Whatever decides it must be the same
-  call everywhere -- publish, `clear_stale_edition` and the profile-confirm check -- or near
-  midnight they disagree and today's edition is replaced without anyone being asked.
+  call everywhere, or near midnight two parts of a run disagree about which day they are writing.
 - **Typed enums, not raw strings**, with an `UNKNOWN` member wherever a source could surprise us.
 - **Specific exceptions with complete-sentence messages.** Never `raise Exception(...)`, never
   `except Exception: pass`. The sanctioned broad catches are per-source isolation in
@@ -559,11 +558,13 @@ so the deployment has no LLM spend of its own and one user's exhausted budget ca
   its edition with the card's `closed` tag, and only a posting the reader **dismissed** leaves,
   from the list and the count together (`_NOT_DISMISSED`, shared by both queries so they cannot
   disagree).
-- **Only today's edition may be replaced, and only after the user says so.** A save that bumps
-  the profile version shows a confirm page first when an edition already exists for today
-  (`profile_confirm.html`, which re-posts the form verbatim); the run then clears that day's rows
-  at the old version and publishes the new ones in the same transaction, so a failed run leaves
-  the old edition standing. Every older edition is a published record and is never touched.
+- **No edition is ever replaced, including today's, and there is no confirm step.** An edition is
+  a (day, profile version) pair -- `profile_version` is part of the key -- so a profile change
+  publishes a SECOND edition for the day beside the one already there and the dropdown lists both.
+  Replacing used to be the single exception to "an edition is never rewritten", and the confirm
+  page existed only because a save destroyed something. Removing the exception removed the page
+  with it; do not reintroduce either. The version is named in the dropdown only when it is not the
+  one currently in force, because silence means "this is you".
 - **A posting reaches a user once per profile version, ever.** Only a profile change can bring it
   back, and the database enforces it (`uq_edition_item_once_per_version`) rather than trusting
   `pending_rerank`'s WHERE clause — a posting silently recommended twice reads as the system
@@ -762,7 +763,10 @@ still holds the old readings and no re-derive has been scheduled.
     a wave is issued rather than after it is billed.
   - **An edition is paged, not cut**: `LIMIT ... OFFSET`, so every posting in the day is reachable.
   - **A posting cannot enter two editions under one profile version** — the constraint, not the
-    query, is what refuses it.
+    query, is what refuses it. Under two DIFFERENT versions it may, which is what versioned
+    editions are for.
+  - **Saving a profile destroys no edition and asks nothing**, and a day the profile changed on
+    lists two editions rather than one.
   - **A closed posting stays in its edition** and the dropdown's count still matches the rows.
   - **Recommendations carries no heading, no run statistics and no button.**
   - **The scan hour is a wall-clock hour and does not drift with DST** -- `run_hour = 7` is seven
