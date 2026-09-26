@@ -34,7 +34,7 @@
   --bad: #a3271f;        --bad-soft: #fae6e4;
 
   /* Diagram lanes only. These carry no meaning, so a status must never use them. */
-  --tint-1: #e6eef8; --tint-2: #e3f1e8;
+  --tint-1: #e6eef8; --tint-2: #e3f1e8; --tint-3: #ece9f4;
 }
 
 /* ---------- Base ---------- */
@@ -219,10 +219,12 @@ form.inline { display: inline; }
 .doc { display: grid; gap: var(--space-5); }
 .doc p { max-width: 90ch; }
 .doc .diagram + p { margin-top: var(--space-4); }
+.doc .section > p + p { margin-top: var(--space-4); }
 .diagram { margin: var(--space-4) 0 0; }
 .diagram svg { display: block; width: 100%; height: auto; font-size: 13px; }
 .diagram .lane { fill: var(--tint-1); stroke: none; }
 .diagram .lane.l2 { fill: var(--tint-2); }
+.diagram .lane.l3 { fill: var(--tint-3); }
 .diagram .lane-title { font-size: 12px; font-weight: 600; letter-spacing: .04em; fill: var(--fg-muted); }
 .diagram .node rect { fill: var(--surface); stroke: var(--primary); stroke-width: 1.25; }
 .diagram .node text { fill: var(--fg); text-anchor: middle; font-weight: 500; }
