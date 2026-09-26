@@ -12,8 +12,6 @@ from decimal import Decimal
 
 from pydantic import BaseModel, Field
 
-from trouveur.models.facets import EmploymentType, Seniority, WorkMode
-
 # What a profile may say, by code. Countries are exactly the codes derivation can produce from
 # ingest/vocab.py (a test pins the two together), because a country the form offers but no
 # posting can ever derive is a filter that silently matches nothing. Languages go to the reranker
@@ -59,11 +57,15 @@ class UserProfile(BaseModel):
     must_have: list[str] = Field(default_factory=list)
     keywords: list[str] = Field(default_factory=list)
 
+    # Location is the only hard filter. `remote_anywhere` belongs to it rather than to a work-mode
+    # list: a role with no office is not in a third place, it is in none, so it is the one case
+    # where "where" cannot be answered with a country. Onsite and hybrid are not distinguished
+    # anywhere, deliberately -- both mean "you go there", which the country already says.
     countries: list[str] = Field(default_factory=lambda: ["AT", "DE", "CH"])
+    remote_anywhere: bool = True
+
+    # Preferences, not filters. Both reach the reranker as prompt text; neither narrows the query.
     cities: list[str] = Field(default_factory=list)
-    work_modes: list[WorkMode] = Field(default_factory=list)
-    seniorities: list[Seniority] = Field(default_factory=list)
-    employment_types: list[EmploymentType] = Field(default_factory=list)
     min_salary_eur_year: Decimal = Decimal(0)
 
     # The user's pause on spending. Off, no paid call runs for them at all; retrieval is free

@@ -19,8 +19,8 @@ log = logging.getLogger(__name__)
 MAX_QUERIES = 8
 _MAX_TOKENS = 400
 
-# Small on purpose: this is the one piece of the profile whose length is multiplied by
-# rerank_limit rather than paid once.
+# Small on purpose: this is the one piece of the profile whose length is multiplied by however many
+# postings a run scores, rather than paid once.
 SUMMARY_MAX_CHARS = 700
 _SUMMARY_MAX_TOKENS = 300
 

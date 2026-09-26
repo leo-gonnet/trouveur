@@ -174,6 +174,7 @@ async def _execute(settings: Settings, run) -> None:
                 "scored": match.scored,
                 "cost_usd": str(match.cost_usd),
                 "stopped_on_budget": match.stopped_on_budget,
+                "stopped_on_scores": match.stopped_on_scores,
             }
             for match in matches
         ],
@@ -188,8 +189,12 @@ async def _execute_match_only(settings: Settings, run) -> None:
 
     The user asked for this from the page they are looking at, so the result lands there; the
     digest for anything newly scored goes out with the next scheduled run as usual.
+
+    `whole_horizon` because every trigger for this run -- a profile change, a key added, scoring
+    switched back on -- means nothing has been judged under the terms that now apply. A run held
+    after a sweep looks at that sweep's additions instead.
     """
-    match = await matching.run_for_user(run.match_user_id, settings)
+    match = await matching.run_for_user(run.match_user_id, settings, whole_horizon=True)
     payload = {
         "summary": match.summary(),
         "matches": [
@@ -199,6 +204,7 @@ async def _execute_match_only(settings: Settings, run) -> None:
                 "scored": match.scored,
                 "cost_usd": str(match.cost_usd),
                 "stopped_on_budget": match.stopped_on_budget,
+                "stopped_on_scores": match.stopped_on_scores,
             }
         ],
     }

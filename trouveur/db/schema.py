@@ -222,11 +222,12 @@ user_profile = sa.Table(
     sa.Column("languages", ARRAY(sa.Text), nullable=False, server_default="{}"),
     sa.Column("must_have", ARRAY(sa.Text), nullable=False, server_default="{}"),
     sa.Column("keywords", ARRAY(sa.Text), nullable=False, server_default="{}"),
+    # The only hard filter, with the one case a country cannot express folded into it: a fully
+    # remote role is in no place, so it is admitted wherever it was posted.
     sa.Column("countries", ARRAY(sa.Text), nullable=False, server_default="{AT,DE,CH}"),
+    sa.Column("remote_anywhere", sa.Boolean, nullable=False, server_default="true"),
+    # Preferences the reranker reads as prompt text. Neither narrows the query.
     sa.Column("cities", ARRAY(sa.Text), nullable=False, server_default="{}"),
-    sa.Column("work_modes", ARRAY(sa.Text), nullable=False, server_default="{}"),
-    sa.Column("seniorities", ARRAY(sa.Text), nullable=False, server_default="{}"),
-    sa.Column("employment_types", ARRAY(sa.Text), nullable=False, server_default="{}"),
     sa.Column("min_salary_eur_year", sa.Numeric, nullable=False, server_default="0"),
     # The one cost control the user touches. Off means no paid call of any kind runs for
     # them -- scoring, and the query expansion that is also billed. Retrieval stays free and
@@ -302,8 +303,11 @@ user_edition_item = sa.Table(
     metadata,
     sa.Column("user_id", sa.BigInteger, primary_key=True),
     sa.Column("day", sa.Date, primary_key=True),
+    # Part of the key: a day holds one edition per profile version. Changing a profile publishes
+    # a second edition for the day rather than replacing the first, so no published edition is
+    # ever destroyed and there is nothing to ask the user's permission for.
+    sa.Column("profile_version", sa.Integer, primary_key=True),
     sa.Column("job_id", sa.BigInteger, primary_key=True),
-    sa.Column("profile_version", sa.Integer, nullable=False),
     sa.Column("llm_score", sa.SmallInteger, nullable=False),
     sa.Column("llm_reason", sa.Text, nullable=False, server_default=""),
     sa.Column("llm_red_flags", JSONB, nullable=False, server_default=sa.text("'[]'::jsonb")),

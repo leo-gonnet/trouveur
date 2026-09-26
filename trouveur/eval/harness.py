@@ -201,7 +201,7 @@ async def _rerank_needles(
       - the gap between the worst positive and the best negative is how much room a reader has
         before the two kinds start interleaving.
 
-    Reuses `rerank.score_batch`, so the prompt, the model and the provider pin are the ones
+    Reuses `rerank.score_one`, so the prompt, the model and the provider pin are the ones
     production sends. A copy of the prompt here would grade something the user never runs.
     """
     from trouveur.match import expand, llm, rerank
@@ -224,11 +224,10 @@ async def _rerank_needles(
     cost = Decimal(0)
     errors: list[str] = []
 
-    for start in range(0, len(rows), rerank.BATCH_SIZE):
-        batch = rows[start : start + rerank.BATCH_SIZE]
+    for row in rows:
         try:
-            scored, usage = await rerank.score_batch(
-                settings, profile, batch,
+            score, usage = await rerank.score_one(
+                settings, profile, row,
                 api_key=api_key, model=model,
                 provider_pin=settings.default_llm_provider,
                 # The truncated background, not a distilled one: building one would make this
@@ -237,13 +236,12 @@ async def _rerank_needles(
             )
         except llm.LlmError as exc:
             errors.append(str(exc))
-            log.warning("rerank batch failed for persona %s: %s", profile.user_id, exc)
+            log.warning("scoring failed for persona %s: %s", profile.user_id, exc)
             break
         cost += usage.cost_usd
-        for score in scored:
-            needle = graded.get(score.id)
-            if needle is not None:
-                scores[needle["id"]] = score.score
+        needle = graded.get(row.job_id)
+        if score is not None and needle is not None:
+            scores[needle["id"]] = score.score
 
     return {
         "model": model,
@@ -324,7 +322,9 @@ async def _evaluate_persona(
 
     async with connect() as conn:
         arms = await retrieve.retrieve_arms(
-            conn, profile, queries, fresh_since=EVAL_FRESH_SINCE
+            conn, profile, queries,
+            # The whole haystack, not one sweep's worth: recall over the corpus is the question.
+            fresh_since=EVAL_FRESH_SINCE, seen_since=EVAL_FRESH_SINCE,
         )
         fused = [job_id for job_id, _ in retrieve.fuse(arms, limit)]
 

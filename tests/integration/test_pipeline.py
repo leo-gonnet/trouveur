@@ -2,7 +2,7 @@
 
 Writing these found two failures nothing else could have: a query that bundled `SET LOCAL` with a
 SELECT (asyncpg runs parameterised queries as prepared statements and rejects two commands), and an
-f-string prefix dropped from _DENSE_SQL so a literal "{_HARD_FILTERS}" reached the server.
+f-string prefix dropped from _DENSE_SQL so a literal "{_ELIGIBLE}" reached the server.
 """
 
 from __future__ import annotations
@@ -35,8 +35,8 @@ async def test_german_search_finds_a_compound_and_folds_umlauts(
     user_id, profile = await seed_user(title="Process Engineer")
 
     async with connect() as conn:
-        assert await mq.lexical_candidates(conn, profile, "ingenieur", 10, _ANY_AGE)
-        assert await mq.lexical_candidates(conn, profile, "munchen", 10, _ANY_AGE)
+        assert await mq.lexical_candidates(conn, profile, "ingenieur", 10, _ANY_AGE, _ANY_AGE)
+        assert await mq.lexical_candidates(conn, profile, "munchen", 10, _ANY_AGE, _ANY_AGE)
         assert await mq.search_jobs(conn, user_id, query="ingenieur")
         assert await mq.search_jobs(conn, user_id, query="munchen")
 
@@ -52,7 +52,7 @@ async def test_dense_retrieval_runs(clean_db, gh_board, aa_listing, aa_detail):
     vector = (await get_provider().embed_queries(["Prozessoptimierung"]))[0]
 
     async with connect() as conn:
-        assert await mq.dense_candidates(conn, profile, vector, 10, _ANY_AGE)
+        assert await mq.dense_candidates(conn, profile, vector, 10, _ANY_AGE, _ANY_AGE)
 
 
 async def test_detail_arrival_changes_the_hash_and_a_replay_changes_nothing(
@@ -136,7 +136,7 @@ async def test_scores_are_cached_and_spend_accumulates(
                 for job_id in job_ids
             ],
         )
-        to_score = await mq.pending_rerank(conn, user_id, profile.version, 100)
+        to_score = await mq.pending_rerank(conn, user_id, profile.version, job_ids)
         await mq.apply_scores(
             conn, user_id,
             [{"job_id": row.job_id, "score": 88, "reason": "good", "red_flags": ["none"],
@@ -170,7 +170,10 @@ async def test_scores_are_cached_and_spend_accumulates(
         )
         days = await mq.editions(conn, user_id)
         assert len(days) == 1
-        assert len(await mq.edition(conn, user_id, days[0].day)) == len(to_score)
+        rows = await mq.edition(
+            conn, user_id, days[0].day, days[0].profile_version, limit=100
+        )
+        assert len(rows) == len(to_score)
 
 
 async def test_bumping_a_version_refills_the_queue(clean_db, gh_board, aa_listing, aa_detail):
@@ -183,3 +186,209 @@ async def test_bumping_a_version_refills_the_queue(clean_db, gh_board, aa_listin
     async with connect() as conn:
         queued, _ = await refill(conn, WorkKind.DERIVE, str(versions.DERIVE_VERSION + 1))
     assert queued == 3
+
+
+async def _credentialled_user(monkeypatch, *, budget="5"):
+    """A user with matches waiting to be scored and a key to score them with."""
+    from trouveur.crypto import encrypt
+    from trouveur.db.engine import connect
+    from trouveur.db.queries import match as mq
+    from trouveur.db.queries import users as uq
+
+    monkeypatch.setenv("ENCRYPTION_KEY", "a-test-encryption-secret")
+    user_id, profile = await seed_user(title="Process Engineer")
+    async with connect() as conn:
+        await uq.save_credential(
+            conn, user_id,
+            api_key_encrypted=encrypt("sk-test"), api_key_fingerprint="sk-…test",
+            model="test/model", provider_pin=None, monthly_budget_usd=Decimal(budget),
+        )
+        job_ids = [
+            row[0] for row in await conn.exec_driver_sql("SELECT id FROM job ORDER BY id")
+        ]
+        await mq.upsert_matches(
+            conn,
+            [
+                {"user_id": user_id, "job_id": job_id, "profile_version": profile.version,
+                 "retrieval_score": 1.0, "dense_rank": 1, "lexical_rank": None}
+                for job_id in job_ids
+            ],
+        )
+        credential = await uq.get_credential(conn, user_id)
+    return user_id, profile, credential, job_ids
+
+
+async def test_one_failed_call_does_not_lose_the_rest_of_the_wave(
+    clean_db, gh_board, aa_listing, aa_detail, monkeypatch
+):
+    """At a few thousand calls a run, ending the stage on the first timeout would leave most of
+    the corpus unscored. The posting that failed stays pending -- never scored, never cached."""
+    from trouveur.config import get_settings
+    from trouveur.db.engine import connect
+    from trouveur.db.queries import match as mq
+    from trouveur.match import llm, pipeline, rerank
+
+    await seed_corpus(gh_board, aa_listing, aa_detail)
+    user_id, profile, credential, job_ids = await _credentialled_user(monkeypatch)
+    doomed = job_ids[0]
+
+    async def score_one(settings, prof, candidate, **kwargs):
+        if candidate.job_id == doomed:
+            raise llm.LlmError("the model request could not be completed")
+        return (
+            rerank._Score(score=77, reason="fine"),
+            llm.Usage(tokens_in=500, tokens_out=40, cost_usd=Decimal("0.0001")),
+        )
+
+    monkeypatch.setattr(rerank, "score_one", score_one)
+    report = pipeline.MatchReport(user_id=user_id)
+    async with connect() as conn:
+        scored = await pipeline._score_pending(
+            conn, get_settings(), profile, credential, report, job_ids
+        )
+        still_pending = await mq.pending_rerank(conn, user_id, profile.version, job_ids)
+
+    assert report.scored == len(job_ids) - 1
+    assert {row["job_id"] for row in scored} == set(job_ids) - {doomed}
+    assert [row.job_id for row in still_pending] == [doomed]
+    assert report.errors and "1 scoring call(s) failed" in report.errors[0]
+    # Billed for what was sent, aggregated per wave rather than per posting.
+    assert report.cost_usd == Decimal("0.0001") * (len(job_ids) - 1)
+
+
+async def test_an_unparseable_response_leaves_a_posting_unscored_never_zero(
+    clean_db, gh_board, aa_listing, aa_detail, monkeypatch
+):
+    """Caching a zero would hide a good job permanently; leaving it pending retries it."""
+    from trouveur.config import get_settings
+    from trouveur.db.engine import connect
+    from trouveur.db.queries import match as mq
+    from trouveur.match import llm, pipeline, rerank
+
+    await seed_corpus(gh_board, aa_listing, aa_detail)
+    user_id, profile, credential, job_ids = await _credentialled_user(monkeypatch)
+
+    async def score_one(settings, prof, candidate, **kwargs):
+        return None, llm.Usage(tokens_in=500, tokens_out=40, cost_usd=Decimal("0.0001"))
+
+    monkeypatch.setattr(rerank, "score_one", score_one)
+    report = pipeline.MatchReport(user_id=user_id)
+    async with connect() as conn:
+        assert await pipeline._score_pending(
+            conn, get_settings(), profile, credential, report, job_ids
+        ) == []
+        # Billed, because the call was made -- but nothing cached, so the next run asks again.
+        pending = await mq.pending_rerank(conn, user_id, profile.version, job_ids)
+        assert len(pending) == len(job_ids)
+        assert await mq.cached_scores(
+            conn, user_id, profile.version, [row.content_hash for row in pending]
+        ) == {}
+    assert report.scored == 0
+    assert report.cost_usd > 0
+
+
+async def test_the_ceiling_stops_the_run_before_the_wave_is_sent(
+    clean_db, gh_board, aa_listing, aa_detail, monkeypatch
+):
+    """Checked before the money is spent, not reported after it. A zero ceiling must send nothing
+    at all -- a retry loop on someone else's card is not something to discover from the user."""
+    from trouveur.config import get_settings
+    from trouveur.db.engine import connect
+    from trouveur.match import pipeline, rerank
+
+    await seed_corpus(gh_board, aa_listing, aa_detail)
+    user_id, profile, credential, job_ids = await _credentialled_user(monkeypatch, budget="0")
+
+    calls = []
+
+    async def score_one(settings, prof, candidate, **kwargs):
+        calls.append(candidate.job_id)
+        raise AssertionError("no call may be issued once the ceiling is reached")
+
+    monkeypatch.setattr(rerank, "score_one", score_one)
+    report = pipeline.MatchReport(user_id=user_id)
+    async with connect() as conn:
+        assert await pipeline._score_pending(
+            conn, get_settings(), profile, credential, report, job_ids
+        ) == []
+    assert calls == []
+    assert report.stopped_on_budget is True
+
+
+async def test_scoring_stops_when_two_blocks_in_a_row_score_badly(
+    clean_db, gh_board, aa_listing, aa_detail, monkeypatch
+):
+    """What decides how long an edition is: the scorer running out of good postings.
+
+    Not a rank cut, which is arbitrary, and not a score threshold, which hides postings the reader
+    already paid for. Everything scored is still published whatever it scored -- the rule only
+    decides when to stop buying.
+    """
+    from trouveur.config import get_settings
+    from trouveur.db.engine import connect
+    from trouveur.db.queries import match as mq
+    from trouveur.match import llm, pipeline, rerank
+
+    await seed_corpus(gh_board, aa_listing, aa_detail)
+    user_id, profile, credential, job_ids = await _credentialled_user(monkeypatch)
+    monkeypatch.setattr(rerank, "BLOCK", 1)
+    verdicts = iter([10, 10, 95])
+    calls = []
+
+    async def score_one(settings, prof, candidate, **kwargs):
+        calls.append(candidate.job_id)
+        return (
+            rerank._Score(score=next(verdicts), reason="x"),
+            llm.Usage(tokens_in=500, tokens_out=40, cost_usd=Decimal("0.0001")),
+        )
+
+    monkeypatch.setattr(rerank, "score_one", score_one)
+    report = pipeline.MatchReport(user_id=user_id)
+    async with connect() as conn:
+        scored = await pipeline._score_pending(
+            conn, get_settings(), profile, credential, report, job_ids
+        )
+        still_pending = await mq.pending_rerank(conn, user_id, profile.version, job_ids)
+
+    assert len(calls) == 2, "the third block was bought after the scores had run out"
+    assert report.stopped_on_scores is True
+    # Published anyway: the rule stops spending, it does not hide what was spent.
+    assert len(scored) == 2
+    assert len(still_pending) == 1
+
+
+async def test_one_good_block_resets_the_patience(
+    clean_db, gh_board, aa_listing, aa_detail, monkeypatch
+):
+    """Two blocks in a row, not two blocks in total.
+
+    Retrieval order correlates only loosely with the model's verdict, so a single weak block is
+    noise. Counting them cumulatively would cut a rich day short on the strength of two bad
+    postings that happened to be spread across it.
+    """
+    from trouveur.config import get_settings
+    from trouveur.db.engine import connect
+    from trouveur.match import llm, pipeline, rerank
+
+    await seed_corpus(gh_board, aa_listing, aa_detail)
+    user_id, profile, credential, job_ids = await _credentialled_user(monkeypatch)
+    monkeypatch.setattr(rerank, "BLOCK", 1)
+    verdicts = iter([10, 95, 10])
+    calls = []
+
+    async def score_one(settings, prof, candidate, **kwargs):
+        calls.append(candidate.job_id)
+        return (
+            rerank._Score(score=next(verdicts), reason="x"),
+            llm.Usage(tokens_in=500, tokens_out=40, cost_usd=Decimal("0.0001")),
+        )
+
+    monkeypatch.setattr(rerank, "score_one", score_one)
+    report = pipeline.MatchReport(user_id=user_id)
+    async with connect() as conn:
+        await pipeline._score_pending(
+            conn, get_settings(), profile, credential, report, job_ids
+        )
+
+    assert len(calls) == len(job_ids), "a good block did not reset the patience"
+    assert report.stopped_on_scores is False

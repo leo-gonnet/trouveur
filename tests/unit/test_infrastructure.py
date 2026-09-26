@@ -360,8 +360,11 @@ async def test_a_match_only_run_sweeps_nothing_and_matches_one_user(monkeypatch)
         calls.append("ingest")
         raise AssertionError("a match-only run must not sweep")
 
-    async def fake_run_for_user(user_id, settings):
-        calls.append(f"match:{user_id}")
+    async def fake_run_for_user(user_id, settings, *, whole_horizon=False):
+        # Wide on purpose: every trigger for a match-only run -- a profile change, a key added,
+        # scoring switched back on -- means nothing has been judged under the terms that now
+        # apply, so it looks at the whole retained horizon rather than the last sweep.
+        calls.append(f"match:{user_id}:{'wide' if whole_horizon else 'narrow'}")
         return MatchReport(user_id=user_id, retrieved=3, scored=2)
 
     finished: dict = {}
@@ -384,7 +387,7 @@ async def test_a_match_only_run_sweeps_nothing_and_matches_one_user(monkeypatch)
     run = SimpleNamespace(id=7, match_user_id=42, only_source=None, backfill=False)
     await service._execute(None, run)
 
-    assert calls == ["match:42"]
+    assert calls == ["match:42:wide"]
     assert finished["run_id"] == 7 and finished["status"] == service.RunStatus.SUCCESS
     assert finished["report"]["matches"][0]["scored"] == 2
 

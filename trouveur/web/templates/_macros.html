@@ -5,11 +5,14 @@
   {%- if row.day == today -%}Today
   {%- else -%}{{ row.day.strftime('%a %d %b %Y') }}{%- endif %}
   &mdash; {{ row.postings }} posting{{ '' if row.postings == 1 else 's' }}
-  {%- if row.profile_version != current_version or row.profile_version_max != current_version %}
-    &middot; older profile (v{{ row.profile_version }}
-    {%- if row.profile_version_max != row.profile_version %}&ndash;v{{ row.profile_version_max }}{% endif %})
+  {#- Silence means "this is you". A day can hold two editions once a profile changed on it, so
+      the version is named only when it is not the one currently in force. -#}
+  {%- if row.profile_version != current_version %}
+    &middot; older profile (v{{ row.profile_version }})
   {%- endif -%}
 {% endmacro %}
+
+{% macro edition_href(row, after='', before='') %}/recommendations?edition={{ row.day }}&v={{ row.profile_version }}{% if after %}&after={{ after }}{% endif %}{% if before %}&before={{ before }}{% endif %}{% endmacro %}
 
 {% macro places(job) %}
   {%- set names = (job.cities or []) | list -%}
@@ -85,11 +88,3 @@
 {% if hint %}<span class="hint">{{ hint }}</span>{% endif %}
 {% endmacro %}
 
-{% macro checks(name, options, selected) %}
-<div class="checks">
-  {% for value, label in options %}
-    <label class="check"><input type="checkbox" name="{{ name }}" value="{{ value }}"
-      {% if value in selected %}checked{% endif %}>{{ label }}</label>
-  {% endfor %}
-</div>
-{% endmacro %}

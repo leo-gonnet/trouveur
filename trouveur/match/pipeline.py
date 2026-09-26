@@ -6,9 +6,11 @@ another's results. Retrieval is free and re-runnable; only the last stage costs 
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import statistics
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -37,6 +39,7 @@ class MatchReport:
     published: int = 0
     cost_usd: Decimal = Decimal(0)
     stopped_on_budget: bool = False
+    stopped_on_scores: bool = False
     errors: list[str] = field(default_factory=list)
 
     def summary(self) -> str:
@@ -46,6 +49,7 @@ class MatchReport:
             f"published={self.published} "
             f"cost=${self.cost_usd:.4f}"
             + (" [budget reached]" if self.stopped_on_budget else "")
+            + (" [scores ran out]" if self.stopped_on_scores else "")
         )
 
 
@@ -72,7 +76,17 @@ async def run_all(settings: Settings | None = None) -> list[MatchReport]:
     return reports
 
 
-async def run_for_user(user_id: int, settings: Settings | None = None) -> MatchReport:
+async def run_for_user(
+    user_id: int, settings: Settings | None = None, *, whole_horizon: bool = False
+) -> MatchReport:
+    """One user's run.
+
+    `whole_horizon` widens the candidate window from the last sweep's additions to everything
+    still retained. The daily run after a sweep leaves it off: a posting gets one chance, on the
+    day it arrives. A run the USER caused -- a profile change, a key added, scoring switched back
+    on -- turns it on, because in each of those cases nothing has been judged under the terms that
+    now apply and the last seven days deserve a fresh look.
+    """
     settings = settings or get_settings()
     report = MatchReport(user_id=user_id)
 
@@ -98,15 +112,23 @@ async def run_for_user(user_id: int, settings: Settings | None = None) -> MatchR
         return report
     report.queries = len(queries) + len(adverts)
 
-    # One cutoff for the whole run, so the two arms cannot disagree about what is fresh.
+    # One pair of cutoffs for the whole run, so the two arms cannot disagree about either.
     fresh_since = freshness.fresh_since(settings.retrieval_horizon_days)
+    seen_since = (
+        fresh_since
+        if whole_horizon
+        else datetime.now(UTC) - timedelta(hours=retrieve.NEW_ARRIVALS_HOURS)
+    )
     async with connect() as conn:
-        await _retrieve(conn, profile, queries, report, adverts, fresh_since=fresh_since)
+        retrieved = await _retrieve(
+            conn, profile, queries, report, adverts,
+            fresh_since=fresh_since, seen_since=seen_since,
+        )
 
-    if credential is not None:
+    if credential is not None and retrieved:
         async with connect() as conn:
             await _rerank(
-                conn, settings, profile, credential, report,
+                conn, settings, profile, credential, report, retrieved,
                 background=expansion.background_summary or expand.truncated_background(profile),
             )
     log.info("match complete: %s", report.summary())
@@ -204,12 +226,14 @@ async def _retrieve(
     adverts: list[str] | None = None,
     *,
     fresh_since: datetime,
-) -> None:
+    seen_since: datetime,
+) -> list[int]:
     """Hybrid retrieval: dense searches per query and advert, lexical per query, fused by rank."""
     arms = await retrieve.retrieve_arms(
-        conn, profile, queries, adverts or [], fresh_since=fresh_since
+        conn, profile, queries, adverts or [],
+        fresh_since=fresh_since, seen_since=seen_since,
     )
-    fused = retrieve.fuse(arms, retrieve.RETRIEVAL_LIMIT)
+    fused = retrieve.fuse(arms, retrieve.FUSED_LIMIT)
     dense_rank, lexical_rank = retrieve.ranks(arms)
 
     rows = [
@@ -225,6 +249,8 @@ async def _retrieve(
     ]
     await match_q.upsert_matches(conn, rows)
     report.retrieved = len(rows)
+    # Handed to the scorer, which scores what THIS run found and nothing else.
+    return [job_id for job_id, _ in fused]
 
 
 async def _rerank(
@@ -233,12 +259,13 @@ async def _rerank(
     profile: UserProfile,
     credential,
     report,
+    retrieved: list[int],
     *,
     background: str = "",
 ) -> None:
     """Score what is pending, then publish the day's edition from whatever was scored."""
     scored = await _score_pending(
-        conn, settings, profile, credential, report, background=background
+        conn, settings, profile, credential, report, retrieved, background=background
     )
     if not scored:
         return
@@ -248,16 +275,16 @@ async def _rerank(
 async def _publish(
     conn: AsyncConnection, profile: UserProfile, report, scored: list[dict]
 ) -> None:
-    """Write today's edition.
+    """Write today's edition, at this profile version.
 
-    The clear and the insert share this transaction on purpose: a run that dies between them
-    would otherwise delete a published day and put nothing back in its place.
+    Nothing is deleted here. A profile change publishes a second edition for the day beside the
+    one already there rather than replacing it, so a published edition is never destroyed and the
+    reader keeps what they were shown before the change.
     """
     # The reader's day, not the server's: an edition published at 01:00 in Vienna belongs to
     # that morning's reading, not to the day UTC was still on. Decided here and stored, because
     # the page must not recompute a published day.
     day = clock.today()
-    await match_q.clear_stale_edition(conn, profile.user_id, day, profile.version)
     report.published = await match_q.publish_edition(
         conn,
         [
@@ -281,6 +308,7 @@ async def _score_pending(
     profile: UserProfile,
     credential,
     report,
+    retrieved: list[int],
     *,
     background: str = "",
 ) -> list[dict]:
@@ -291,7 +319,7 @@ async def _score_pending(
     """
     scored: list[dict] = []
     pending = await match_q.pending_rerank(
-        conn, profile.user_id, profile.version, rerank.RERANK_LIMIT
+        conn, profile.user_id, profile.version, retrieved
     )
     if not pending:
         return scored
@@ -328,10 +356,35 @@ async def _score_pending(
     spent = Decimal(spend_row.cost_usd) if spend_row else Decimal(0)
     budget = Decimal(credential.monthly_budget_usd)
     # Pessimistic, not zero: a zero estimate would always pass the ceiling test.
-    estimate = Decimal("0.02")
+    estimate = Decimal("0.002")
+    failures: list[str] = []
+    weak_blocks = 0
+    gate = asyncio.Semaphore(rerank.CONCURRENCY)
 
-    for start in range(0, len(uncached), rerank.BATCH_SIZE):
-        if rerank.would_exceed_budget(spent, budget, estimate):
+    async def attempt(row):
+        """One posting's call, with the one failure the caller can do something about caught.
+
+        Returned rather than raised so a block survives a single timeout: at a few thousand calls
+        a run, ending the whole stage on the first blip would leave most of the corpus unscored.
+        Only LlmError is caught -- anything else is a bug and must not be swallowed per posting.
+        """
+        async with gate:
+            try:
+                return await rerank.score_one(
+                    settings, profile, row,
+                    api_key=api_key, model=settings.default_llm_model,
+                    provider_pin=settings.default_llm_provider,
+                    background=background,
+                )
+            except llm.LlmError as exc:
+                return exc
+
+    for start in range(0, len(uncached), rerank.BLOCK):
+        block = uncached[start : start + rerank.BLOCK]
+        # Before the block goes out, and priced for the whole block: its calls are issued
+        # together, so the ceiling has to be tested against what all of them can cost. Never
+        # after -- a retry loop on someone else's card is not something to discover from the user.
+        if rerank.would_exceed_budget(spent, budget, estimate * len(block)):
             report.stopped_on_budget = True
             log.info(
                 "user %s reached the monthly ceiling ($%.2f of $%.2f); %d jobs left unscored",
@@ -339,32 +392,23 @@ async def _score_pending(
             )
             break
 
-        batch = uncached[start : start + rerank.BATCH_SIZE]
-        try:
-            scores, usage = await rerank.score_batch(
-                settings, profile, batch,
-                api_key=api_key, model=settings.default_llm_model,
-                provider_pin=settings.default_llm_provider,
-                background=background,
-            )
-        except llm.LlmError as exc:
-            report.errors.append(str(exc))
-            log.warning("rerank batch failed for user %s: %s", profile.user_id, exc)
-            break
+        results = await asyncio.gather(*(attempt(row) for row in block))
 
-        spent = await users_q.add_spend(
-            conn, profile.user_id, tokens_in=usage.tokens_in,
-            tokens_out=usage.tokens_out, cost_usd=usage.cost_usd,
-        )
-        report.cost_usd += usage.cost_usd
-        if usage.cost_usd > 0:
-            estimate = usage.cost_usd
-
-        by_id = {row.job_id: row for row in batch}
         updates, cache_rows = [], []
-        for score in scores:
-            row = by_id.get(score.id)
-            if row is None:
+        tokens_in = tokens_out = 0
+        cost = Decimal(0)
+        for row, outcome in zip(block, results, strict=True):
+            if isinstance(outcome, llm.LlmError):
+                failures.append(str(outcome))
+                continue
+            score, usage = outcome
+            tokens_in += usage.tokens_in
+            tokens_out += usage.tokens_out
+            cost += usage.cost_usd
+            estimate = max(estimate, usage.cost_usd)
+            # A response that could not be parsed is billed and left unscored, never cached and
+            # never recorded as a zero: the next run asks again.
+            if score is None:
                 continue
             updates.append(
                 {
@@ -380,9 +424,44 @@ async def _score_pending(
                     "model": settings.default_llm_model,
                 }
             )
+
+        if tokens_in or tokens_out or cost:
+            spent = await users_q.add_spend(
+                conn, profile.user_id,
+                tokens_in=tokens_in, tokens_out=tokens_out, cost_usd=cost,
+            )
+        report.cost_usd += cost
         await match_q.apply_scores(conn, profile.user_id, updates)
         await match_q.put_cached_scores(conn, cache_rows)
         report.scored += len(updates)
         scored.extend(updates)
+
+        # Every call in the block failed: that is the key, the credit or the provider, not a
+        # blip, and the next block would fail the same way on the user's own card.
+        if all(isinstance(outcome, llm.LlmError) for outcome in results):
+            log.warning("every scoring call failed for user %s; stopping", profile.user_id)
+            break
+
+        # The scores have run out. Judged on the median of the block rather than on any one
+        # posting, and only after two blocks in a row, because retrieval order correlates loosely
+        # with the model's verdict and one weak block is noise. Nothing is hidden by this: what
+        # was scored is published whatever it scored -- the rule decides when to stop BUYING.
+        # An empty block counts as weak: every call was billed and none came back parseable,
+        # which is the model not returning JSON rather than a quiet day, and no reason to buy more.
+        block_scores = [row["score"] for row in updates]
+        if not block_scores or statistics.median(block_scores) < rerank.SCORE_FLOOR:
+            weak_blocks += 1
+            if weak_blocks >= rerank.WEAK_BLOCKS_BEFORE_STOPPING:
+                report.stopped_on_scores = True
+                log.info(
+                    "user %s: scores ran out after %d postings; %d left unscored",
+                    profile.user_id, start + len(block), len(uncached) - start - len(block),
+                )
+                break
+        else:
+            weak_blocks = 0
+
+    if failures:
+        report.errors.append(f"{len(failures)} scoring call(s) failed: {failures[0]}")
 
     return scored

@@ -77,8 +77,8 @@ async def test_postings_published_on_different_days_land_in_different_editions(s
     async with connect() as conn:
         days = await mq.editions(conn, user_id)
         assert [row.day for row in days] == [tuesday, monday], "editions are not newest first"
-        assert len(await mq.edition(conn, user_id, monday)) == 1
-        assert len(await mq.edition(conn, user_id, tuesday)) == len(ids) - 1
+        assert len(await mq.edition(conn, user_id, monday, 1, limit=100)) == 1
+        assert len(await mq.edition(conn, user_id, tuesday, 1, limit=100)) == len(ids) - 1
 
 
 async def test_an_edition_records_the_profile_version_that_produced_it(seeded):
@@ -113,7 +113,7 @@ async def test_changing_the_profile_leaves_every_published_edition_standing(seed
         )
         assert rescore, "changing the title must count as a scoring change"
         assert version > 1
-        rows = await mq.edition(conn, user_id, monday)
+        rows = await mq.edition(conn, user_id, monday, 1, limit=100)
         assert len(rows) == len(ids), "a profile change erased a published edition"
 
 
@@ -126,8 +126,9 @@ async def test_re_scoring_a_posting_does_not_move_it_out_of_its_edition(seeded):
     await _publish(user_id, ids[:1], friday, version=2)
 
     async with connect() as conn:
-        assert len(await mq.edition(conn, user_id, monday)) == 1, "monday lost its posting"
-        assert len(await mq.edition(conn, user_id, friday)) == 1
+        monday_rows = await mq.edition(conn, user_id, monday, 1, limit=100)
+        assert len(monday_rows) == 1, "monday lost its posting"
+        assert len(await mq.edition(conn, user_id, friday, 2, limit=100)) == 1
 
 
 async def test_a_posting_cannot_be_recommended_twice_under_one_profile_version(seeded):
@@ -144,7 +145,7 @@ async def test_a_posting_cannot_be_recommended_twice_under_one_profile_version(s
 
 
 async def test_a_posting_never_published_belongs_to_no_edition(seeded):
-    """Retrieval is cumulative and RERANK_LIMIT caps scoring; unscored is not a recommendation."""
+    """Retrieval is cumulative and can outrun scoring; unscored is not a recommendation."""
     user_id = seeded["user_id"]
     await _all_match_ids(user_id)
     async with connect() as conn:
@@ -162,7 +163,7 @@ async def test_a_day_with_no_scoring_simply_has_no_edition(seeded):
     async with connect() as conn:
         days = [row.day for row in await mq.editions(conn, user_id)]
         assert days == [wednesday, monday]
-        assert await mq.edition(conn, user_id, monday + timedelta(days=1)) == []
+        assert await mq.edition(conn, user_id, monday + timedelta(days=1), 1, limit=100) == []
 
 
 async def test_an_edition_survives_its_postings_ageing_past_the_horizon(seeded):
@@ -180,7 +181,7 @@ async def test_an_edition_survives_its_postings_ageing_past_the_horizon(seeded):
             "UPDATE job SET posted_at = now() - interval '300 days', "
             "first_seen_at = now() - interval '300 days'"
         )
-        rows = await mq.edition(conn, user_id, long_ago)
+        rows = await mq.edition(conn, user_id, long_ago, 1, limit=100)
     assert len(rows) == len(ids)
 
 
@@ -196,14 +197,19 @@ async def test_a_posting_that_closes_stays_in_the_edition_it_was_published_in(se
 
     async with connect() as conn:
         await conn.exec_driver_sql("UPDATE job SET closed_at = now()")
-        rows = await mq.edition(conn, user_id, monday)
+        rows = await mq.edition(conn, user_id, monday, 1, limit=100)
         counted = {row.day: row.postings for row in await mq.editions(conn, user_id)}
     assert len(rows) == len(ids), "closing a posting emptied a published edition"
     assert counted[monday] == len(rows), "the dropdown count and the list disagree"
 
 
-async def test_clearing_a_day_only_touches_rows_from_another_profile(seeded):
-    """Replacing today's edition must not restart a day that is simply still being filled."""
+async def test_a_profile_change_adds_an_edition_beside_the_day_it_changed_on(seeded):
+    """Nothing published is ever destroyed, including today's.
+
+    A profile change used to REPLACE the day's edition, which is why saving one needed a confirm
+    page: the save destroyed something. It was also the single exception to "an edition is never
+    rewritten", and an exception in an invariant is what eventually gets taken for the rule.
+    """
     user_id = seeded["user_id"]
     ids = await _all_match_ids(user_id)
     today = date(2026, 9, 24)
@@ -211,7 +217,29 @@ async def test_clearing_a_day_only_touches_rows_from_another_profile(seeded):
     await _publish(user_id, ids[1:], today, version=2)
 
     async with connect() as conn:
-        removed = await mq.clear_stale_edition(conn, user_id, today, profile_version=2)
-        remaining = await mq.edition(conn, user_id, today)
-    assert removed == 1, "the old-profile row was not replaced"
-    assert len(remaining) == len(ids) - 1, "rows at the current version were destroyed too"
+        listed = [(row.day, row.profile_version, row.postings)
+                  for row in await mq.editions(conn, user_id)]
+        first = await mq.edition(conn, user_id, today, 1, limit=100)
+        second = await mq.edition(conn, user_id, today, 2, limit=100)
+
+    assert listed == [(today, 2, len(ids) - 1), (today, 1, 1)], "newest version first"
+    assert len(first) == 1, "the edition read under the old profile was destroyed"
+    assert len(second) == len(ids) - 1
+
+
+async def test_one_posting_may_sit_in_two_editions_under_two_profiles(seeded):
+    """The once-per-version constraint is per VERSION, which is what makes versioning work.
+
+    A reader who changes their profile is asking to be shown the corpus again under new terms, so
+    the same posting appearing in both editions is the point. The constraint still refuses it
+    twice under ONE version, which is the case that reads as the system repeating itself.
+    """
+    user_id = seeded["user_id"]
+    ids = await _all_match_ids(user_id)
+    today = date(2026, 9, 24)
+    await _publish(user_id, ids[:1], today, version=1)
+    await _publish(user_id, ids[:1], today, version=2)
+
+    async with connect() as conn:
+        assert len(await mq.edition(conn, user_id, today, 1, limit=100)) == 1
+        assert len(await mq.edition(conn, user_id, today, 2, limit=100)) == 1

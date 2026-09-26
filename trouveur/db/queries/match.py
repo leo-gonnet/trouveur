@@ -21,32 +21,40 @@ from trouveur.db.schema import (
 )
 from trouveur.models import Expansion
 
-# pgvector applies WHERE after the index walk, so a filtered ANN query returns a short result
-# rather than an error. Over-fetching and raising ef_search is the remedy.
-_DENSE_OVERSAMPLE = 4
-_EF_SEARCH = 200
-
-_HARD_FILTERS = f"""
+# The ONE filter applied before ranking, and deliberately the only one. Every other preference a
+# user states -- cities, salary, languages -- reaches the reranker as text instead, because a rule
+# that rejected a posting here hid it from the reader with no way to find out it existed. The four
+# enum filters this replaced (work mode, seniority, employment type, salary) each also dropped
+# every posting whose facet was unstated, which is why the form had to offer a "not stated" tick
+# box to undo the filter the user had just set.
+#
+# Unstated location passes: a posting nobody parsed a country out of is not a posting somewhere
+# else. Fully remote passes wherever it is, because for a role with no office the country named
+# says nothing about whether the reader can take it -- whether it is remote *for them* is in the
+# description, which the reranker reads.
+_ELIGIBLE = f"""
     j.closed_at IS NULL
     AND {freshness.sql("j")}
-    AND (cardinality(CAST(:countries AS text[])) = 0 OR f.countries && CAST(:countries AS text[]))
-    AND (cardinality(CAST(:work_modes AS text[])) = 0
-         OR f.work_mode::text = ANY(CAST(:work_modes AS text[])))
-    AND (cardinality(CAST(:seniorities AS text[])) = 0
-         OR f.seniority::text = ANY(CAST(:seniorities AS text[])))
-    AND (cardinality(CAST(:employment_types AS text[])) = 0
-         OR f.employment_type::text = ANY(CAST(:employment_types AS text[])))
+    -- When WE got it, which is not how old the advert is. A run after a sweep considers that
+    -- sweep's additions and nothing else: a posting gets one chance, on the day it arrives. A
+    -- posting we first saw today but that was posted three days ago is a new arrival and belongs
+    -- in today's run, which is why this reads first_seen_at and the clause above reads COALESCE.
+    AND j.first_seen_at > :seen_since
     AND (
-        CAST(:min_salary AS numeric) <= 0
-        OR f.salary_max_eur_year IS NULL
-        OR f.salary_max_eur_year >= CAST(:min_salary AS numeric)
+        cardinality(CAST(:countries AS text[])) = 0
+        OR f.countries && CAST(:countries AS text[])
+        OR cardinality(f.countries) = 0
+        OR (CAST(:remote_anywhere AS boolean) AND f.work_mode = 'remote')
     )
 """
 
-# Issued on its own: asyncpg runs parameterised queries as prepared statements, which reject
-# multiple commands, so this cannot be prepended to the SELECT below.
-_EF_SEARCH_SQL = f"SET LOCAL hnsw.ef_search = {_EF_SEARCH}"
-
+# There is deliberately NO ANN index on job_embedding, so this is an exact scan over the vectors
+# inside the freshness horizon. An HNSW index applies WHERE *after* the graph walk, which silently
+# returns fewer rows than asked for the moment a filter is selective -- looking for jobs in one
+# small city, the walk spends its whole working set on postings elsewhere and the filter discards
+# them. Measured on the production join shape at 250k vectors: 14ms when the filter qualifies 565
+# rows, 80ms unfiltered. Bring an index back only if the horizon holds several million vectors.
+#
 # The READ width, which is not always the width the embed worker is writing: a model change is
 # backfilled over days and the dense arm serves the old space meanwhile.
 _DENSE_SQL_TEMPLATE = f"""
@@ -54,7 +62,7 @@ SELECT j.id AS job_id
 FROM job_embedding e
 JOIN job j ON j.id = e.job_id
 JOIN job_facet f ON f.job_id = j.id
-WHERE {_HARD_FILTERS}
+WHERE {_ELIGIBLE}
   AND e.{{column}} IS NOT NULL
 ORDER BY e.{{column}} <=> CAST(:vector AS halfvec)
 LIMIT :limit
@@ -72,7 +80,7 @@ _LEXICAL_SQL = f"""
 SELECT j.id AS job_id
 FROM job j
 JOIN job_facet f ON f.job_id = j.id
-WHERE {_HARD_FILTERS}
+WHERE {_ELIGIBLE}
   AND (
       j.search_de @@ websearch_to_tsquery('german', :query)
       OR j.search_fold LIKE '%' || lower(f_unaccent(:query)) || '%'
@@ -84,14 +92,14 @@ LIMIT :limit
 """
 
 
-def _filter_params(profile: Any, fresh_since: datetime) -> dict[str, Any]:
+def _filter_params(
+    profile: Any, fresh_since: datetime, seen_since: datetime
+) -> dict[str, Any]:
     return {
         "fresh_since": fresh_since,
+        "seen_since": seen_since,
         "countries": list(profile.countries or []),
-        "work_modes": [str(mode) for mode in (profile.work_modes or [])],
-        "seniorities": [str(level) for level in (profile.seniorities or [])],
-        "employment_types": [str(kind) for kind in (profile.employment_types or [])],
-        "min_salary": float(profile.min_salary_eur_year or 0),
+        "remote_anywhere": bool(profile.remote_anywhere),
     }
 
 
@@ -101,29 +109,38 @@ async def dense_candidates(
     vector: list[float],
     limit: int,
     fresh_since: datetime,
+    seen_since: datetime,
 ) -> list[int]:
     """Nearest neighbours to one query vector, in rank order."""
     params = {
-        **_filter_params(profile, fresh_since),
+        **_filter_params(profile, fresh_since, seen_since),
         "vector": "[" + ",".join(f"{value:.6f}" for value in vector) + "]",
-        "limit": limit * _DENSE_OVERSAMPLE,
+        "limit": limit,
     }
     from trouveur.config import get_settings
     from trouveur.ingest.embed.base import column_for
 
-    await conn.execute(sa.text(_EF_SEARCH_SQL))
     rows = await conn.execute(
         sa.text(_dense_sql(column_for(get_settings().embedding_read_dim))), params
     )
-    return [row.job_id for row in rows][:limit]
+    return [row.job_id for row in rows]
 
 
 async def lexical_candidates(
-    conn: AsyncConnection, profile: Any, query: str, limit: int, fresh_since: datetime
+    conn: AsyncConnection,
+    profile: Any,
+    query: str,
+    limit: int,
+    fresh_since: datetime,
+    seen_since: datetime,
 ) -> list[int]:
     rows = await conn.execute(
         sa.text(_LEXICAL_SQL),
-        {**_filter_params(profile, fresh_since), "query": query, "limit": limit},
+        {
+            **_filter_params(profile, fresh_since, seen_since),
+            "query": query,
+            "limit": limit,
+        },
     )
     return [row.job_id for row in rows]
 
@@ -153,9 +170,21 @@ async def upsert_matches(conn: AsyncConnection, rows: Sequence[dict]) -> int:
 
 
 async def pending_rerank(
-    conn: AsyncConnection, user_id: int, profile_version: int, limit: int
+    conn: AsyncConnection, user_id: int, profile_version: int, job_ids: Sequence[int]
 ) -> list[sa.Row]:
-    """Jobs this user has retrieved and not yet been scored for, best first."""
+    """What THIS run retrieved and has not scored at this profile version, best first.
+
+    Bounded by the run's own retrieval rather than by an age rule of its own, so the question
+    "how far back do we look" is answered in exactly one place -- the candidate window in
+    `_ELIGIBLE`. A posting the scorer stopped short of today is simply not retrieved tomorrow,
+    because tomorrow's window has moved past it, so it needs no separate expiry here.
+
+    That is also what makes a profile change work: it runs with the whole retained horizon as its
+    window, so the new profile's queries decide what is re-judged. A posting the new queries do
+    not find is not re-scored, which is the right answer -- it is not relevant to the new profile.
+    """
+    if not job_ids:
+        return []
     return list(
         await conn.execute(
             sa.text(
@@ -167,13 +196,17 @@ async def pending_rerank(
                 JOIN job j ON j.id = m.job_id
                 JOIN job_facet f ON f.job_id = j.id
                 WHERE m.user_id = :user_id
+                  AND m.job_id = ANY(CAST(:job_ids AS bigint[]))
                   AND j.closed_at IS NULL
                   AND (m.llm_score IS NULL OR m.profile_version < :profile_version)
                 ORDER BY m.retrieval_score DESC NULLS LAST
-                LIMIT :limit
                 """
             ),
-            {"user_id": user_id, "profile_version": profile_version, "limit": limit},
+            {
+                "user_id": user_id,
+                "profile_version": profile_version,
+                "job_ids": list(job_ids),
+            },
         )
     )
 
@@ -203,22 +236,34 @@ async def scoreable_rows(conn: AsyncConnection, job_ids: Sequence[int]) -> list[
 
 
 async def count_pending_rerank(
-    conn: AsyncConnection, user_id: int, profile_version: int
+    conn: AsyncConnection, user_id: int, fresh_since: datetime
 ) -> int:
-    """How many jobs a re-score would cover, so the UI can price an edit before it happens."""
+    """An upper bound on what a profile change would score, so the form can price an edit.
+
+    An upper bound and not a count: what a re-score actually covers is whatever the NEW profile's
+    queries retrieve, which cannot be known without running them. This is every open posting in
+    the retained horizon that the user's location filter admits -- the largest that set could be.
+    """
     return int(
         (
             await conn.execute(
                 sa.text(
-                    """
-                    SELECT count(*) FROM user_job_match m
-                    JOIN job j ON j.id = m.job_id
-                    WHERE m.user_id = :user_id
-                      AND j.closed_at IS NULL
-                      AND (m.llm_score IS NULL OR m.profile_version < :profile_version)
+                    f"""
+                    SELECT count(*)
+                    FROM job j
+                    JOIN job_facet f ON f.job_id = j.id
+                    JOIN user_profile p ON p.user_id = :user_id
+                    WHERE j.closed_at IS NULL
+                      AND {freshness.sql("j")}
+                      AND (
+                          cardinality(p.countries) = 0
+                          OR f.countries && p.countries
+                          OR cardinality(f.countries) = 0
+                          OR (p.remote_anywhere AND f.work_mode = 'remote')
+                      )
                     """
                 ),
-                {"user_id": user_id, "profile_version": profile_version},
+                {"user_id": user_id, "fresh_since": fresh_since},
             )
         ).scalar_one()
         or 0
@@ -298,24 +343,22 @@ _NOT_DISMISSED = "coalesce(m.state::text, 'new') <> 'dismissed'"
 
 
 async def editions(conn: AsyncConnection, user_id: int) -> list[sa.Row]:
-    """Every day this user has an edition for, newest first.
+    """Every edition this user has, newest first.
 
-    The profile version comes back so the page can mark a day that was read under a profile the
-    user has since changed; a day can span two versions if the profile changed mid-day.
+    One per (day, profile version), not one per day: a profile change publishes a second edition
+    for the day beside the first rather than replacing it, so a day the profile changed on has two
+    and the reader can still see what they were shown before the change.
     """
     return list(
         await conn.execute(
             sa.text(
                 f"""
-                SELECT e.day,
-                       count(*) AS postings,
-                       min(e.profile_version) AS profile_version,
-                       max(e.profile_version) AS profile_version_max
+                SELECT e.day, e.profile_version, count(*) AS postings
                 FROM user_edition_item e
                 {_EDITION_STATE}
                 WHERE e.user_id = :user_id AND {_NOT_DISMISSED}
-                GROUP BY e.day
-                ORDER BY e.day DESC
+                GROUP BY e.day, e.profile_version
+                ORDER BY e.day DESC, e.profile_version DESC
                 """
             ),
             {"user_id": user_id},
@@ -323,86 +366,95 @@ async def editions(conn: AsyncConnection, user_id: int) -> list[sa.Row]:
     )
 
 
-async def edition(conn: AsyncConnection, user_id: int, day: date) -> list[sa.Row]:
-    """One day's edition, best first. No score cut: the day is the cut.
+# Paged by cursor, never by OFFSET. The dismiss filter above runs BEFORE the page is cut, so with
+# OFFSET the page boundaries move whenever the reader dismisses something: dismiss three on page
+# one, open page two, and the three postings that shifted up past the boundary are never shown on
+# any page. Dismissing is an htmx swap of the one widget, so the list the reader is looking at does
+# not shrink under them and there is nothing on screen to suggest it happened.
+#
+# A cursor is anchored to a row instead of to a count, so it survives the set changing underneath
+# it. The order has to be total for that to work, which is why the tiebreak is job_id -- unique
+# within an edition, since it is part of the key -- rather than posted_at, which is nullable and
+# repeats. Higher job_id is later ingestion, so among equal scores it still reads newest first.
+_EDITION_SQL_TEMPLATE = f"""
+SELECT j.id, j.public_id, j.url, j.title, j.company, j.posted_at, j.source,
+       j.closed_at, j.locations, f.countries, f.cities,
+       f.work_mode::text AS work_mode,
+       f.salary_min_eur_year, f.salary_max_eur_year,
+       e.llm_score, e.llm_reason, e.llm_red_flags,
+       coalesce(m.state::text, 'new') AS state
+FROM user_edition_item e
+JOIN job j ON j.id = e.job_id
+JOIN job_facet f ON f.job_id = j.id
+{_EDITION_STATE}
+WHERE e.user_id = :user_id
+  AND e.day = CAST(:day AS date)
+  AND e.profile_version = :profile_version
+  AND {_NOT_DISMISSED}
+  AND {{cursor}}
+ORDER BY e.llm_score {{direction}}, e.job_id {{direction}}
+LIMIT :limit
+"""
+
+_NO_CURSOR = "TRUE"
+_BEFORE_CURSOR = (
+    "(e.llm_score, e.job_id) < (CAST(:cursor_score AS smallint), CAST(:cursor_job AS bigint))"
+)
+_AFTER_CURSOR = (
+    "(e.llm_score, e.job_id) > (CAST(:cursor_score AS smallint), CAST(:cursor_job AS bigint))"
+)
+
+
+@lru_cache(maxsize=4)
+def _edition_sql(cursor: str, direction: str) -> str:
+    return _EDITION_SQL_TEMPLATE.format(cursor=cursor, direction=direction)
+
+
+async def edition(
+    conn: AsyncConnection,
+    user_id: int,
+    day: date,
+    profile_version: int,
+    *,
+    limit: int,
+    after: tuple[int, int] | None = None,
+    before: tuple[int, int] | None = None,
+) -> list[sa.Row]:
+    """One page of one edition, best first. No score cut: the edition is the cut.
 
     The score, reason and red flags are the EDITION's, not user_job_match's -- that row holds the
     current verdict, and reading it here would let a later re-score rewrite what this day said.
+
+    Paged because nothing bounds an edition's length any more: the old scoring cap of 150 did that
+    job as a side effect, and a profile change can publish an edition of thousands. `after` and
+    `before` are (score, job_id) cursors; `before` reads backwards and the rows come back in
+    display order either way. The dropdown's count is still the whole edition, from `editions()`:
+    a page is how much is read at once, not how much the day held.
     """
-    return list(
-        await conn.execute(
-            sa.text(
-                f"""
-                SELECT j.id, j.public_id, j.url, j.title, j.company, j.posted_at, j.source,
-                       j.closed_at, j.locations, f.countries, f.cities,
-                       f.work_mode::text AS work_mode,
-                       f.salary_min_eur_year, f.salary_max_eur_year,
-                       e.llm_score, e.llm_reason, e.llm_red_flags,
-                       coalesce(m.state::text, 'new') AS state
-                FROM user_edition_item e
-                JOIN job j ON j.id = e.job_id
-                JOIN job_facet f ON f.job_id = j.id
-                {_EDITION_STATE}
-                WHERE e.user_id = :user_id
-                  AND e.day = CAST(:day AS date)
-                  AND {_NOT_DISMISSED}
-                ORDER BY e.llm_score DESC, j.posted_at DESC NULLS LAST
-                """
-            ),
-            {"user_id": user_id, "day": day},
-        )
-    )
+    params: dict[str, Any] = {
+        "user_id": user_id,
+        "day": day,
+        "profile_version": profile_version,
+        "limit": limit,
+    }
+    cursor, direction = _NO_CURSOR, "DESC"
+    if before is not None:
+        cursor, direction = _AFTER_CURSOR, "ASC"
+        params["cursor_score"], params["cursor_job"] = before
+    elif after is not None:
+        cursor, direction = _BEFORE_CURSOR, "DESC"
+        params["cursor_score"], params["cursor_job"] = after
 
-
-async def edition_size(conn: AsyncConnection, user_id: int, day: date) -> int:
-    """How many postings a day's edition holds, so the profile form can say what a save costs."""
-    return int(
-        (
-            await conn.execute(
-                sa.text(
-                    """
-                    SELECT count(*) FROM user_edition_item
-                    WHERE user_id = :user_id AND day = CAST(:day AS date)
-                    """
-                ),
-                {"user_id": user_id, "day": day},
-            )
-        ).scalar_one()
-        or 0
-    )
-
-
-async def clear_stale_edition(
-    conn: AsyncConnection, user_id: int, day: date, profile_version: int
-) -> int:
-    """Drop `day`'s edition if it was published under a profile the user has since changed.
-
-    Only ever called for the current day, and only after the user agreed to lose it on the
-    profile form: an edition already published is a record, and a past one is never touched.
-    Rows at the CURRENT version survive, so a second run on the same day adds to the day
-    rather than restarting it.
-    """
-    return (
-        await conn.execute(
-            sa.text(
-                """
-                DELETE FROM user_edition_item
-                WHERE user_id = :user_id
-                  AND day = CAST(:day AS date)
-                  AND profile_version <> :profile_version
-                """
-            ),
-            {"user_id": user_id, "day": day, "profile_version": profile_version},
-        )
-    ).rowcount or 0
+    rows = list(await conn.execute(sa.text(_edition_sql(cursor, direction)), params))
+    return list(reversed(rows)) if direction == "ASC" else rows
 
 
 async def publish_edition(conn: AsyncConnection, rows: Sequence[dict]) -> int:
     """Add scored postings to a day's edition.
 
-    Conflicts on (user, day, job) do nothing, so re-running a day is idempotent. A conflict on
-    the version constraint is NOT swallowed: that one means a posting is being recommended twice
-    under one profile, which is a bug upstream rather than a repeat.
+    Conflicts on the key do nothing, so re-running a day at the same version is idempotent. A
+    conflict on `uq_edition_item_once_per_version` is NOT swallowed: that one means a posting is
+    being recommended twice under one profile, which is a bug upstream rather than a repeat.
     """
     if not rows:
         return 0
@@ -411,6 +463,7 @@ async def publish_edition(conn: AsyncConnection, rows: Sequence[dict]) -> int:
         index_elements=[
             user_edition_item.c.user_id,
             user_edition_item.c.day,
+            user_edition_item.c.profile_version,
             user_edition_item.c.job_id,
         ]
     )

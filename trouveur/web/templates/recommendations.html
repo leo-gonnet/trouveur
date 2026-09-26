@@ -10,16 +10,17 @@
 
 {% if editions %}
 <nav class="editions">
-  {% if newer %}<a href="/recommendations?edition={{ newer }}">← {{ newer.strftime('%d %b') }}</a>
+  {% if newer %}<a href="{{ m.edition_href(newer) }}">← {{ newer.day.strftime('%d %b') }}</a>
   {% else %}<span class="muted">← newer</span>{% endif %}
-  <select onchange="location = '/recommendations?edition=' + this.value">
+  <select onchange="location = this.value">
     {% for row in editions %}
-      <option value="{{ row.day }}" {% if edition and row.day == edition.day %}selected{% endif %}>
+      <option value="{{ m.edition_href(row) }}"
+        {%- if edition and row.day == edition.day and row.profile_version == edition.profile_version %} selected{% endif %}>
         {{ m.edition_label(row, today, profile_version) }}
       </option>
     {% endfor %}
   </select>
-  {% if older %}<a href="/recommendations?edition={{ older }}">{{ older.strftime('%d %b') }} →</a>
+  {% if older %}<a href="{{ m.edition_href(older) }}">{{ older.day.strftime('%d %b') }} →</a>
   {% else %}<span class="muted">older →</span>{% endif %}
 </nav>
 {% endif %}
@@ -28,6 +29,21 @@
   <div class="results">
     {% for job in jobs %}{{ m.job_card(job) }}{% endfor %}
   </div>
+  {% if next_cursor or prev_cursor %}
+  <div class="pager">
+    {% if prev_cursor %}
+      <a class="pill" href="{{ m.edition_href(edition, before=prev_cursor) }}">← previous</a>
+    {% endif %}
+    {% if next_cursor %}
+      <a class="pill" href="{{ m.edition_href(edition, after=next_cursor) }}">next →</a>
+    {% endif %}
+  </div>
+  {% endif %}
+{% elif editions and paged %}
+<p class="empty">
+  Nothing further in this edition.
+  <a href="{{ m.edition_href(edition) }}">Back to the start of it.</a>
+</p>
 {% elif editions %}
 <p class="empty">
   Every posting in this edition was dismissed. Nothing is lost — pick another day above, or
