@@ -80,7 +80,7 @@ docker run -d --name trouveur-db -p 5432:5432 \
   pgvector/pgvector:pg16
 export DATABASE_URL=postgresql+asyncpg://trouveur:dev@127.0.0.1:5432/trouveur
 uv run alembic upgrade head
-uv run trouveur create-user                    # the only way to make a login
+uv run trouveur create-user                    # the first login, which becomes the admin
 uv run trouveur tenants add <source> <company> # the crawl set is a table, managed from the CLI
 uv run trouveur sweep
 uv run trouveur drain                          # derive, embed, fetch details
@@ -92,7 +92,8 @@ against a real Postgres, because SQL that compiles is not SQL that runs.
 
 Deployment is Docker Compose: Postgres, the UI behind Caddy for TLS, and a runner that owns the
 schedule and is the only process that scans. A push to `main` tests, builds and deploys over SSH.
-`ENCRYPTION_KEY` must never change once set, as it encrypts users' stored API keys.
+Scoring runs on one installation key (`OPENROUTER_API_KEY` in the host's `.env`); users are granted
+credit in dollars against it, and the first account created is the admin who grants it.
 
 ## Disclaimer
 
