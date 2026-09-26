@@ -14,7 +14,7 @@
         crossorigin="anonymous"></script>
 </head>
 <body>
-{% if username is defined and username %}
+{% if request.state.session %}
 <header class="topbar">
   <a href="/recommendations" class="brand"><img src="/static/logo-dark.png" alt="" class="logo">Trouveur</a>
   <nav class="nav">
@@ -22,21 +22,37 @@
                                ('/search', 'search', 'Search'),
                                ('/dashboard', 'dashboard', 'Dashboard'),
                                ('/profile', 'profile', 'Profile'),
-                               ('/settings', 'settings', 'Settings'),
-                               ('/admin', 'admin', 'Scans'),
                                ('/how-it-works', 'how_it_works', 'How it works')] %}
       <a href="{{ href }}" {% if active == key %}aria-current="page"{% endif %}>{{ name }}</a>
     {% endfor %}
   </nav>
   <span class="spacer"></span>
-  <span class="user">
-    <span class="hint">{{ username }}</span>
-    <form method="post" action="/logout" class="inline"><button type="submit" class="ghost">Log out</button></form>
-  </span>
+  {# Credit is the one thing that silently stops scoring, so it is readable from every page.
+     An admin needs none, so they are shown none rather than a meaningless zero. #}
+  {% if request.state.balance_usd is not none %}
+    <span class="pill {{ 'bad' if request.state.balance_usd <= 0 else '' }}"
+          title="LLM credit remaining">${{ '%.2f' % request.state.balance_usd }}</span>
+  {% endif %}
+  {# <details>, so the menu needs no JavaScript. It closes on the next navigation or on a second
+     click of the name; nothing here is worth a script to dismiss it on an outside click. #}
+  <details class="menu">
+    <summary>{{ request.state.display_name }}</summary>
+    <div class="menu-panel">
+      <a href="/settings" {% if active == 'settings' %}aria-current="page"{% endif %}>Settings</a>
+      {% if request.state.is_admin %}
+        <a href="/admin" {% if active == 'admin' %}aria-current="page"{% endif %}>Scans</a>
+        <a href="/users" {% if active == 'users' %}aria-current="page"{% endif %}>Users</a>
+      {% endif %}
+      <form method="post" action="/logout"><button type="submit" class="ghost">Log out</button></form>
+    </div>
+  </details>
 </header>
-{% if request.state.needs_key %}
-<div class="banner warn">No OpenRouter key is set, so nothing is scored and Recommendations stays
-  empty. Search and the free stages still work. <a href="/settings">Add a key in Settings.</a></div>
+{% if request.state.scoring_unconfigured %}
+<div class="banner warn">This installation has no <code>OPENROUTER_API_KEY</code>, so nothing is
+  scored and Recommendations stays empty. Search and the free stages still work.</div>
+{% elif request.state.out_of_credit %}
+<div class="banner warn">Your credit is used up, so nothing new will be scored. Ask an
+  administrator to top it up. Search and the free stages still work.</div>
 {% endif %}
 {% endif %}
 <main>{% block content %}{% endblock %}</main>

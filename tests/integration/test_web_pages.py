@@ -48,7 +48,33 @@ async def client(seeded):
         transport=transport, base_url="http://test", follow_redirects=False
     ) as session:
         response = await session.post(
-            "/login", data={"username": user.username, "password": PASSWORD}
+            "/login", data={"email": user.email, "password": PASSWORD}
+        )
+        assert response.status_code == 303, "login form did not authenticate"
+        yield session
+
+
+@pytest.fixture
+async def admin(seeded):
+    """A logged-in ADMIN, which the seeded reader deliberately is not: every page here is read as
+    an ordinary user unless a test asks otherwise."""
+    from tests.integration.seed import seed_user
+    from trouveur.web.auth import hash_password
+
+    admin_id, _ = await seed_user("overseer@example.test", is_admin=True)
+    async with connect() as conn:
+        await conn.execute(
+            sa.update(app_user)
+            .where(app_user.c.id == admin_id)
+            .values(password_hash=hash_password(PASSWORD))
+        )
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://test", follow_redirects=False
+    ) as session:
+        response = await session.post(
+            "/login", data={"email": "overseer@example.test", "password": PASSWORD}
         )
         assert response.status_code == 303, "login form did not authenticate"
         yield session
@@ -61,13 +87,34 @@ async def _public_id() -> str:
 
 @pytest.mark.parametrize(
     "path",
-    ["/recommendations", "/search", "/dashboard", "/profile", "/settings", "/admin",
-     "/how-it-works"],
+    ["/recommendations", "/search", "/dashboard", "/profile", "/settings", "/how-it-works"],
 )
 async def test_page_renders(client, path):
     response = await client.get(path)
     assert response.status_code == 200, f"{path} returned {response.status_code}"
     assert "<main>" in response.text
+
+
+@pytest.mark.parametrize("path", ["/admin", "/users"])
+async def test_admin_page_renders(admin, path):
+    response = await admin.get(path)
+    assert response.status_code == 200, f"{path} returned {response.status_code}"
+    assert "<main>" in response.text
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [("GET", "/admin"), ("POST", "/admin/run"), ("GET", "/users"), ("POST", "/users")],
+)
+async def test_an_admin_route_refuses_an_ordinary_user(client, method, path):
+    """Checked by prefix in the middleware, not per handler: a per-route check is the line somebody
+    forgets on the next route, and the route that leaks is always the newest one.
+
+    Scans owns the SHARED schedule and queues real sweeps, so it is not one reader's to retime.
+    """
+    response = await client.request(method, path)
+    assert response.status_code == 303, f"{method} {path} answered an ordinary user"
+    assert response.headers["location"] == "/recommendations"
 
 
 async def test_pages_that_show_a_job_card_actually_render_one(client):
@@ -121,35 +168,31 @@ async def test_search_shows_a_posting_the_user_never_retrieved(client, seeded):
     assert title[:20] in response.text
 
 
-async def test_a_stored_api_key_is_never_rendered(client, seeded):
-    """The settings page must be able to say *which* key is stored without disclosing it.
-
-    Checked over the rendered body rather than by reading the template, because the leak that
-    matters is a context value that reaches any page, not one particular field.
-    """
-    from trouveur.crypto import encrypt, fingerprint
-
-    secret = "sk-or-v1-integration-test-secret-value"
-    async with connect() as conn:
-        await users_q.save_credential(
-            conn, seeded["user_id"],
-            api_key_encrypted=encrypt(secret), api_key_fingerprint=fingerprint(secret),
-            model="probe/model", provider_pin=None, monthly_budget_usd=Decimal("5"),
-        )
-
-    body = (await client.get("/settings")).text
-    assert secret not in body
-    assert secret[-8:] not in body
-    assert fingerprint(secret) in body, "the page must identify which key is stored"
-    assert 'class="banner warn"' not in body, "the no-key banner must go once a key is stored"
-
-
-async def test_the_no_key_banner_is_on_every_page_until_a_key_is_set(client, seeded):
+async def test_the_out_of_credit_banner_is_on_every_page_until_credit_is_granted(client, seeded):
+    """Credit is what silently stops scoring, so a reader must not have to visit Settings to learn
+    they have none. Set by the session middleware, so no route can forget it."""
     for path in ("/recommendations", "/search", "/profile"):
         body = (await client.get(path)).text
         assert 'class="banner warn"' in body, path
-    body = (await client.get("/recommendations")).text
-    assert "Add a key in Settings." in body, "the banner has to say what to do about it"
+    assert "Ask an\n  administrator to top it up." in (await client.get("/search")).text
+
+    async with connect() as conn:
+        await users_q.grant_credit(
+            conn, seeded["user_id"], amount_usd=Decimal("5"), granted_by=seeded["user_id"],
+            note="test",
+        )
+    assert 'class="banner warn"' not in (await client.get("/recommendations")).text
+
+
+async def test_the_balance_is_readable_from_the_topbar(client, seeded):
+    """The one number that decides whether tomorrow's scan scores anything."""
+    async with connect() as conn:
+        await users_q.grant_credit(
+            conn, seeded["user_id"], amount_usd=Decimal("3.42"), granted_by=seeded["user_id"],
+            note="test",
+        )
+    body = (await client.get("/search")).text
+    assert "$3.42" in body
 
 
 async def test_the_page_is_a_reading_list_with_no_console_on_it(client, seeded):
@@ -181,89 +224,64 @@ async def test_the_scoring_switch_pauses_spending_and_says_so(client, seeded):
 
 
 async def test_the_ceiling_is_the_users_to_set_while_scoring_is_on(client, seeded):
-    async with connect() as conn:
-        await users_q.save_credential(
-            conn, seeded["user_id"], api_key_encrypted=b"probe",
-            api_key_fingerprint="probe", model="probe/model", provider_pin=None,
-            monthly_budget_usd=Decimal("5"),
-        )
     assert (
         await client.post(
-            "/settings/scoring", data={"scoring_enabled": "on", "monthly_budget_usd": "12.50"}
+            "/settings/scoring", data={"scoring_enabled": "on", "daily_ceiling_usd": "0.75"}
         )
     ).status_code == 303
     async with connect() as conn:
         assert (
-            await users_q.get_credential(conn, seeded["user_id"])
-        ).monthly_budget_usd == Decimal("12.50")
+            await users_q.get_profile(conn, seeded["user_id"])
+        ).daily_ceiling_usd == Decimal("0.75")
+
+
+async def test_the_page_states_the_monthly_worst_case_and_offers_no_monthly_ceiling(
+    client, seeded
+):
+    """One limit, and it is the day's. The month is what a reader worries about, so it is stated
+    rather than set: two numbers for one decision is how they come to disagree."""
+    async with connect() as conn:
+        await users_q.save_profile(conn, seeded["user_id"], {"daily_ceiling_usd": Decimal("0.25")})
+    body = (await client.get("/settings")).text
+    assert "$7.50" in body, "thirty days of a $0.25 ceiling is the worst case the page must state"
+    assert "monthly_budget_usd" not in body, "a second, monthly ceiling must not come back"
 
 
 async def test_an_absent_ceiling_keeps_the_stored_one_rather_than_resetting_it(client, seeded):
     """The form DISABLES the ceiling while scoring is off, and a disabled input submits nothing.
 
-    Read as "reset to the default", that silently put the user back on $5 every time they
+    Read as "reset to the default", that silently put the user back on the default every time they
     touched the switch -- a cost control quietly widened by the control meant to narrow it.
     """
     async with connect() as conn:
-        await users_q.save_credential(
-            conn, seeded["user_id"], api_key_encrypted=b"probe",
-            api_key_fingerprint="probe", model="probe/model", provider_pin=None,
-            monthly_budget_usd=Decimal("42"),
-        )
+        await users_q.save_profile(conn, seeded["user_id"], {"daily_ceiling_usd": Decimal("0.90")})
 
     assert (await client.post("/settings/scoring", data={})).status_code == 303
     async with connect() as conn:
-        credential = await users_q.get_credential(conn, seeded["user_id"])
-    assert credential.monthly_budget_usd == Decimal("42"), "the ceiling was silently reset"
+        profile = await users_q.get_profile(conn, seeded["user_id"])
+    assert profile.daily_ceiling_usd == Decimal("0.90"), "the ceiling was silently reset"
 
 
 async def test_the_ceiling_cannot_be_changed_while_scoring_is_off(client, seeded):
     """Enforced in the route, not only by the disabled attribute the browser is asked to honour."""
     async with connect() as conn:
-        await users_q.save_credential(
-            conn, seeded["user_id"], api_key_encrypted=b"probe",
-            api_key_fingerprint="probe", model="probe/model", provider_pin=None,
-            monthly_budget_usd=Decimal("42"),
-        )
+        await users_q.save_profile(conn, seeded["user_id"], {"daily_ceiling_usd": Decimal("0.90")})
     assert (
-        await client.post("/settings/scoring", data={"monthly_budget_usd": "999"})
+        await client.post("/settings/scoring", data={"daily_ceiling_usd": "999"})
     ).status_code == 303
     async with connect() as conn:
         assert (
-            await users_q.get_credential(conn, seeded["user_id"])
-        ).monthly_budget_usd == Decimal("42")
-
-
-async def test_replacing_a_key_keeps_the_ceiling_that_was_set_on_it(client, seeded):
-    """The installation default is a starting value for a first key, not a reset."""
-    async with connect() as conn:
-        await users_q.save_credential(
-            conn, seeded["user_id"], api_key_encrypted=b"probe",
-            api_key_fingerprint="probe", model="probe/model", provider_pin=None,
-            monthly_budget_usd=Decimal("42"),
-        )
-    assert (
-        await client.post("/settings", data={"api_key": "sk-or-v1-replacement"})
-    ).status_code == 303
-    async with connect() as conn:
-        assert (
-            await users_q.get_credential(conn, seeded["user_id"])
-        ).monthly_budget_usd == Decimal("42")
+            await users_q.get_profile(conn, seeded["user_id"])
+        ).daily_ceiling_usd == Decimal("0.90")
 
 
 async def test_editing_the_ceiling_does_not_queue_a_paid_run(client, seeded):
     """Turning scoring back on is a reason to run; changing a number is not."""
     from trouveur.db.queries import admin as admin_q
 
-    async with connect() as conn:
-        await users_q.save_credential(
-            conn, seeded["user_id"], api_key_encrypted=b"probe",
-            api_key_fingerprint="probe", model="probe/model", provider_pin=None,
-            monthly_budget_usd=Decimal("5"),
-        )
     assert (
         await client.post(
-            "/settings/scoring", data={"scoring_enabled": "on", "monthly_budget_usd": "9"}
+            "/settings/scoring", data={"scoring_enabled": "on", "daily_ceiling_usd": "0.9"}
         )
     ).status_code == 303
     async with connect() as conn:
@@ -281,7 +299,7 @@ async def test_editing_the_ceiling_does_not_queue_a_paid_run(client, seeded):
 async def test_the_ceiling_input_is_locked_while_scoring_is_off(client, seeded):
     assert (await client.post("/settings/scoring", data={})).status_code == 303
     body = (await client.get("/settings")).text
-    assert 'name="monthly_budget_usd"' in body, "the ceiling is still shown, just not editable"
+    assert 'name="daily_ceiling_usd"' in body, "the ceiling is still shown, just not editable"
     assert "disabled" in body
     assert "Save ceiling" not in body
 
@@ -413,7 +431,7 @@ async def test_saving_a_profile_destroys_no_edition_and_asks_nothing(client, see
     assert len(kept) == len(ids), "saving a profile destroyed a published edition"
 
 
-async def test_a_profile_change_queues_one_match_run_for_this_user_only(client, seeded):
+async def test_a_profile_change_queues_one_match_run_for_this_user_only(client, admin, seeded):
     """What replaced the Match now button. Still one at a time: a second is a second bill."""
     from trouveur.db.queries import admin as admin_q
 
@@ -430,17 +448,22 @@ async def test_a_profile_change_queues_one_match_run_for_this_user_only(client, 
     assert len(mine) == 1, "a second edit must not queue a second paid run"
     assert mine[0].only_source is None and not mine[0].backfill
     assert pending is not None and pending.id == mine[0].id
-    assert "match only" in (await client.get("/admin")).text
+    assert "match only" in (await admin.get("/admin")).text
 
 
-async def test_saving_a_key_queues_a_match_so_a_new_user_sees_something(client, seeded):
-    """Pasting the key is usually the last step of setting up, and without this the page stays
-    empty until the next daily scan -- which reads as the key not having worked."""
+async def test_granting_credit_queues_a_match_so_a_new_user_sees_something(client, admin, seeded):
+    """Credit is what stops a run, so granting some is a reason to start one. Without this the
+    person waits for the next daily scan -- which reads as the top-up not having worked."""
     from trouveur.db.queries import admin as admin_q
 
-    assert (await client.post("/settings", data={"api_key": "sk-or-v1-probe"})).status_code == 303
+    response = await admin.post(
+        f"/users/{seeded['user_id']}/credit", data={"amount_usd": "5.00", "note": "welcome"}
+    )
+    assert response.status_code == 303
     async with connect() as conn:
         assert await admin_q.pending_match_run(conn, seeded["user_id"]) is not None
+        credit = await users_q.credit(conn, seeded["user_id"])
+    assert credit.balance_usd == Decimal("5.00")
 
 
 async def test_logout_clears_the_session(client):
@@ -450,7 +473,7 @@ async def test_logout_clears_the_session(client):
     assert response.headers["location"].startswith("/login")
 
 
-async def test_the_live_panel_renders_a_run_in_flight(client):
+async def test_the_live_panel_renders_a_run_in_flight(admin):
     """An empty panel exercises none of it.
 
     The progress bar, the cancel button and the per-source table only render when a run is
@@ -469,14 +492,14 @@ async def test_the_live_panel_renders_a_run_in_flight(client):
         sweep_id, _ = await ingest_q.start_sweep(conn, "greenhouse")
         await ingest_q.record_sweep_progress(conn, sweep_id, documents_seen=1234)
 
-    body = (await client.get("/admin/status")).text
+    body = (await admin.get("/admin/status")).text
     assert 'role="progressbar"' in body
     assert "1 of 4 sources done" in body
     assert "greenhouse" in body and "1,234" in body
     assert f"/admin/run/{run_id}/cancel" in body
 
 
-async def test_cancelling_a_running_run_asks_rather_than_kills(client):
+async def test_cancelling_a_running_run_asks_rather_than_kills(admin):
     """A running sweep must not be torn down mid-source: it would look complete when it is not."""
     from trouveur.db.queries import admin as admin_q
     from trouveur.models import RunStatus, RunTrigger
@@ -485,7 +508,7 @@ async def test_cancelling_a_running_run_asks_rather_than_kills(client):
         await admin_q.enqueue_run(conn, trigger=RunTrigger.MANUAL)
         claimed = await admin_q.claim_next_run(conn)
 
-    response = await client.post(f"/admin/run/{claimed.id}/cancel", follow_redirects=False)
+    response = await admin.post(f"/admin/run/{claimed.id}/cancel", follow_redirects=False)
     assert response.status_code == 303
 
     async with connect() as conn:
@@ -494,7 +517,7 @@ async def test_cancelling_a_running_run_asks_rather_than_kills(client):
     assert row.status == RunStatus.RUNNING.value, "a running sweep must finish its source first"
 
 
-async def test_cancelling_a_queued_run_ends_it_immediately(client):
+async def test_cancelling_a_queued_run_ends_it_immediately(admin):
     """Nothing has started, so there is no partial sweep to protect."""
     from trouveur.db.queries import admin as admin_q
     from trouveur.models import RunStatus, RunTrigger
@@ -502,7 +525,7 @@ async def test_cancelling_a_queued_run_ends_it_immediately(client):
     async with connect() as conn:
         run_id = await admin_q.enqueue_run(conn, trigger=RunTrigger.MANUAL)
 
-    await client.post(f"/admin/run/{run_id}/cancel", follow_redirects=False)
+    await admin.post(f"/admin/run/{run_id}/cancel", follow_redirects=False)
 
     async with connect() as conn:
         row = next(r for r in await admin_q.recent_runs(conn) if r.id == run_id)
@@ -692,3 +715,258 @@ async def test_dismissing_on_one_page_does_not_skip_the_next_page(client, seeded
     assert f'/job/{second}/state' in page_two, (
         "the posting after the dismissed one was stepped over and is now unreachable"
     )
+
+
+async def test_an_admin_creates_an_account_and_its_password_is_shown_exactly_once(admin):
+    """There is no invitation email and no reset link, so the generated password has to reach the
+    admin somehow -- and it must not reach the URL, the proxy log or the next page."""
+    response = await admin.post(
+        "/users", data={"email": "newcomer@example.test", "credit": "5.00"}
+    )
+    assert response.status_code == 200, "the password must be rendered, never redirected to"
+    shown = re.search(r"password <code>([^<]+)</code>", response.text)
+    assert shown, "the created account's password was not shown at all"
+    password = shown.group(1)
+
+    assert password not in (await admin.get("/users")).text, "the password was shown twice"
+
+    async with connect() as conn:
+        created = await users_q.get_user_by_email(conn, "newcomer@example.test")
+        credit = await users_q.credit(conn, created.id)
+    assert created is not None and created.is_admin is False
+    assert credit.balance_usd == Decimal("5.00")
+    assert created.password_hash != password, "the password must be stored as a hash"
+
+    # And it is the password that was shown: the new account can log in with it.
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as session:
+        login = await session.post(
+            "/login", data={"email": "newcomer@example.test", "password": password},
+            follow_redirects=False,
+        )
+    assert login.status_code == 303, "the password shown does not work"
+
+
+async def test_a_duplicate_address_is_refused_rather_than_colliding(admin, seeded):
+    """Including in another case. The unique index is on lower(email), so `Verifier@...` and
+    `verifier@...` cannot both exist -- and the second account would be invisible until its owner
+    could not sign in, because what they typed matches a row that is not theirs."""
+    async with connect() as conn:
+        existing = (await users_q.get_user(conn, seeded["user_id"])).email
+
+    for variant in (existing, existing.upper(), f"  {existing.title()}  "):
+        response = await admin.post("/users", data={"email": variant})
+        assert response.status_code == 200
+        assert "already has an account" in response.text, variant
+
+
+async def test_changing_a_password_requires_the_current_one(client, seeded):
+    """A borrowed session must not be able to lock the owner out of their own account."""
+    from trouveur.web.auth import verify_password
+
+    response = await client.post(
+        "/settings/password",
+        data={
+            "current_password": "not the password",
+            "new_password": "a-new-long-password",
+            "repeat_password": "a-new-long-password",
+        },
+    )
+    assert response.headers["location"] == "/settings?password=wrong"
+    async with connect() as conn:
+        assert verify_password(
+            (await users_q.get_user(conn, seeded["user_id"])).password_hash, PASSWORD
+        )
+
+    response = await client.post(
+        "/settings/password",
+        data={
+            "current_password": PASSWORD,
+            "new_password": "a-new-long-password",
+            "repeat_password": "a-new-long-password",
+        },
+    )
+    assert response.headers["location"] == "/settings?password=changed"
+    async with connect() as conn:
+        assert verify_password(
+            (await users_q.get_user(conn, seeded["user_id"])).password_hash, "a-new-long-password"
+        )
+
+
+async def test_a_short_or_mismatched_new_password_is_refused(client):
+    """The same floor as the CLI: this login faces the internet."""
+    short = await client.post(
+        "/settings/password",
+        data={"current_password": PASSWORD, "new_password": "short", "repeat_password": "short"},
+    )
+    assert short.headers["location"] == "/settings?password=short"
+    mismatch = await client.post(
+        "/settings/password",
+        data={
+            "current_password": PASSWORD,
+            "new_password": "a-long-enough-password",
+            "repeat_password": "a-different-password",
+        },
+    )
+    assert mismatch.headers["location"] == "/settings?password=mismatch"
+
+
+async def test_an_admin_is_shown_no_balance_because_they_need_none(admin):
+    """An admin grants credit and has none of their own, so a zero balance in their topbar would
+    read as a problem to fix rather than as a category that does not apply."""
+    body = (await admin.get("/users")).text
+    assert "needs none" in body
+    # The specific banner, not any banner: the one about a missing installation key is an admin's
+    # to act on and must still reach them.
+    assert "Your credit is used up" not in body, "an admin was told to top themselves up"
+    assert 'title="LLM credit remaining"' not in body, "an admin was shown a balance"
+
+
+async def test_disabling_an_account_revokes_the_session_it_already_holds(client, admin, seeded):
+    """Not only future logins. A session is a signed token with a 30-day life, so checking
+    is_active at login alone means an admin disabling an account revokes nothing its holder can
+    already do -- for a month, while the Users page says "cannot log in"."""
+    assert (await client.get("/recommendations")).status_code == 200
+
+    response = await admin.post(f"/users/{seeded['user_id']}/active", data={"is_active": "off"})
+    assert response.status_code == 303
+
+    revoked = await client.get("/recommendations")
+    assert revoked.status_code == 303, "a disabled account kept browsing on its existing session"
+    assert revoked.headers["location"].startswith("/login")
+    # And the cookie is cleared, so they are not bounced between /login and a dead session.
+    assert "trouveur_session=" in revoked.headers.get("set-cookie", "")
+
+    # Every page, not just the one: the check is in the middleware.
+    for path in ("/settings", "/search", "/profile"):
+        assert (await client.get(path)).status_code == 303, path
+
+
+async def test_a_non_numeric_ceiling_falls_back_instead_of_500ing(client, seeded):
+    """`Decimal("nan")` and `Decimal("inf")` PARSE, so neither reaches the except clause. A NaN
+    then raises from the first comparison that touches it -- a 500 on a form meant to fall back --
+    and an Infinity is worse than a crash: accepted as a ceiling, it removes the cap entirely."""
+    async with connect() as conn:
+        await users_q.save_profile(conn, seeded["user_id"], {"daily_ceiling_usd": Decimal("0.25")})
+
+    for bad in ("nan", "inf", "-inf", "NaN", "abc", "1e999999999"):
+        response = await client.post(
+            "/settings/scoring", data={"scoring_enabled": "on", "daily_ceiling_usd": bad}
+        )
+        assert response.status_code == 303, f"{bad!r} produced {response.status_code}"
+        async with connect() as conn:
+            ceiling = (await users_q.get_profile(conn, seeded["user_id"])).daily_ceiling_usd
+        assert ceiling == Decimal("0.25"), f"{bad!r} was stored as a ceiling of {ceiling}"
+
+
+async def test_a_non_numeric_credit_grant_is_refused_rather_than_crashing(admin, seeded):
+    """The same helper, reached through the two money fields this page added."""
+    for bad in ("nan", "inf", "abc"):
+        response = await admin.post(
+            f"/users/{seeded['user_id']}/credit", data={"amount_usd": bad, "note": "probe"}
+        )
+        assert response.status_code == 303, f"{bad!r} produced {response.status_code}"
+    async with connect() as conn:
+        assert (await users_q.credit(conn, seeded["user_id"])).balance_usd == 0
+
+    created = await admin.post("/users", data={"email": "oddball@example.test", "credit": "nan"})
+    assert created.status_code == 200
+    async with connect() as conn:
+        row = await users_q.get_user_by_email(conn, "oddball@example.test")
+        assert (await users_q.credit(conn, row.id)).balance_usd == 0
+
+
+async def test_an_address_signs_in_whatever_case_it_is_typed_in(client, seeded):
+    """The login is folded on both sides. Unfolded, someone who capitalised their own address once
+    at sign-up cannot sign in the day they type it normally."""
+    async with connect() as conn:
+        email = (await users_q.get_user(conn, seeded["user_id"])).email
+
+    transport = httpx.ASGITransport(app=app)
+    for variant in (email.upper(), email.title(), f"  {email}  "):
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as session:
+            response = await session.post(
+                "/login", data={"email": variant, "password": PASSWORD}, follow_redirects=False
+            )
+        assert response.status_code == 303, f"{variant!r} could not sign in"
+
+
+async def test_the_stored_address_is_folded_so_the_index_can_refuse_a_duplicate(admin):
+    """Folded at the write too, not only at the lookup: the unique index is on lower(email), so a
+    mixed-case row would be an account nobody can find by what its owner types."""
+    await admin.post("/users", data={"email": "  MixedCase@Example.TEST  "})
+    async with connect() as conn:
+        row = await users_q.get_user_by_email(conn, "mixedcase@example.test")
+    assert row is not None and row.email == "mixedcase@example.test"
+
+
+async def test_a_name_typed_into_the_email_box_is_refused(admin):
+    """The one mistake the shallow check exists for. Accepted, it creates an account whose owner
+    can never sign in, because there is no address for them to type."""
+    for bad in ("newcomer", "", "   ", "two words@example.test", "a@@b"):
+        response = await admin.post("/users", data={"email": bad})
+        assert response.status_code == 200, f"{bad!r} produced {response.status_code}"
+        assert "email address" in response.text, bad
+    async with connect() as conn:
+        assert len(await users_q.list_users_with_credit(conn)) == 2, "a bad address made an account"
+
+
+async def test_a_display_name_defaults_to_the_local_part_and_is_editable(client, admin):
+    """What the nav shows is not the login. An address is long and would otherwise sit in every
+    screenshot, and nothing looks an account up by this."""
+    created = await admin.post("/users", data={"email": "ada.lovelace@example.test"})
+    assert created.status_code == 200
+    async with connect() as conn:
+        row = await users_q.get_user_by_email(conn, "ada.lovelace@example.test")
+    assert row.display_name == "ada.lovelace"
+
+    # The reader's own name, changed by them, is in the topbar on the very next page.
+    assert (await client.post(
+        "/settings/account", data={"display_name": "Renamed", "digest_enabled": "on"}
+    )).status_code == 303
+    body = (await client.get("/recommendations")).text
+    assert "<summary>Renamed</summary>" in body, (
+        "the name came from the session cookie, so it is a month stale after a rename"
+    )
+
+
+async def test_clearing_the_display_name_falls_back_rather_than_leaving_it_blank(client, seeded):
+    async with connect() as conn:
+        email = (await users_q.get_user(conn, seeded["user_id"])).email
+    assert (await client.post("/settings/account", data={"display_name": "   "})).status_code == 303
+    async with connect() as conn:
+        assert (
+            await users_q.get_user(conn, seeded["user_id"])
+        ).display_name == email.partition("@")[0]
+
+
+async def test_the_digest_switch_is_the_opt_out_and_costs_no_re_score(client, seeded):
+    """Every account has an address now, so a missing one can no longer be the way out of the
+    mail. It is not a SCORING_FIELD either: opting out of an email must not bill a re-score."""
+    async with connect() as conn:
+        before = (await users_q.get_profile(conn, seeded["user_id"])).version
+
+    assert (await client.post("/settings/account", data={"display_name": "x"})).status_code == 303
+    async with connect() as conn:
+        profile = await users_q.get_profile(conn, seeded["user_id"])
+    assert profile.digest_enabled is False, "an unticked box posts nothing, which is 'off'"
+    assert profile.version == before, "opting out of the digest billed a re-score"
+
+
+async def test_the_database_itself_refuses_a_case_variant_address(seeded):
+    """The guarantee that survives the application being wrong.
+
+    Folding in the route, in create_user and in the lookup are three layers that each make this
+    work, and a test passes while two of them are broken. The unique index is on lower(email), so
+    the duplicate is refused underneath all of them -- which is what stops an account nobody can
+    sign in to from ever existing.
+    """
+    async with connect() as conn:
+        email = (await users_q.get_user(conn, seeded["user_id"])).email
+
+    with pytest.raises(sa.exc.IntegrityError, match="uq_app_user_email"):
+        async with connect() as conn:
+            await conn.exec_driver_sql(
+                "INSERT INTO app_user (email, display_name, password_hash) VALUES ($1, $2, $3)",
+                (email.upper(), "shadow", "argon2$fake"),
+            )

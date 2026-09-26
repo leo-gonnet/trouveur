@@ -1,0 +1,99 @@
+{% extends "base.html" %}{% import "_macros.html" as m %}{% block title %}Users · Trouveur{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Users</h1>
+  <p class="hint">
+    Accounts and the credit they score out of. Creating an account costs only the credit granted to
+    it; the crawl set stays a CLI decision, because enlarging that spends every user's politeness
+    budget.
+  </p>
+</div>
+
+{% if error %}<p class="notice bad">{{ error }}</p>{% endif %}
+{% if new_login %}
+  <section class="section">
+    <div class="section-head"><h2>New login</h2></div>
+    <p><strong>{{ new_login[0] }}</strong> · password <code>{{ new_login[1] }}</code></p>
+    <p class="hint">Shown once, here, and stored only as a hash — reloading this page will not show
+      it again. Pass it on; they can change it in their own Settings.</p>
+  </section>
+{% endif %}
+
+<section class="section">
+  <div class="section-head"><h2>Accounts</h2></div>
+  <table>
+    <tr><th>Name</th><th>Email</th><th class="num">Granted</th><th class="num">Spent</th>
+        <th class="num">Remaining</th><th class="num">Ceiling/day</th><th>State</th>
+        <th>Top up</th></tr>
+    {% for row in users %}
+      <tr>
+        <td>{{ row.display_name }}{% if row.is_admin %} <span class="pill">admin</span>{% endif %}</td>
+        <td>{{ row.email }}</td>
+        <td class="num">${{ '%.2f' % row.granted_usd }}</td>
+        <td class="num">${{ '%.4f' % row.spent_usd }}</td>
+        <td class="num">
+          {%- if row.is_admin %}—
+          {%- elif row.balance_usd > 0 %}<span class="pill good">${{ '%.2f' % row.balance_usd }}</span>
+          {%- else %}<span class="pill bad">${{ '%.2f' % row.balance_usd }}</span>{% endif %}</td>
+        <td class="num">${{ '%.2f' % row.daily_ceiling_usd }}</td>
+        <td>
+          {% if not row.is_active %}<span class="pill bad">disabled</span>
+          {% elif not row.scoring_enabled %}<span class="pill">paused</span>
+          {% else %}<span class="pill good">active</span>{% endif %}
+        </td>
+        <td>
+          {% if row.is_admin %}
+            <span class="hint">needs none</span>
+          {% else %}
+            <form method="post" action="/users/{{ row.id }}/credit" class="inline">
+              <input name="amount_usd" inputmode="decimal" placeholder="5.00" size="5">
+              <input name="note" placeholder="note" size="12">
+              <button type="submit">Grant</button>
+            </form>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+  </table>
+</section>
+
+<div class="grid">
+  <section class="section">
+    <div class="section-head"><h2>Create an account</h2></div>
+    <form method="post" action="/users">
+      <label>Email <span class="hint">their login, and where the digest is sent</span>
+        <input name="email" type="email" autocomplete="off"></label>
+      <label>Name <span class="hint">what the UI shows; defaults to the part before the @</span>
+        <input name="display_name" autocomplete="off"></label>
+      <label>Opening credit <span class="hint">US dollars. Leave empty to grant none yet.</span>
+        <input name="credit" inputmode="decimal" placeholder="5.00"></label>
+      <p class="actions"><button class="primary" type="submit">Create</button></p>
+    </form>
+    <p class="hint">A password is generated and shown once. There is no invitation email and no
+      reset link: you pass the password on, and they change it in Settings.</p>
+  </section>
+
+  <section class="section">
+    <div class="section-head"><h2>Access</h2></div>
+    <p class="hint">A disabled account cannot log in and is skipped by every run. Your own account
+      is not listed here: nothing could re-enable it, because every route needs a session.</p>
+    <table>
+      <tr><th>User</th><th>Access</th></tr>
+      {% for row in users if row.id != user_id %}
+        <tr>
+          <td>{{ row.display_name }}</td>
+          <td>
+            <form method="post" action="/users/{{ row.id }}/active" class="inline">
+              {% if row.is_active %}
+                <button class="danger" type="submit" name="is_active" value="off">Disable</button>
+              {% else %}
+                <button type="submit" name="is_active" value="on">Enable</button>
+              {% endif %}
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+    </table>
+  </section>
+</div>
+{% endblock %}

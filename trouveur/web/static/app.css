@@ -6,7 +6,7 @@
    is used in the logo and nowhere else. The page is full width and is the only thing that
    scrolls.
 
-   Components: .topbar .nav .banner .page-head .section .section-head .grid .kpis .kpi table .pill
+   Components: .topbar .nav .menu .banner .page-head .section .section-head .grid .kpis .kpi table .pill
    .score button/.btn(.primary .danger .ghost) label/input .field .tags .switch
    .notice .empty .bar
    .results .job .job-main .states .editions .pager .searchbar .login .foot
@@ -73,7 +73,27 @@ code, kbd { font: .86em var(--mono); background: var(--surface-2); padding: 1px 
          border-bottom: 2px solid transparent; }
 .nav a[aria-current="page"] { opacity: 1; border-bottom-color: var(--primary-fg); }
 .spacer { flex: 1; }
-.user { display: flex; align-items: center; gap: var(--space-3); }
+
+/* The account menu. <details>, so it opens with no JavaScript; the marker is replaced by a
+   caret because a disclosure triangle reads as "expand this text". */
+.menu { position: relative; }
+.menu > summary { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-3) 0;
+                  cursor: pointer; list-style: none; opacity: .78; }
+.menu > summary::-webkit-details-marker { display: none; }
+.menu > summary::after { content: "\25be"; font-size: 11px; }
+.menu[open] > summary, .menu > summary:hover { opacity: 1; }
+.menu-panel { position: absolute; right: 0; top: 100%; z-index: 10; min-width: 11rem;
+              display: grid; padding: var(--space-2) 0; background: var(--surface);
+              border: 1px solid var(--border); border-radius: var(--radius);
+              box-shadow: 0 6px 20px rgb(0 0 0 / .13); }
+/* Inside the panel the surface is the page, not the topbar, so the topbar's inherited colour
+   would put navy text on navy. */
+.topbar .menu-panel a, .topbar .menu-panel .ghost { color: var(--fg); opacity: 1; }
+.menu-panel a, .menu-panel button { padding: var(--space-2) var(--space-4); text-align: left;
+                                    font-size: var(--fs-md); }
+.menu-panel a[aria-current="page"] { font-weight: 600; }
+.menu-panel a:hover, .topbar .menu-panel .ghost:hover { background: var(--surface-2); }
+.menu-panel button { width: 100%; height: auto; border: 0; border-radius: 0; background: none; }
 
 .banner { padding: var(--space-3) var(--space-6); font-size: var(--fs-md); text-align: center; }
 .banner.warn { background: var(--warn-soft); color: var(--warn); }

@@ -97,7 +97,7 @@ that runs periodically, plus a rich but simple web UI. Multi-user (for now, a fe
   cut, a quiet week promoted postings that two thousand others had beaten for six days running --
   nothing about them had changed except the competition.
 - **A run the USER caused passes the whole retained horizon instead** (`whole_horizon=True`): a
-  profile change, a key added, scoring switched back on. In each case nothing has been judged under
+  profile change, credit granted, scoring switched back on. In each case nothing has been judged under
   the terms that now apply. The runner already distinguishes these by `pipeline_run.match_user_id`.
 - **The staleness bound reads `COALESCE(posted_at, first_seen_at)` and the candidate window reads
   `first_seen_at`.** One asks how old the ADVERT is, the other asks when WE got it, and folding
@@ -379,6 +379,8 @@ Rules that follow:
 - **Managing the crawl set is a CLI action, not a web one** (`trouveur tenants …`). It is shared by
   every user, so enlarging it is an operator decision — exposing it per user means one person
   adding five hundred boards and everyone paying the crawl cost. The dashboard shows it read-only.
+  Managing ACCOUNTS is the opposite and is a web action (`/users`), because the cost is bounded by
+  the credit that page grants: an account costs what it is given, a board costs everybody.
 - **A discovery pass inserts `enabled = false`, `origin = 'discovered'`.** It proposes; a human
   promotes. Discovery must never be able to enlarge the crawl, the bill or the politeness budget on
   its own.
@@ -429,39 +431,62 @@ which are reachable only through reverse-engineered private endpoints with hardc
 The repo is public. Users' career data is not, and must never enter it.
 
 - **Never commit:** `.env`, database dumps, or anything holding a user's objectives, salary
-  expectations, employers watched, email address or API key.
-- **Profiles and users' API keys live in the database only**, edited through the web UI. There is
-  deliberately no file-based path in or out for them; do not add one. This does **not** apply to the
-  tenant registry — see below.
+  expectations, employers watched, email address or password.
+- **Profiles live in the database only**, edited through the web UI. There is deliberately no
+  file-based path in or out for them; do not add one. This does **not** apply to the tenant
+  registry — see below.
 - **Test fixtures are hand-written and synthetic.** Never commit a captured page or a real scraped
   payload — third-party content, repository bloat, and a fixture nobody wrote is a fixture nobody
   understands when it starts failing.
 - **Secrets come from the environment only**, delivered by the Compose `env_file`. Never read a
   secret from a file inside the repo, and never log one.
-- **Users' API keys are encrypted at rest** with `ENCRYPTION_KEY` and surfaced only as a
-  fingerprint. Never render a key back to the browser, not even to the user who set it.
+- **No user secret is stored at all any more.** The LLM key is the installation's and lives only in
+  the environment, which is why `crypto.py` and `ENCRYPTION_KEY` are gone: an encryption seam kept
+  for one column nobody writes is a seam that rots. Never log the key and never render it to a
+  browser. A generated initial password is shown **once**, in the response that created the account,
+  and never travels in a URL — a URL is in the browser history, the proxy log and the Referer of
+  whatever the reader clicks next.
 
 Before any commit: `git status` must be clean of the above.
 
 ## LLM cost discipline
 
-**There is no installation-wide API key.** Reranking runs on each user's own OpenRouter credential,
-so the deployment has no LLM spend of its own and one user's exhausted budget cannot affect another.
+**One installation key, credit per user.** `OPENROUTER_API_KEY` in `.env` is the only LLM
+credential; users are granted CREDIT in dollars and every call is metered against the balance of
+whoever it was made for. Bring-your-own-key was the whole of onboarding -- a new user had to open
+and fund an OpenRouter account before they could be shown one recommendation -- and it bought
+nothing that credit does not: one user's empty balance still cannot touch another's.
 
 - **Retrieval runs first and is free; nothing caps the paid stage but the user's ceiling.**
   There is deliberately no deterministic cut between the two: a rule that rejected a posting before
   scoring hid it from the user with no way to find out it existed. Internships, working-student
   roles and staffing agencies are the reranker's to penalise, in the system prompt. What bounds the
   work is `retrieve.FUSED_LIMIT` -- how many candidates survive fusion -- and what bounds the spend
-  is the monthly ceiling, in dollars, where the user set it. `RERANK_LIMIT` was neither: it kept the
+  is the DAILY ceiling, in dollars, where the user set it, and the credit they hold. `RERANK_LIMIT` was neither: it kept the
   bill small and, as a side effect, decided how long the Recommendations page was, so after a
   profile change a user met their own corpus 150 postings a day for a fortnight.
 - **Always cache by `(content_hash, user, profile_version)`.** A posting is scored once per profile,
   ever. Re-scoring an unchanged posting is a bug, not an inefficiency.
-- **Check the ceiling before the calls go out, not after, and price it for all of them.** Scoring
+- **Check both limits before the calls go out, not after, and price them for all of them.** Scoring
   runs in waves of `rerank.CONCURRENCY`, issued together, so the test has to cover what the whole
-  wave can cost. A retry loop on someone else's card is not something to discover from the user. Spend is metered in **USD**, the currency OpenRouter bills
-  in — an EUR column would put a stale exchange rate between the meter and the cap.
+  wave can cost (`rerank.affordable`). A retry loop that empties somebody's credit is not something
+  to discover from them. Spend is metered in **USD**, the currency OpenRouter bills in — an EUR
+  column would put a stale exchange rate between the meter and the cap.
+- **There are two limits and a run must report WHICH one stopped it** (`stopped_on_ceiling`,
+  `stopped_on_credit`). They need different answers from the reader: a ceiling lifts at midnight,
+  an empty balance needs an admin. Collapsed into one flag, the page can only say "no more today",
+  which is a lie half the time.
+- **A balance is derived, never stored**: `SUM(user_credit_grant) - SUM(user_llm_spend)`. A balance
+  column would be a second record of a fact the spend meter already holds, and a run that died
+  between the call and the decrement would leave the two disagreeing with nothing to say which was
+  right. Grants are **append-only**, so a top-up keeps who gave it and when, and a mistaken grant is
+  corrected by a negative one rather than by an edit.
+- **Spend is metered per DAY** (`user_llm_spend.period_day`), because the ceiling is a day. Tested
+  against a running monthly total a daily ceiling would never lift.
+- **An admin needs no credit, and is still metered.** `Spending.unlimited_credit` exempts them from
+  the balance and from nothing else: their own daily ceiling applies, and an unlimited balance is not
+  a reason to be unmetered. They are shown no balance rather than a zero, which would read as a
+  problem to fix.
 - **Bump `profile.version` only for fields that change what a good match is** (`SCORING_FIELDS`). A
   cost setting such as `scoring_enabled` must not invalidate a cache and bill a re-score.
 - **Text the reranker reads is multiplied by every posting scored; text expansion reads is not.** This
@@ -470,13 +495,13 @@ so the deployment has no LLM spend of its own and one user's exhausted budget ca
   derived by the same cached, versioned stage (`user_query_expansion.background_summary`).
   `rerank.build_prompt` takes the summary as an **argument** and must never read
   `profile.background` itself -- the two look identical in a diff, and the second one bills a
-  4,000-character CV once per posting scored -- thousands of times in a run -- on the user's own
-  card, besides burying the objectives under it. Guarded by a test.
+  4,000-character CV once per posting scored -- thousands of times in a run -- out of that user's
+  credit, besides burying the objectives under it. Guarded by a test.
 - **Query expansion costs one call per profile version, not per job**, and is cached. The
   deterministic expansion is the floor, not a degraded fallback: retrieval must work fully with no
-  key at all. **Only a full expansion is cached**, though: a run with no key, or with scoring
-  paused, produces the floor, and storing that would pin the profile version to it for ever, so
-  adding a key later would silently buy nothing.
+  key and no credit at all. **Only a full expansion is cached**, though: a run with nothing to spend,
+  or with scoring paused, produces the floor, and storing that would pin the profile version to it
+  for ever, so a top-up later would silently buy nothing.
 - **A malformed response leaves that posting unscored, never scored 0.** Scoring garbage as 0
   caches a wrong verdict and hides good jobs permanently. It is billed and left pending, so the
   next run asks again. One failed call must not end the stage either: at a few thousand calls a run
@@ -492,13 +517,18 @@ so the deployment has no LLM spend of its own and one user's exhausted budget ca
   a per-user field: a user-chosen model makes scores incomparable across users and lets the pin
   be cleared. The Settings page shows them read-only. Every field left on Profile is a
   `SCORING_FIELDS` member.
-- **The ceiling is the user's, and it is theirs only while scoring is on.** It lives on the
-  credential; `settings.monthly_budget_usd` is the starting value for a FIRST key, never a reset
-  — replacing a key keeps the ceiling that was set on it. The form disables the input while the
-  switch is off, and **a disabled input submits nothing**, so an absent value means "keep it".
-  Reading it as "reset to the default" silently put every user back on $5 whenever they saved
-  anything else on the page. The route refuses a posted ceiling while scoring is off rather than
-  trusting the markup to have disabled it.
+- **The ceiling is the user's, is a DAY, and is theirs only while scoring is on.** It is a column on
+  `user_profile` beside `scoring_enabled` -- the two cost controls in one place -- defaulting to
+  **$0.25**, which is hardcoded and deliberately not a setting: an installation default would be a
+  second place the number lives, and the only value that matters is the one on the user's own row.
+  The form disables the input while the switch is off, and **a disabled input submits nothing**, so
+  an absent value means "keep it"; the route refuses a posted ceiling while scoring is off rather
+  than trusting the markup to have disabled it.
+- **Settings STATES the monthly worst case beside the daily ceiling and does not let anyone set
+  one.** The month is what a reader actually worries about, so it is arithmetic on the page
+  (`ceiling × 30`), not a second limit. Two numbers for one decision is how they come to disagree,
+  and a monthly cap sized for a quiet week stops a profile-change re-score half way through -- not
+  as an error, just as an edition that is quietly short.
 - **The user's two cost controls are the `scoring_enabled` switch and the ceiling it governs.**
   The switch submits itself (`.switch`, not a tick box: one that needed a Save button would be a
   tick box); the ceiling keeps a Save button. Retrieval depth is two constants,
@@ -507,13 +537,22 @@ so the deployment has no LLM spend of its own and one user's exhausted budget ca
   number at all any more -- the scorer stops when the scores run out. `rerank_limit` was three things at once
   — list length, bill and pause — and it read as a volume dial while being the only way to stop
   spending. Off means **no paid call at all** runs for that user, expansion included, which is
-  why `run_for_user` drops the credential rather than gating the rerank alone.
+  why `run_for_user` withholds the `Spending` rather than gating the rerank alone. Its existence is
+  the gate, exactly as a stored credential's was.
+- **`digest_enabled` is the opt-out, and it is a switch rather than the absence of data.** A
+  missing email used to be the only way not to receive the digest, so opting out required having no
+  way to be reached at all; when every account gained an address that opt-out would have vanished
+  in silence. It lives beside `scoring_enabled` and is not a `SCORING_FIELD`: declining an email
+  must not bill a re-score.
 - **Recommendations shows no run statistics at all.** `retrieved`/`passed`/`scored` and the cost
   of the last run are diagnostics; they live on the dashboard. The page is a reading list, and
   "450 candidates" is not a sentence a reader can act on.
-- **A missing key is a full-width `.banner warn` on every page**, set by the session middleware
-  (`request.state.needs_key`) so no route can forget it. It says what to do about it; the free
-  stages still run regardless.
+- **An empty balance, or a missing installation key, is a full-width `.banner warn` on every
+  page**, set by the session middleware (`request.state.out_of_credit`,
+  `request.state.scoring_unconfigured`) so no route can forget it — a per-route check hides it on
+  exactly the one page that needed it. Each says what to do about it and who has to do it; the free
+  stages still run regardless. The balance itself is in the topbar on every page, because it is the
+  one number that decides whether tomorrow's scan scores anything.
 - **A scoring change erases nothing.** The version bump alone queues the re-score, because
   retrieval **must not re-stamp** `user_job_match.profile_version` — that column records the
   profile a posting was SCORED under, and retrieval runs first on every row it finds again, so
@@ -521,7 +560,7 @@ so the deployment has no LLM spend of its own and one user's exhausted budget ca
   matched nothing. The repair for that used to be `reset_scores`, which nulled every score and
   `scored_at` the user had — and since an edition was derived from `scored_at`, editing a profile
   wiped the whole Recommendations history while the page promised the opposite. Guarded by a test.
-- **Matching is started by the scan, by a profile change and by adding a key**, never by a button.
+- **Matching is started by the scan, by a profile change and by a credit grant**, never by a button.
   Each queues a match-only run (`pipeline_run.match_user_id`) that the runner executes like any
   other: it sweeps nothing and sends no digest. One per user at a time — a second must not queue
   another paid run. A button asking "match now" could not say whether it would do anything,
@@ -623,6 +662,43 @@ so the deployment has no LLM spend of its own and one user's exhausted budget ca
   wrong container, not a wrong template. Do not add a build arg or bake a file for this: the
   value already exists and a second source could disagree with the first. The package version
   is static and says nothing about a deploy. A tag that is not a commit is shown unlinked.
+- **The nav is the reader's pages; the account menu is everything else.** Recommendations, Search,
+  Dashboard, Profile and How it works sit on the left; Settings, and for an admin Scans and Users,
+  sit in a `<details class="menu">` under the username on the right, with the credit balance as a
+  `pill` beside it. `<details>` because a dropdown is not worth a script: it closes on the next
+  navigation or on a second click, and nothing in it needs dismissing on an outside click.
+- **Admin-only is enforced by PREFIX in the session middleware** (`ADMIN_PREFIXES`), never per
+  route, for the same reason the session check is: a per-handler check is the line somebody forgets
+  on the next route, and the route that leaks is always the newest one. Scans owns the shared
+  schedule and queues real sweeps, so it is not one reader's to retime; Users creates accounts and
+  grants credit. Dashboard stays open — it is read-only diagnostics plus the reader's own spend.
+- **An admin account is the FIRST account**, decided in `users_q.create_user` when the table is
+  empty, because at that moment there is provably nobody else it could be. Every later account is
+  created by an admin and is not one. A test fixture must pass `is_admin` explicitly or it silently
+  tests an admin's view of every page.
+- **The email is the login and the display name is what the UI shows; they are not the same
+  field.** One identifier, not two -- the address already existed, the digest already needed it,
+  and an admin already typed it -- but an address is long and would otherwise sit in every
+  screenshot, so the name is its own column. It is not unique and nothing ever looks an account up
+  by it.
+- **The address is folded to lower case, and the unique index is on `lower(email)`.** Folding only
+  in the form leaves the database willing to hold `Leo@x.com` beside `leo@x.com`, and the second
+  account is invisible until its owner cannot sign in -- what they type matches a row, just not
+  theirs. `clean_email`, `create_user` and `get_user_by_email` all fold, which means a test can
+  pass with two of the three broken; the index is the guarantee, so it is guarded directly.
+- **Validating an address is deliberately shallow** (`auth.clean_email`): non-empty, one `@`, no
+  whitespace. A strict RFC parser is a dependency and rejects addresses that deliver. What has to
+  be caught is a NAME typed into the email box, which would create an account whose owner can
+  never sign in.
+- **The display name is resolved once, at creation or rename, and stored** (`display_name_for`,
+  falling back to the part before the `@`). Derived at every read it would change under the reader
+  the day they changed their address, and a name is not something an address should rewrite.
+- **The session cookie carries the id and nothing else.** It used to carry the name too, which
+  every page rendered -- and a name that can be edited cannot be cached in a token that lasts a
+  month, or the topbar keeps the old one until the next login. The middleware already loads the
+  row, so no route passes a name at all.
+- **A login failure logs the user id, never the address.** A log file is not the place to
+  accumulate people's email addresses, and the id is what anyone reading it would look up anyway.
 - **Styling lives in one file:** `web/static/app.css`, light only, one system sans-serif, the
   logo's navy on white. The logo's red-orange is used in the logo and nowhere else, and there
   is no display font: that combination read as another product's theme. No inline `<style>`
@@ -776,7 +852,7 @@ still holds the old readings and no re-derive has been scheduled.
     execution entry fails.
   - **Every Postgres enum has a Python counterpart and the members match** — Python ↔ `schema.py`
     offline, `schema.py` ↔ server in integration.
-  - A stored API key never appears in a rendered page.
+  - The installation's API key never appears in a rendered page.
   - **A profile change leaves every published edition standing**, and re-scoring a posting does
     not move it out of the day it was published in.
   - **Retrieval never re-stamps the profile version a posting was scored under**, or the rows
@@ -785,8 +861,42 @@ still holds the old readings and no re-derive has been scheduled.
     remote posting is admitted wherever it was posted.
   - **The rerank prompt carries exactly one advert**, with the profile block before it — batching
     moved scores by slot position, and profile-first is what a prompt-prefix cache reuses.
-  - **One failed scoring call does not lose the rest of its wave**, and the ceiling is tested before
-    a wave is issued rather than after it is billed.
+  - **One failed scoring call does not lose the rest of its wave**, and both limits are tested
+    before a wave is issued rather than after it is billed.
+  - **A user with no credit makes no paid call at all**, expansion included, and retrieval still
+    runs. Asserted over the whole run, not over the scorer: gating the rerank alone still bills
+    three expansion calls per profile version to somebody who was granted nothing.
+  - **An admin needs no credit and is still held to their own daily ceiling**, and the run reports
+    which of the two limits stopped it.
+  - **A daily ceiling counts today only** — yesterday's spend cannot hold today's run back, or the
+    ceiling would never lift.
+  - **A balance is grants minus spend, and a second grant adds to the first** rather than replacing
+    it.
+  - **What is left of a limit is re-read from the database between blocks**, never decremented from
+    a snapshot: the expansion stage spends out of the same day, and a second runner draining a
+    match-only run is claimed with SKIP LOCKED precisely so it CAN proceed in parallel. Against a
+    process-local belief two runs each authorise a full day's ceiling.
+  - **Disabling an account revokes the session it already holds**, on every page. A session is a
+    signed token with a 30-day life, so checking `is_active` at login alone revokes nothing its
+    holder can already do.
+  - **A money field accepts no `nan`, `inf` or absurd exponent.** All three PARSE: `nan` raises from
+    the first comparison, `inf` is accepted as a ceiling and silently removes the cap, and
+    `1e999999999` is finite but fails at the driver.
+  - **Every admin route refuses an ordinary user**, parametrized over the prefix so a new admin
+    route is covered the moment it exists.
+  - **A generated password is shown exactly once**, in the response that created the account, and
+    never in a URL or on a reload.
+  - **Changing a password requires the current one**, so a borrowed session cannot lock the owner
+    out.
+  - **Settings states the monthly worst case and offers no monthly ceiling field.**
+  - **An address signs in whatever case it is typed in**, and the DATABASE refuses a case-variant
+    duplicate -- asserted against the index itself, because the three app-side foldings mean a
+    weaker test passes while two of them are broken.
+  - **A name typed into the email box is refused**, rather than creating an account whose owner can
+    never sign in.
+  - **A display name defaults to the part before the `@`, is editable, and reaches the topbar on
+    the next page** rather than at the next login -- it is read from the row, not from the cookie.
+  - **Declining the digest is a switch and bills no re-score.**
   - **An edition is paged by cursor, never by OFFSET**, and the cursor's columns match the sort
     exactly. The dismiss filter runs before the page is cut, so an offset moves under the reader:
     dismissing what is on page one makes the "next" link they already have point one row too far,
@@ -898,9 +1008,11 @@ reason precision is not measurable at retrieval.
   scored, sorted by score, so the question is whether a planted negative outranks a planted
   positive — a bad posting the reader meets first. `inversions` counts those pairs and `margin`
   is the distance between the worst positive and the best negative.
-- **The key comes from `TROUVEUR_EVAL_LLM_KEY`, and is never stored.** Users' keys live in the
-  database and are entered through the web UI; this harness must not become a second way in.
-- It reuses `rerank.score_batch`, so the prompt, model and provider pin are the ones production
+- **The key comes from `TROUVEUR_EVAL_LLM_KEY`, which is deliberately NOT
+  `OPENROUTER_API_KEY`.** Grading is the operator's spend and must be visible as such: reaching for
+  the installation key would bill a quality experiment to the same account users' credit is drawn
+  against, with nothing on any page to show where the money went.
+- It reuses `rerank.score_one`, so the prompt, model and provider pin are the ones production
   sends. A copy of the prompt here would grade something no user ever runs.
 - **Rerank numbers are noisier than retrieval numbers, and the noise has a cause.** Measured
   2026-09-22 over 150 real postings per persona: at a fixed position a score moves 5 points
@@ -945,7 +1057,7 @@ uv run trouveur match --user 1            # retrieve, cut, rerank for one user
 uv run trouveur tenants list             # the crawl set, with per-tenant health
 uv run trouveur tenants add greenhouse n26   # accepts a slug or a full careers URL
 uv run trouveur tenants import --dry-run  # preload from tenants.local.toml (gitignored)
-uv run trouveur create-user               # the ONLY way to create a login
+uv run trouveur create-user --email me@example.com   # the FIRST login; it becomes the admin
 uv run trouveur serve                     # dev server on 127.0.0.1:8080
 uv run trouveur runner                    # scheduler + queue workers
 ```
@@ -960,7 +1072,7 @@ test a parser — use a fixture.
 | Command | Why |
 |---|---|
 | `trouveur sweep` | hits live APIs and writes |
-| `trouveur match` | spends a user's LLM credit |
+| `trouveur match` | spends a user's credit on the installation's key |
 | `trouveur refill --kind embed` | re-embeds the corpus; hours of CPU |
 | `trouveur test-notify` | reaches a real inbox |
 | `trouveur runner` | long-running; starts real scans on a schedule |

@@ -24,7 +24,6 @@ from jinja2 import StrictUndefined
 
 from trouveur import clock
 from trouveur.config import get_settings
-from trouveur.crypto import encrypt, fingerprint
 from trouveur.db.engine import connect
 from trouveur.db.queries import admin as admin_q
 from trouveur.db.queries import freshness
@@ -63,6 +62,7 @@ def _localtime(value, fmt: str = "%Y-%m-%d %H:%M") -> str:
 templates.env.filters["localtime"] = _localtime
 templates.env.globals["version"] = importlib.metadata.version("trouveur")
 templates.env.globals["timezone"] = get_settings().timezone
+templates.env.globals["min_password_chars"] = auth.MIN_PASSWORD_CHARS
 
 REPO_URL = "https://github.com/leo-gonnet/trouveur"
 _SHA = re.compile(r"\A[0-9a-f]{7,40}\Z")
@@ -141,6 +141,10 @@ class FieldTooLong(ValueError):
     pass
 
 
+# Enough for "trial", "topped up after the September run", not for an essay.
+GRANT_NOTE_MAX_CHARS = 200
+
+
 def _capped(raw: str, limit: int, what: str) -> str:
     """Refuse an over-long free-text field rather than truncating it to half a sentence."""
     value = raw.strip()
@@ -160,16 +164,43 @@ def _choices(raw: list[str], allowed: Iterable[str], what: str) -> list[str]:
     return list(dict.fromkeys(values))
 
 
+# Every field this parses is an amount of money -- a daily ceiling, a credit grant -- so nine
+# digits either side of the point is already absurd for both. The bound is not fussiness:
+# `1e999999999` is a perfectly FINITE Decimal that asyncpg refuses to encode ("exponent is too
+# large"), which is the same 500 one layer further down, raised from inside the write.
+_MONEY_DIGITS = 9
+
+
 def _decimal(raw: str, default: Decimal) -> Decimal:
+    """A money field from a form, or `default` if it is not a usable amount.
+
+    Three ways a string gets past `Decimal()` without raising, and all three used to reach a
+    column: `nan`, which raises InvalidOperation from the first `>` or `max()` that touches it --
+    an uncaught 500 on a form meant to fall back; `inf`, which is worse than a crash because it is
+    accepted as a spending ceiling and silently removes the cap; and an absurd exponent, which
+    fails at the driver instead.
+    """
     try:
-        return Decimal(raw.strip() or "0")
+        value = Decimal(raw.strip() or "0")
     except (InvalidOperation, ValueError):
         return default
+    # `adjusted()` reads the exponent off the tuple and does no arithmetic, which matters because
+    # `abs()` on one of these raises Overflow before any comparison of ours could reject it.
+    if not value.is_finite() or not -_MONEY_DIGITS <= value.adjusted() <= _MONEY_DIGITS:
+        return default
+    # In range but written with a scale no money column has a use for: 0.00001 is not a rate here.
+    return value.quantize(Decimal("0.0001")) if value.as_tuple().exponent < -4 else value
 
 
 # Public by opt-in, never by omission: the failure mode of forgetting about auth is "locked".
 PUBLIC_PATHS = frozenset({"/", "/login", "/logout", "/healthz"})
 PUBLIC_PREFIXES = ("/static/",)
+
+# Admin by prefix rather than per route, for the same reason the session check is middleware: a
+# per-route check is a line somebody forgets on the next route, and the route that leaks is always
+# the newest one. Scans owns the shared schedule and queues real sweeps, so it is not one reader's
+# to retime; Users creates accounts and grants credit.
+ADMIN_PREFIXES = ("/admin", "/users")
 
 
 def _session(request: Request) -> dict | None:
@@ -178,6 +209,10 @@ def _session(request: Request) -> dict | None:
 
 def _is_public(path: str) -> bool:
     return path in PUBLIC_PATHS or path.startswith(PUBLIC_PREFIXES)
+
+
+def _is_admin_only(path: str) -> bool:
+    return path.startswith(ADMIN_PREFIXES)
 
 
 @app.middleware("http")
@@ -189,13 +224,39 @@ async def require_session(request: Request, call_next):
     """
     session = _session(request)
     request.state.session = session
-    if session is None and not _is_public(request.url.path):
+    path = request.url.path
+    if session is None and not _is_public(path):
         return RedirectResponse("/login", status_code=303)
-    # Set here, not per route: a route that forgot would hide the banner on exactly one page.
-    request.state.needs_key = False
-    if session is not None and not _is_public(request.url.path):
+    # Set here, not per route: a route that forgot would hide the banner on exactly one page, and
+    # the one page it hid it on would be the page that needed it.
+    request.state.is_admin = False
+    # Read from the row on every request rather than from the cookie, so renaming yourself changes
+    # the topbar at once instead of at the next login a month later.
+    request.state.display_name = ""
+    request.state.balance_usd = None
+    request.state.out_of_credit = False
+    request.state.scoring_unconfigured = False
+    if session is not None and not _is_public(path):
         async with connect() as conn:
-            request.state.needs_key = not await users_q.has_credential(conn, session["uid"])
+            user = await users_q.get_user(conn, session["uid"])
+            # Checked on every request, not only at login: a session is a signed token with a
+            # 30-day life, so an admin disabling an account would otherwise revoke nothing the
+            # holder of that cookie can still do -- for a month, while the Users page says
+            # "cannot log in". Covers a deleted account's surviving cookie too.
+            if user is None or not user.is_active:
+                revoked = RedirectResponse("/login", status_code=303)
+                auth.clear_cookie(revoked)
+                return revoked
+            request.state.is_admin = bool(user.is_admin)
+            request.state.display_name = user.display_name
+            if _is_admin_only(path) and not request.state.is_admin:
+                return RedirectResponse("/recommendations", status_code=303)
+            # An admin needs no credit, so they are shown no balance and no warning about one.
+            if not request.state.is_admin:
+                balance = Decimal((await users_q.credit(conn, session["uid"])).balance_usd)
+                request.state.balance_usd = balance
+                request.state.out_of_credit = balance <= 0
+        request.state.scoring_unconfigured = not get_settings().openrouter_api_key.strip()
     return await call_next(request)
 
 
@@ -212,16 +273,16 @@ async def login_form(request: Request):
 
 
 @app.post("/login", response_class=HTMLResponse)
-async def login(request: Request, username: str = Form(...), password: str = Form(...)):
+async def login(request: Request, email: str = Form(""), password: str = Form("")):
     settings = get_settings()
     async with connect() as conn:
-        user_id, message = await auth.authenticate(conn, settings, username, password)
+        user_id, message = await auth.authenticate(conn, settings, email, password)
     if user_id is None:
         return templates.TemplateResponse(
-            request, "login.html", {"error": message, "attempted": username}, status_code=401
+            request, "login.html", {"error": message, "attempted": email}, status_code=401
         )
     response = RedirectResponse("/recommendations", status_code=303)
-    auth.set_cookie(response, settings, auth.issue_session(settings, user_id, username))
+    auth.set_cookie(response, settings, auth.issue_session(settings, user_id))
     return response
 
 
@@ -292,7 +353,6 @@ async def recommendations(
             "paged": bool(forward or backward),
             "paused": profile_row is not None and not profile_row.scoring_enabled,
             "profile_version": profile_row.version if profile_row else 1,
-            "username": session["u"],
             "today": clock.today(),
         },
     )
@@ -375,7 +435,6 @@ async def search(
         "include_closed": include_closed,
         "page": page,
         "has_more": len(jobs) == limit,
-        "username": session["u"],
     }
     # HTMX swaps only the results table; a full navigation renders the whole page.
     if request.headers.get("HX-Request"):
@@ -391,7 +450,7 @@ async def job_detail(request: Request, public_id: str):
     if job is None:
         return HTMLResponse("Not found", status_code=404)
     return templates.TemplateResponse(
-        request, "job.html", {"active": "search", "job": job, "username": session["u"]}
+        request, "job.html", {"active": "search", "job": job}
     )
 
 
@@ -427,7 +486,6 @@ async def profile_form(request: Request):
             "active": "profile",
             "profile": profile,
             "rescore_estimate": pending,
-            "username": session["u"],
             "country_names": COUNTRY_NAMES,
             "language_names": LANGUAGES,
             "background_max_chars": BACKGROUND_MAX_CHARS,
@@ -486,9 +544,12 @@ async def profile_save(
 async def settings_form(request: Request):
     session = request.state.session
     async with connect() as conn:
-        credential = await users_q.get_credential(conn, session["uid"])
+        user = await users_q.get_user(conn, session["uid"])
         profile = profile_from_row(await users_q.get_profile(conn, session["uid"]))
-        spend = await users_q.month_spend(conn, session["uid"])
+        credit = await users_q.credit(conn, session["uid"])
+        grants = await users_q.credit_grants(conn, session["uid"])
+        today = await users_q.today_spend(conn, session["uid"])
+        month = await users_q.month_to_date_spend(conn, session["uid"])
         history = await users_q.spend_history(conn, session["uid"])
     settings = get_settings()
     return templates.TemplateResponse(
@@ -498,71 +559,42 @@ async def settings_form(request: Request):
             "active": "settings",
             "model": settings.default_llm_model,
             "provider": settings.default_llm_provider or "",
-            "monthly_budget_usd": settings.monthly_budget_usd,
+            "email": user.email,
+            "display_name": user.display_name,
             "profile": profile,
-            # Never the key itself, not even to the user who set it.
-            "credential": credential,
-            "spend": spend,
+            "credit": credit,
+            "grants": grants,
+            "today": today,
+            "month_to_date": month,
             "history": history,
-            "username": session["u"],
         },
     )
-
-
-@app.post("/settings", response_class=HTMLResponse)
-async def settings_save(request: Request, api_key: str = Form("")):
-    """Store a key. The ceiling is not a form field: it is an installation setting, copied onto
-    the credential here so the batch check has it on the row it already reads."""
-    session = request.state.session
-    settings = get_settings()
-    async with connect() as conn:
-        key = api_key.strip()
-        # Empty means "leave the stored key alone", not "delete it".
-        if not key:
-            return RedirectResponse("/settings?saved=1", status_code=303)
-        existing = await users_q.get_credential(conn, session["uid"])
-        await users_q.save_credential(
-            conn,
-            session["uid"],
-            api_key_encrypted=encrypt(key),
-            api_key_fingerprint=fingerprint(key),
-            model=settings.default_llm_model,
-            provider_pin=settings.default_llm_provider,
-            # Replacing a key is not a reason to forget the ceiling the user set on it; the
-            # installation default is the starting value for a FIRST key only.
-            monthly_budget_usd=(
-                existing.monthly_budget_usd if existing else settings.monthly_budget_usd
-            ),
-        )
-        # Usually the last step of setting up, and the first thing that makes scoring
-        # possible at all. Without this the page stays empty until the next daily scan.
-        await _queue_match(conn, session["uid"])
-    return RedirectResponse("/settings?saved=1", status_code=303)
 
 
 @app.post("/settings/scoring", response_class=HTMLResponse)
 async def settings_scoring_save(
     request: Request,
     scoring_enabled: str = Form(""),
-    monthly_budget_usd: str = Form(""),
+    daily_ceiling_usd: str = Form(""),
 ):
     """The switch and the ceiling it governs. Neither is a SCORING_FIELD, so saving here never
-    bumps the profile version or bills a re-score."""
+    bumps the profile version or bills a re-score.
+
+    The ceiling is a plain column with a default now, so an absent value simply keeps what is
+    stored -- there is nothing to distinguish from "reset me", which is what the form's disabled
+    input used to require the route to guess at.
+    """
     session = request.state.session
     enabled = scoring_enabled == "on"
     async with connect() as conn:
         previous = await users_q.get_profile(conn, session["uid"])
         was_enabled = previous.scoring_enabled if previous else True
-        await users_q.save_profile(conn, session["uid"], {"scoring_enabled": enabled})
-
-        # The form disables the ceiling while scoring is off, and a disabled input submits
-        # nothing at all -- so an absent value means "keep it", never "reset it to the default".
+        values: dict = {"scoring_enabled": enabled}
         # Refused outright while scoring is off, rather than only hidden in the markup.
-        if enabled and monthly_budget_usd.strip():
-            credential = await users_q.get_credential(conn, session["uid"])
-            if credential is not None:
-                ceiling = _decimal(monthly_budget_usd, credential.monthly_budget_usd)
-                await users_q.update_budget(conn, session["uid"], max(ceiling, Decimal(0)))
+        if enabled and daily_ceiling_usd.strip():
+            ceiling = _decimal(daily_ceiling_usd, Decimal(previous.daily_ceiling_usd))
+            values["daily_ceiling_usd"] = max(ceiling, Decimal(0))
+        await users_q.save_profile(conn, session["uid"], values)
 
         # Only the switch turning back on is a reason to run; editing the ceiling is not.
         if enabled and not was_enabled:
@@ -570,12 +602,155 @@ async def settings_scoring_save(
     return RedirectResponse("/settings?saved=1", status_code=303)
 
 
-@app.post("/settings/delete-key")
-async def settings_delete_key(request: Request):
+@app.post("/settings/account", response_class=HTMLResponse)
+async def settings_account(
+    request: Request, display_name: str = Form(""), digest_enabled: str = Form("")
+):
+    """The name the UI shows, and whether the day's edition is also mailed.
+
+    The address itself is not editable here: it is the login, and changing it is the one edit that
+    can lock somebody out of their own account by a typo. An admin changes it on the Users page,
+    where there is somebody else to undo it.
+    """
     session = request.state.session
     async with connect() as conn:
-        await users_q.delete_credential(conn, session["uid"])
-    return RedirectResponse("/settings?deleted=1", status_code=303)
+        user = await users_q.get_user(conn, session["uid"])
+        await users_q.set_display_name(
+            conn, session["uid"], auth.display_name_for(display_name, user.email)
+        )
+        await users_q.save_profile(
+            conn, session["uid"], {"digest_enabled": digest_enabled == "on"}
+        )
+    return RedirectResponse("/settings?saved=1", status_code=303)
+
+
+@app.post("/settings/password", response_class=HTMLResponse)
+async def settings_password(
+    request: Request,
+    current_password: str = Form(""),
+    new_password: str = Form(""),
+    repeat_password: str = Form(""),
+):
+    """Change your own password. The current one is required, so a borrowed session cannot lock
+    the owner out of their account."""
+    session = request.state.session
+    async with connect() as conn:
+        user = await users_q.get_user(conn, session["uid"])
+        if user is None or not auth.verify_password(user.password_hash, current_password):
+            return RedirectResponse("/settings?password=wrong", status_code=303)
+        if len(new_password) < auth.MIN_PASSWORD_CHARS:
+            return RedirectResponse("/settings?password=short", status_code=303)
+        if new_password != repeat_password:
+            return RedirectResponse("/settings?password=mismatch", status_code=303)
+        await users_q.set_password(conn, session["uid"], auth.hash_password(new_password))
+    log.info("password changed for user %s", session["uid"])
+    return RedirectResponse("/settings?password=changed", status_code=303)
+
+
+@app.get("/users", response_class=HTMLResponse)
+async def users_page(request: Request):
+    """The admin's people page: who exists, what credit they hold, and a way to add both.
+
+    Managing accounts is a web action while managing the CRAWL SET stays a CLI one, and the
+    difference is who pays for the decision: enlarging the crawl costs every user politeness
+    budget and bill, while an account costs only the credit this page grants it.
+    """
+    return await _users_response(request)
+
+
+@app.post("/users", response_class=HTMLResponse)
+async def users_create(
+    request: Request,
+    email: str = Form(""),
+    display_name: str = Form(""),
+    credit: str = Form(""),
+):
+    """Create an account and show its password once.
+
+    Rendered directly rather than redirected to, because the only other way to carry a password to
+    the next page is a URL -- and a URL is in the browser's history, the proxy's log and the
+    Referer of whatever the reader clicks next.
+    """
+    session = request.state.session
+    try:
+        login = auth.clean_email(email)
+    except auth.InvalidEmail as exc:
+        return await _users_response(request, error=str(exc))
+    async with connect() as conn:
+        if await users_q.get_user_by_email(conn, login):
+            return await _users_response(request, error=f"{login} already has an account.")
+
+        password = auth.generate_password()
+        user_id = await users_q.create_user(
+            conn,
+            login,
+            auth.hash_password(password),
+            auth.display_name_for(display_name, login),
+            is_admin=False,
+        )
+        opening = max(_decimal(credit, Decimal(0)), Decimal(0))
+        if opening > 0:
+            await users_q.grant_credit(
+                conn, user_id, amount_usd=opening, granted_by=session["uid"], note="opening credit"
+            )
+    # The id, not the address: a log line is not the place to accumulate people's emails.
+    log.info("user %s created account %s", session["uid"], user_id)
+    return await _users_response(request, new_login=(login, password))
+
+
+@app.post("/users/{user_id}/credit")
+async def users_grant(
+    request: Request, user_id: int, amount_usd: str = Form(""), note: str = Form("")
+):
+    """Top up. A grant is a row, so two top-ups add up and nothing overwrites a total."""
+    session = request.state.session
+    amount = _decimal(amount_usd, Decimal(0))
+    if amount == 0:
+        return RedirectResponse("/users", status_code=303)
+    async with connect() as conn:
+        try:
+            reason = _capped(note, GRANT_NOTE_MAX_CHARS, "The note")
+        except FieldTooLong as exc:
+            return await _users_response(request, error=str(exc))
+        await users_q.grant_credit(
+            conn, user_id, amount_usd=amount, granted_by=session["uid"], note=reason
+        )
+        # Credit is what stops a run, so granting some is a reason to start one: without this the
+        # person waits for the next daily scan to see anything they were just paid for.
+        if amount > 0:
+            await _queue_match(conn, user_id)
+    log.info("user %s granted $%s to user %s", session["uid"], amount, user_id)
+    return RedirectResponse("/users", status_code=303)
+
+
+@app.post("/users/{user_id}/active")
+async def users_set_active(request: Request, user_id: int, is_active: str = Form("")):
+    session = request.state.session
+    if user_id == session["uid"]:
+        # Nothing else can re-enable them: there is no route that does not require a session.
+        return RedirectResponse("/users", status_code=303)
+    async with connect() as conn:
+        await users_q.set_active(conn, user_id, is_active=is_active == "on")
+    return RedirectResponse("/users", status_code=303)
+
+
+async def _users_response(
+    request: Request, *, error: str = "", new_login: tuple[str, str] | None = None
+) -> HTMLResponse:
+    async with connect() as conn:
+        users = await users_q.list_users_with_credit(conn)
+    return templates.TemplateResponse(
+        request,
+        "users.html",
+        {
+            "active": "users",
+            "users": users,
+            "error": error,
+            # The generated password, shown exactly once: in this response and nowhere after it.
+            "new_login": new_login,
+            "user_id": request.state.session["uid"],
+        },
+    )
 
 
 @app.get("/how-it-works", response_class=HTMLResponse)
@@ -583,7 +758,7 @@ async def how_it_works(request: Request):
     return templates.TemplateResponse(
         request,
         "how_it_works.html",
-        {"active": "how_it_works", "username": request.state.session["u"]},
+        {"active": "how_it_works"},
     )
 
 
@@ -600,7 +775,7 @@ async def dashboard(request: Request):
         countries = await admin_q.facet_breakdown(conn)
         scopes = await admin_q.list_tenants(conn)
         stats = await match_q.match_stats(conn, session["uid"])
-        spend = await users_q.month_spend(conn, session["uid"])
+        spend = await users_q.today_spend(conn, session["uid"])
     return templates.TemplateResponse(
         request,
         "dashboard.html",
@@ -615,7 +790,6 @@ async def dashboard(request: Request):
             "stats": stats,
             "spend": spend,
             "sources": sorted(NORMALIZERS),
-            "username": session["u"],
         },
     )
 
@@ -666,7 +840,6 @@ async def _run_status() -> dict:
 
 @app.get("/admin", response_class=HTMLResponse)
 async def admin(request: Request):
-    session = request.state.session
     async with connect() as conn:
         schedule = await admin_q.get_schedule(conn)
         runs = await admin_q.recent_runs(conn)
@@ -680,7 +853,6 @@ async def admin(request: Request):
             "runs": runs,
             "sweeps": sweeps,
             "sources": sorted(NORMALIZERS),
-            "username": session["u"],
             **await _run_status(),
         },
     )

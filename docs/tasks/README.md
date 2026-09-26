@@ -12,8 +12,8 @@ wants to apply to. They are not dependencies on each other unless a brief says s
 
 Trouveur is a self-hosted job radar for the DACH market. It sweeps ~10 job sources into a raw
 archive, normalises each posting into a canonical row with derived facets, embeds it, retrieves
-per user with a hybrid dense + lexical search, and ranks the shortlist with an LLM paid for by
-that user's own API key. Roughly 229,000 live postings, deployed as Docker Compose on a single
+per user with a hybrid dense + lexical search, and ranks the shortlist with an LLM on the
+installation's key, metered against credit an admin grants each user. Roughly 229,000 live postings, deployed as Docker Compose on a single
 four-core VPS that also hosts the development database.
 
 Read `AGENTS.md` first -- it is the architectural contract, and several briefs below deliberately

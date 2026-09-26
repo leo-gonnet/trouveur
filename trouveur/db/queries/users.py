@@ -1,8 +1,7 @@
-"""User SQL: accounts, profiles, stored credentials and metered spend."""
+"""User SQL: accounts, profiles, granted credit and metered spend."""
 
 from __future__ import annotations
 
-from datetime import date
 from decimal import Decimal
 from typing import Any
 
@@ -13,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from trouveur import clock
 from trouveur.db.schema import (
     app_user,
-    user_llm_credential,
+    user_credit_grant,
     user_llm_spend,
     user_profile,
 )
@@ -29,9 +28,16 @@ SCORING_FIELDS = frozenset(
 )
 
 
-async def get_user_by_username(conn: AsyncConnection, username: str) -> sa.Row | None:
+async def get_user_by_email(conn: AsyncConnection, email: str) -> sa.Row | None:
+    """Look an account up by its login. Folded on both sides, so a caller that has not normalised
+    its input still finds the row rather than silently reporting no such account -- and the
+    comparison matches the unique index, which is on `lower(email)` too."""
     return (
-        await conn.execute(app_user.select().where(app_user.c.username == username))
+        await conn.execute(
+            app_user.select().where(
+                sa.func.lower(app_user.c.email) == sa.func.lower(sa.func.btrim(email))
+            )
+        )
     ).one_or_none()
 
 
@@ -42,16 +48,38 @@ async def get_user(conn: AsyncConnection, user_id: int) -> sa.Row | None:
 
 
 async def list_users(conn: AsyncConnection) -> list[sa.Row]:
-    return list(await conn.execute(app_user.select().order_by(app_user.c.username)))
+    return list(await conn.execute(app_user.select().order_by(app_user.c.email)))
 
 
 async def create_user(
-    conn: AsyncConnection, username: str, password_hash: str, email: str | None = None
+    conn: AsyncConnection,
+    email: str,
+    password_hash: str,
+    display_name: str = "",
+    *,
+    is_admin: bool | None = None,
 ) -> int:
+    """Create a login. `is_admin=None` means "admin if this is the first account", which is the
+    only moment it can be decided without one: the accounts an admin will create do not exist
+    yet, so on an empty installation there is nobody else it could be.
+
+    The address is folded here as well as at the form, so no write path can put a mixed-case
+    duplicate in front of the unique index and get a constraint error instead of an account.
+    """
+    if is_admin is None:
+        is_admin = (
+            await conn.execute(sa.select(sa.func.count()).select_from(app_user))
+        ).scalar_one() == 0
+    login = email.strip().lower()
     user_id = (
         await conn.execute(
             app_user.insert()
-            .values(username=username, password_hash=password_hash, email=email)
+            .values(
+                email=login,
+                display_name=display_name.strip() or login.partition("@")[0],
+                password_hash=password_hash,
+                is_admin=is_admin,
+            )
             .returning(app_user.c.id)
         )
     ).scalar_one()
@@ -126,91 +154,146 @@ async def save_profile(
     return max(version, 1), rescore
 
 
-async def has_credential(conn: AsyncConnection, user_id: int) -> bool:
+async def set_password(conn: AsyncConnection, user_id: int, password_hash: str) -> None:
+    """Change a password. The current one is verified by the caller, which holds the hasher."""
+    await conn.execute(
+        app_user.update().where(app_user.c.id == user_id).values(password_hash=password_hash)
+    )
+
+
+async def set_display_name(conn: AsyncConnection, user_id: int, display_name: str) -> None:
+    await conn.execute(
+        app_user.update().where(app_user.c.id == user_id).values(display_name=display_name)
+    )
+
+
+async def set_active(conn: AsyncConnection, user_id: int, *, is_active: bool) -> None:
+    await conn.execute(
+        app_user.update().where(app_user.c.id == user_id).values(is_active=is_active)
+    )
+
+
+_GRANTED = (
+    sa.select(sa.func.coalesce(sa.func.sum(user_credit_grant.c.amount_usd), 0))
+    .where(user_credit_grant.c.user_id == app_user.c.id)
+    .scalar_subquery()
+)
+_SPENT = (
+    sa.select(sa.func.coalesce(sa.func.sum(user_llm_spend.c.cost_usd), 0))
+    .where(user_llm_spend.c.user_id == app_user.c.id)
+    .scalar_subquery()
+)
+
+
+async def credit(conn: AsyncConnection, user_id: int) -> sa.Row:
+    """What this user has been granted, has spent, and has left.
+
+    The balance is derived, never stored. A balance column would be a second record of a fact the
+    spend meter already holds, and a run that died between the call and the decrement would leave
+    the two disagreeing with no way to tell which was right.
+    """
     return (
         await conn.execute(
-            sa.select(sa.literal(True))
-            .select_from(user_llm_credential)
-            .where(user_llm_credential.c.user_id == user_id)
+            sa.select(
+                _GRANTED.label("granted_usd"),
+                _SPENT.label("spent_usd"),
+                (_GRANTED - _SPENT).label("balance_usd"),
+            ).where(app_user.c.id == user_id)
         )
-    ).scalar() is True
+    ).one()
 
 
-async def get_credential(conn: AsyncConnection, user_id: int) -> sa.Row | None:
-    return (
+async def list_users_with_credit(conn: AsyncConnection) -> list[sa.Row]:
+    """Every account with its credit, for the admin page. One query rather than one per user."""
+    return list(
         await conn.execute(
-            user_llm_credential.select().where(user_llm_credential.c.user_id == user_id)
+            sa.select(
+                app_user.c.id,
+                app_user.c.email,
+                app_user.c.display_name,
+                app_user.c.is_admin,
+                app_user.c.is_active,
+                app_user.c.created_at,
+                user_profile.c.scoring_enabled,
+                user_profile.c.daily_ceiling_usd,
+                _GRANTED.label("granted_usd"),
+                _SPENT.label("spent_usd"),
+                (_GRANTED - _SPENT).label("balance_usd"),
+            )
+            .join_from(app_user, user_profile, app_user.c.id == user_profile.c.user_id)
+            .order_by(app_user.c.email)
         )
-    ).one_or_none()
+    )
 
 
-async def save_credential(
+async def grant_credit(
     conn: AsyncConnection,
     user_id: int,
     *,
-    api_key_encrypted: bytes,
-    api_key_fingerprint: str,
-    model: str,
-    provider_pin: str | None,
-    monthly_budget_usd: Decimal,
+    amount_usd: Decimal,
+    granted_by: int,
+    note: str = "",
 ) -> None:
-    stmt = pg_insert(user_llm_credential).values(
-        user_id=user_id,
-        api_key_encrypted=api_key_encrypted,
-        api_key_fingerprint=api_key_fingerprint,
-        model=model,
-        provider_pin=provider_pin,
-        monthly_budget_usd=monthly_budget_usd,
-    )
+    """Add credit. Append-only: a top-up is a row, never an edit to a total, so the history of
+    who gave what survives and a mistaken grant is corrected by a negative one."""
     await conn.execute(
-        stmt.on_conflict_do_update(
-            index_elements=[user_llm_credential.c.user_id],
-            set_={
-                "api_key_encrypted": stmt.excluded.api_key_encrypted,
-                "api_key_fingerprint": stmt.excluded.api_key_fingerprint,
-                "model": stmt.excluded.model,
-                "provider_pin": stmt.excluded.provider_pin,
-                "monthly_budget_usd": stmt.excluded.monthly_budget_usd,
-                "updated_at": sa.func.now(),
-            },
+        user_credit_grant.insert().values(
+            user_id=user_id, amount_usd=amount_usd, granted_by=granted_by, note=note
         )
     )
 
 
-async def update_budget(
-    conn: AsyncConnection, user_id: int, monthly_budget_usd: Decimal
-) -> None:
-    await conn.execute(
-        user_llm_credential.update()
-        .where(user_llm_credential.c.user_id == user_id)
-        .values(monthly_budget_usd=monthly_budget_usd, updated_at=sa.func.now())
+async def credit_grants(conn: AsyncConnection, user_id: int, limit: int = 10) -> list[sa.Row]:
+    granter = app_user.alias("granter")
+    return list(
+        await conn.execute(
+            sa.select(
+                user_credit_grant.c.amount_usd,
+                user_credit_grant.c.note,
+                user_credit_grant.c.created_at,
+                granter.c.display_name.label("granted_by"),
+            )
+            .join_from(
+                user_credit_grant,
+                granter,
+                user_credit_grant.c.granted_by == granter.c.id,
+                isouter=True,
+            )
+            .where(user_credit_grant.c.user_id == user_id)
+            .order_by(user_credit_grant.c.created_at.desc())
+            .limit(limit)
+        )
     )
 
 
-async def delete_credential(conn: AsyncConnection, user_id: int) -> None:
-    await conn.execute(
-        user_llm_credential.delete().where(user_llm_credential.c.user_id == user_id)
-    )
+async def today_spend(conn: AsyncConnection, user_id: int) -> sa.Row | None:
+    """Spend against today's ceiling, on the installation's clock rather than the server's.
 
-
-def _month(when: date | None = None) -> date:
-    """The month spend is metered into, on the installation's clock rather than the server's.
-
-    `date.today()` is the process's local date, which is UTC in the container and the operator's
-    zone anywhere else -- so the month boundary moved with where this ran.
+    `date.today()` is the process's local date -- UTC in the container, the operator's zone
+    anywhere else -- so the day boundary would move with where this ran, and a ceiling would
+    reset at the wrong hour.
     """
-    return (when or clock.today()).replace(day=1)
-
-
-async def month_spend(conn: AsyncConnection, user_id: int) -> sa.Row | None:
     return (
         await conn.execute(
             user_llm_spend.select().where(
                 user_llm_spend.c.user_id == user_id,
-                user_llm_spend.c.period_month == _month(),
+                user_llm_spend.c.period_day == clock.today(),
             )
         )
     ).one_or_none()
+
+
+async def month_to_date_spend(conn: AsyncConnection, user_id: int) -> Decimal:
+    """This calendar month's spend, summed from the daily rows rather than metered separately:
+    two meters for one fact eventually disagree."""
+    return (
+        await conn.execute(
+            sa.select(sa.func.coalesce(sa.func.sum(user_llm_spend.c.cost_usd), 0)).where(
+                user_llm_spend.c.user_id == user_id,
+                user_llm_spend.c.period_day >= clock.today().replace(day=1),
+            )
+        )
+    ).scalar_one()
 
 
 async def add_spend(
@@ -221,7 +304,7 @@ async def add_spend(
     tokens_out: int,
     cost_usd: Decimal,
 ) -> Decimal:
-    """Record spend and return the new month-to-date total, in USD.
+    """Record spend and return the new day-to-date total, in USD.
 
     USD because that is the currency OpenRouter actually bills in. Storing a euro figure would
     require an exchange rate between the meter and the cap, and a stale rate makes a budget limit
@@ -232,14 +315,14 @@ async def add_spend(
     """
     stmt = pg_insert(user_llm_spend).values(
         user_id=user_id,
-        period_month=_month(),
+        period_day=clock.today(),
         tokens_in=tokens_in,
         tokens_out=tokens_out,
         cost_usd=cost_usd,
         calls=1,
     )
     stmt = stmt.on_conflict_do_update(
-        index_elements=[user_llm_spend.c.user_id, user_llm_spend.c.period_month],
+        index_elements=[user_llm_spend.c.user_id, user_llm_spend.c.period_day],
         set_={
             "tokens_in": user_llm_spend.c.tokens_in + stmt.excluded.tokens_in,
             "tokens_out": user_llm_spend.c.tokens_out + stmt.excluded.tokens_out,
@@ -251,12 +334,12 @@ async def add_spend(
     return (await conn.execute(stmt)).scalar_one()
 
 
-async def spend_history(conn: AsyncConnection, user_id: int, months: int = 6) -> list[sa.Row]:
+async def spend_history(conn: AsyncConnection, user_id: int, days: int = 14) -> list[sa.Row]:
     return list(
         await conn.execute(
             user_llm_spend.select()
             .where(user_llm_spend.c.user_id == user_id)
-            .order_by(user_llm_spend.c.period_month.desc())
-            .limit(months)
+            .order_by(user_llm_spend.c.period_day.desc())
+            .limit(days)
         )
     )

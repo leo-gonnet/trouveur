@@ -52,6 +52,7 @@ def test_the_export_never_reads_a_table_that_holds_personal_data():
     these tables are excluded can go on naming them.
     """
     private = ("user_account", "user_profile", "user_credential", "user_job_match",
+               "user_credit_grant", "user_llm_spend", "user_edition_item",
                "llm_score_cache", "user_query_expansion", "user_session")
     queries = {
         "documents": archive_q._DOCUMENTS,
