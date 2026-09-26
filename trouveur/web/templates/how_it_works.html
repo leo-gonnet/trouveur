@@ -2,25 +2,25 @@
 {% block content %}
 <div class="page-head">
   <h1>How it works</h1>
-  <p class="hint">Two halves that share only the database. Ingest builds one corpus for everyone;
-    match selects from it for each user.</p>
+  <p class="hint">Three things happen, on three different clocks. Ingest builds one corpus for
+    everyone. Your profile is turned into search terms once, when you change it. A run then
+    selects from the corpus with those terms and publishes the day's edition.</p>
 </div>
 
 <div class="doc">
 <section class="section">
-  <p>Boards are swept by their own structure, never with a user's keywords, so a job the user
-    would have wanted but never thought to type still arrives. Every derived table is a pure,
-    versioned function of the raw archive: bump the version and every row is recomputed from it,
-    by the same worker that handles new postings. What can be recommended is bounded by age as
-    well as by whether the posting is still open: only the last seven days are embedded, kept in
-    the index and searched, so a vacancy that has gone cold leaves the index instead of competing
-    in it.</p>
+  <div class="section-head"><h2>Ingest &mdash; one corpus, shared by everyone</h2></div>
+  <p>Boards are swept by their own structure, never with a user's keywords, so a job you would
+    have wanted but never thought to type still arrives. Every derived table is a pure, versioned
+    function of the raw archive: bump the version and every row is recomputed from it, by the same
+    worker that handles new postings. What can be recommended is bounded by age as well as by
+    whether the posting is still open: only the last seven days are embedded, kept in the index and
+    searched, so a vacancy that has gone cold leaves the index instead of competing in it.</p>
   <figure class="diagram">
-    <svg viewBox="0 0 960 410" role="img" aria-label="Ingest lane feeding a match lane">
+    <svg viewBox="0 0 960 200" role="img" aria-label="Sources are archived, then normalised, derived and embedded">
       <defs><marker id="a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="arrowhead"/></marker></defs>
-
-      <rect x="4" y="4" width="952" height="196" rx="6" class="lane l1"/>
-      <text x="20" y="28" class="lane-title">INGEST — one shared corpus, no user involved, runs daily</text>
+      <rect x="4" y="4" width="952" height="192" rx="6" class="lane l1"/>
+      <text x="20" y="28" class="lane-title">INGEST — no user involved, once a night</text>
       <g class="node"><rect x="20" y="52" width="110" height="56" rx="4"/><text x="75" y="76">sources</text><text x="75" y="93" class="sub">boards, feeds</text></g>
       <g class="node"><rect x="160" y="52" width="120" height="56" rx="4"/><text x="220" y="76">raw archive</text><text x="220" y="93" class="sub">kept forever</text></g>
       <g class="node"><rect x="320" y="52" width="120" height="56" rx="4"/><text x="380" y="76">normalise (v)</text><text x="380" y="93" class="sub">structure only</text></g>
@@ -36,42 +36,90 @@
       <text x="20" y="140" class="note start">(v)  a pure function with a version number.</text>
       <text x="20" y="156" class="note start">Bumping it queues every row below the new value;</text>
       <text x="20" y="172" class="note start">the ordinary worker recomputes them from the archive.</text>
-
-      <rect x="4" y="214" width="952" height="192" rx="6" class="lane l2"/>
-      <text x="20" y="238" class="lane-title">MATCH — per user, on demand or after a sweep, paid only where marked</text>
-      <g class="node"><rect x="20" y="284" width="80" height="56" rx="4"/><text x="60" y="308">profile</text><text x="60" y="325" class="sub">per user</text></g>
-      <g class="node"><rect x="144" y="262" width="90" height="44" rx="4"/><text x="189" y="281">queries</text><text x="189" y="297" class="sub">+ synonyms</text></g>
-      <g class="node paid"><rect x="144" y="318" width="90" height="44" rx="4"/><text x="189" y="337">adverts</text><text x="189" y="353" class="sub">dense arm only</text></g>
-      <g class="node"><rect x="278" y="284" width="100" height="56" rx="4"/><text x="328" y="308">hard filters</text><text x="328" y="325" class="sub">in SQL, first</text></g>
-      <g class="node"><rect x="422" y="262" width="120" height="44" rx="4"/><text x="482" y="281">meaning search</text><text x="482" y="297" class="sub">nearest vectors</text></g>
-      <g class="node"><rect x="422" y="318" width="120" height="44" rx="4"/><text x="482" y="337">word search</text><text x="482" y="353" class="sub">full text + trigram</text></g>
-      <g class="node"><rect x="586" y="284" width="80" height="56" rx="4"/><text x="626" y="308">fuse</text><text x="626" y="325" class="sub">RRF, by rank</text></g>
-      <g class="node paid"><rect x="710" y="284" width="110" height="56" rx="4"/><text x="765" y="308">LLM score</text><text x="765" y="325" class="sub">your key, cached</text></g>
-      <g class="node"><rect x="864" y="284" width="80" height="56" rx="4"/><text x="904" y="308">page</text><text x="904" y="325" class="sub">digest</text></g>
-      <g class="edge" marker-end="url(#a1)">
-        <path d="M100 312 C122 312 122 284 144 284"/><path d="M100 312 C122 312 122 340 144 340"/>
-        <path d="M234 284 C256 284 256 312 278 312"/><path d="M234 340 C256 340 256 312 278 312"/>
-        <path d="M378 312 C400 312 400 284 422 284"/><path d="M378 312 C400 312 400 340 422 340"/>
-        <path d="M542 284 C564 284 564 312 586 312"/><path d="M542 340 C564 340 564 312 586 312"/>
-        <path d="M666 312H710"/><path d="M820 312H864"/>
-      </g>
-      <g class="edge dashed" marker-end="url(#a1)"><path d="M805 180 V240 Q805 252 793 252 H494 Q482 252 482 262"/></g>
-      <text x="189" y="380" class="note">8 short ads,</text>
-      <text x="189" y="394" class="note">model-written</text>
-      <text x="765" y="380" class="note">paid, per</text>
-      <text x="765" y="394" class="note">posting scored</text>
-      <text x="900" y="380" class="note">an edition a day</text>
-      <text x="900" y="394" class="note">by score, no cut</text>
-      <text x="328" y="380" class="note">country, mode, seniority,</text>
-      <text x="328" y="394" class="note">contract, salary floor, age</text>
     </svg>
   </figure>
-  <p class="hint">A day's matching is published as an edition: one page per day, keyed on when a
-    posting became a recommendation for this user rather than on when it was posted. It is stored
-    rather than recalculated, so it is never rewritten &mdash; the one exception is today's,
-    which a profile change replaces once you agree to it. Two processes share the database and nothing else: the web app reads
-    and enqueues, the runner sweeps, drains and matches. Either can be down without breaking the
-    other.</p>
+</section>
+
+<section class="section">
+  <div class="section-head"><h2>Your profile &mdash; read once, when you change it</h2></div>
+  <p>Your profile is not searched with directly. It is turned into a set of search terms, and that
+    happens <em>once per version of the profile</em>: saving a field that changes what a good match
+    is bumps the version, and the next run pays to build the terms again. Nothing else rebuilds
+    them &mdash; not a new day, not a new edition, not a scan that found ten thousand postings.
+    That is the whole reason this is drawn as its own stage.</p>
+  <figure class="diagram">
+    <svg viewBox="0 0 960 190" role="img" aria-label="A profile is expanded once into stored search terms">
+      <defs><marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="arrowhead"/></marker></defs>
+      <rect x="4" y="4" width="952" height="182" rx="6" class="lane l2"/>
+      <text x="20" y="28" class="lane-title">YOUR PROFILE — once per version, not once per run</text>
+      <g class="node"><rect x="20" y="62" width="110" height="56" rx="4"/><text x="75" y="86">profile</text><text x="75" y="103" class="sub">what you saved</text></g>
+      <g class="node paid"><rect x="180" y="62" width="120" height="56" rx="4"/><text x="240" y="86">expand</text><text x="240" y="103" class="sub">one set of calls</text></g>
+      <g class="node"><rect x="350" y="62" width="140" height="56" rx="4"/><text x="420" y="86">search terms</text><text x="420" y="103" class="sub">stored, reused</text></g>
+      <g class="edge" marker-end="url(#a2)"><path d="M130 90H180"/><path d="M300 90H350"/></g>
+      <text x="530" y="58" class="note start">· keyword queries from your own fields — free, always</text>
+      <text x="530" y="80" class="note start">· wider queries — synonyms, and the other language</text>
+      <text x="530" y="102" class="note start">· eight invented adverts — for the meaning search only</text>
+      <text x="530" y="124" class="note start">· a summary of your background — all the scorer reads</text>
+      <text x="20" y="150" class="note start">With no key, the free keyword queries are used on their own</text>
+      <text x="20" y="166" class="note start">and nothing is stored — so adding a key later still buys the rest.</text>
+    </svg>
+  </figure>
+  <p class="hint">The invented adverts are there because a vacancy is written like a vacancy and a
+    profile is not; searching by meaning works better when both sides of the comparison have the
+    same shape. They only ever reach the meaning search. Your background is summarised here, once,
+    rather than sent with every batch of postings to be scored &mdash; which is why the scorer sees
+    the summary and never the whole field.</p>
+</section>
+
+<section class="section">
+  <div class="section-head"><h2>A run &mdash; select from the corpus, score, publish</h2></div>
+  <p>A run reads the stored search terms and never writes new ones. It filters the corpus in SQL,
+    searches what is left twice over &mdash; once by meaning, once by word &mdash; and merges the
+    two by rank rather than by score, since the two arms have no common scale. Only the top of that
+    list is sent to be scored, and only the postings not already scored under this version of your
+    profile: a posting is paid for once, ever.</p>
+  <figure class="diagram">
+    <svg viewBox="0 0 960 240" role="img" aria-label="Filters, two search arms, fusion, scoring and an edition">
+      <defs><marker id="a3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="arrowhead"/></marker></defs>
+      <rect x="4" y="4" width="952" height="232" rx="6" class="lane l3"/>
+      <text x="20" y="28" class="lane-title">A RUN — after every scan, or if you change your profile</text>
+      <g class="node"><rect x="20" y="52" width="130" height="48" rx="4"/><text x="85" y="72">search terms</text><text x="85" y="89" class="sub">from your profile</text></g>
+      <g class="node"><rect x="20" y="124" width="130" height="48" rx="4"/><text x="85" y="144">facets, vectors</text><text x="85" y="161" class="sub">the shared corpus</text></g>
+      <g class="node"><rect x="190" y="88" width="110" height="56" rx="4"/><text x="245" y="112">hard filters</text><text x="245" y="129" class="sub">in SQL, first</text></g>
+      <g class="node"><rect x="340" y="52" width="140" height="48" rx="4"/><text x="410" y="72">meaning search</text><text x="410" y="89" class="sub">nearest vectors</text></g>
+      <g class="node"><rect x="340" y="124" width="140" height="48" rx="4"/><text x="410" y="144">word search</text><text x="410" y="161" class="sub">full text + trigram</text></g>
+      <g class="node"><rect x="520" y="88" width="90" height="56" rx="4"/><text x="565" y="112">merge</text><text x="565" y="129" class="sub">by rank</text></g>
+      <g class="node paid"><rect x="650" y="88" width="120" height="56" rx="4"/><text x="710" y="112">score</text><text x="710" y="129" class="sub">your key, cached</text></g>
+      <g class="node"><rect x="810" y="88" width="130" height="56" rx="4"/><text x="875" y="112">edition</text><text x="875" y="129" class="sub">today's page</text></g>
+      <g class="edge" marker-end="url(#a3)">
+        <path d="M150 76 C170 76 170 116 190 116"/><path d="M150 148 C170 148 170 116 190 116"/>
+        <path d="M300 116 C320 116 320 76 340 76"/><path d="M300 116 C320 116 320 148 340 148"/>
+        <path d="M480 76 C500 76 500 116 520 116"/><path d="M480 148 C500 148 500 116 520 116"/>
+        <path d="M610 116H650"/><path d="M770 116H810"/>
+      </g>
+      <text x="245" y="190" class="note">country, work mode, seniority,</text>
+      <text x="245" y="206" class="note">contract, salary floor, age</text>
+      <text x="710" y="190" class="note">the top 150, minus anything</text>
+      <text x="710" y="206" class="note">already scored for this profile</text>
+      <text x="875" y="190" class="note">ordered by score,</text>
+      <text x="875" y="206" class="note">with no cut-off</text>
+    </svg>
+  </figure>
+  <p>A run starts when the nightly scan finishes, and once more whenever you save a profile
+    change, add a key, or switch scoring back on. There is no button for it: with nothing new to
+    score a run would fetch nothing, cost nothing and change no pixel, so a button could not say
+    whether pressing it would do anything.</p>
+    <br>
+  <p class="hint">What a run publishes is an <em>edition</em> &mdash; one page per day, keyed on the
+    day a posting became a recommendation for you rather than on the day it was posted. An edition
+    is stored as it was read, not recalculated, so it is never rewritten: a posting that later
+    closes keeps its place with a <em>closed</em> tag, and only one you dismiss leaves. The single
+    exception is today's, which a profile change replaces &mdash; after asking you first, because
+    the new profile will score the same postings differently. Everything older stands as published.
+    A posting reaches you once per profile version, ever; only changing your profile can bring it
+    back.</p>
+  <p class="hint">Two processes share the database and nothing else: the web app reads and enqueues,
+    the runner sweeps, drains and matches. Either can be down without breaking the other.</p>
 </section>
 </div>
 {% endblock %}
