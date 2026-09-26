@@ -178,16 +178,17 @@ def _arguments(ctx: dict) -> dict[str, dict]:
         },
         "match.match_stats": {"user_id": user_id},
         # users
-        "users.get_user_by_username": {"username": ctx["username"]},
+        "users.get_user_by_email": {"email": ctx["email"]},
         "users.get_user": {"user_id": user_id},
         "users.list_users": {},
-        "users.create_user": {"username": "probe-user", "password_hash": "argon2$probe"},
+        "users.create_user": {"email": "probe@example.test", "password_hash": "argon2$probe"},
         "users.record_login_result": {
             "user_id": user_id, "success": False, "lockout_minutes": 15, "max_attempts": 5,
         },
         "users.get_profile": {"user_id": user_id},
         "users.save_profile": {"user_id": user_id, "values": {"title": "Probe"}},
         "users.set_password": {"user_id": user_id, "password_hash": "argon2$probe"},
+        "users.set_display_name": {"user_id": user_id, "display_name": "Probe"},
         "users.set_active": {"user_id": user_id, "is_active": True},
         "users.credit": {"user_id": user_id},
         "users.list_users_with_credit": {},
@@ -218,12 +219,12 @@ async def context(seeded):
         ).one()
         run_id = await admin.enqueue_run(conn, trigger=RunTrigger.MANUAL)
         sweep_id, _ = await ingest.start_sweep(conn, row.source)
-        user = (await conn.exec_driver_sql("SELECT username FROM app_user LIMIT 1")).scalar()
+        user = (await conn.exec_driver_sql("SELECT email FROM app_user LIMIT 1")).scalar()
 
     return {
         "user_id": seeded["user_id"],
         "profile": seeded["profile"],
-        "username": user,
+        "email": user,
         "job_id": row.id,
         "source": row.source,
         "external_id": row.external_id,

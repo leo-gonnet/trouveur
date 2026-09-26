@@ -78,3 +78,6 @@ class UserProfile(BaseModel):
     # installation-wide default would be a second place this number lives, and the only value
     # that matters is the one on the user's own row.
     daily_ceiling_usd: Decimal = Decimal("0.25")
+    # Whether the day's edition is also mailed. Not a cost control and not a SCORING_FIELD: it
+    # decides where a reader meets what was already scored.
+    digest_enabled: bool = True

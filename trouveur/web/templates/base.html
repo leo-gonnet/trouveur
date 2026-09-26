@@ -14,7 +14,7 @@
         crossorigin="anonymous"></script>
 </head>
 <body>
-{% if username is defined and username %}
+{% if request.state.session %}
 <header class="topbar">
   <a href="/recommendations" class="brand"><img src="/static/logo-dark.png" alt="" class="logo">Trouveur</a>
   <nav class="nav">
@@ -36,7 +36,7 @@
   {# <details>, so the menu needs no JavaScript. It closes on the next navigation or on a second
      click of the name; nothing here is worth a script to dismiss it on an outside click. #}
   <details class="menu">
-    <summary>{{ username }}</summary>
+    <summary>{{ request.state.display_name }}</summary>
     <div class="menu-panel">
       <a href="/settings" {% if active == 'settings' %}aria-current="page"{% endif %}>Settings</a>
       {% if request.state.is_admin %}

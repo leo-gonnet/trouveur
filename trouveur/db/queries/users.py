@@ -28,9 +28,16 @@ SCORING_FIELDS = frozenset(
 )
 
 
-async def get_user_by_username(conn: AsyncConnection, username: str) -> sa.Row | None:
+async def get_user_by_email(conn: AsyncConnection, email: str) -> sa.Row | None:
+    """Look an account up by its login. Folded on both sides, so a caller that has not normalised
+    its input still finds the row rather than silently reporting no such account -- and the
+    comparison matches the unique index, which is on `lower(email)` too."""
     return (
-        await conn.execute(app_user.select().where(app_user.c.username == username))
+        await conn.execute(
+            app_user.select().where(
+                sa.func.lower(app_user.c.email) == sa.func.lower(sa.func.btrim(email))
+            )
+        )
     ).one_or_none()
 
 
@@ -41,31 +48,36 @@ async def get_user(conn: AsyncConnection, user_id: int) -> sa.Row | None:
 
 
 async def list_users(conn: AsyncConnection) -> list[sa.Row]:
-    return list(await conn.execute(app_user.select().order_by(app_user.c.username)))
+    return list(await conn.execute(app_user.select().order_by(app_user.c.email)))
 
 
 async def create_user(
     conn: AsyncConnection,
-    username: str,
+    email: str,
     password_hash: str,
-    email: str | None = None,
+    display_name: str = "",
     *,
     is_admin: bool | None = None,
 ) -> int:
     """Create a login. `is_admin=None` means "admin if this is the first account", which is the
     only moment it can be decided without one: the accounts an admin will create do not exist
-    yet, so on an empty installation there is nobody else it could be."""
+    yet, so on an empty installation there is nobody else it could be.
+
+    The address is folded here as well as at the form, so no write path can put a mixed-case
+    duplicate in front of the unique index and get a constraint error instead of an account.
+    """
     if is_admin is None:
         is_admin = (
             await conn.execute(sa.select(sa.func.count()).select_from(app_user))
         ).scalar_one() == 0
+    login = email.strip().lower()
     user_id = (
         await conn.execute(
             app_user.insert()
             .values(
-                username=username,
+                email=login,
+                display_name=display_name.strip() or login.partition("@")[0],
                 password_hash=password_hash,
-                email=email,
                 is_admin=is_admin,
             )
             .returning(app_user.c.id)
@@ -149,6 +161,12 @@ async def set_password(conn: AsyncConnection, user_id: int, password_hash: str) 
     )
 
 
+async def set_display_name(conn: AsyncConnection, user_id: int, display_name: str) -> None:
+    await conn.execute(
+        app_user.update().where(app_user.c.id == user_id).values(display_name=display_name)
+    )
+
+
 async def set_active(conn: AsyncConnection, user_id: int, *, is_active: bool) -> None:
     await conn.execute(
         app_user.update().where(app_user.c.id == user_id).values(is_active=is_active)
@@ -191,8 +209,8 @@ async def list_users_with_credit(conn: AsyncConnection) -> list[sa.Row]:
         await conn.execute(
             sa.select(
                 app_user.c.id,
-                app_user.c.username,
                 app_user.c.email,
+                app_user.c.display_name,
                 app_user.c.is_admin,
                 app_user.c.is_active,
                 app_user.c.created_at,
@@ -203,7 +221,7 @@ async def list_users_with_credit(conn: AsyncConnection) -> list[sa.Row]:
                 (_GRANTED - _SPENT).label("balance_usd"),
             )
             .join_from(app_user, user_profile, app_user.c.id == user_profile.c.user_id)
-            .order_by(app_user.c.username)
+            .order_by(app_user.c.email)
         )
     )
 
@@ -233,7 +251,7 @@ async def credit_grants(conn: AsyncConnection, user_id: int, limit: int = 10) ->
                 user_credit_grant.c.amount_usd,
                 user_credit_grant.c.note,
                 user_credit_grant.c.created_at,
-                granter.c.username.label("granted_by"),
+                granter.c.display_name.label("granted_by"),
             )
             .join_from(
                 user_credit_grant,

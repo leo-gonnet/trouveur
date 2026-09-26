@@ -80,7 +80,7 @@ docker run -d --name trouveur-db -p 5432:5432 \
   pgvector/pgvector:pg16
 export DATABASE_URL=postgresql+asyncpg://trouveur:dev@127.0.0.1:5432/trouveur
 uv run alembic upgrade head
-uv run trouveur create-user                    # the first login, which becomes the admin
+uv run trouveur create-user                    # the first login (an email), which is the admin
 uv run trouveur tenants add <source> <company> # the crawl set is a table, managed from the CLI
 uv run trouveur sweep
 uv run trouveur drain                          # derive, embed, fetch details

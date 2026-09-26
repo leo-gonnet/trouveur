@@ -48,7 +48,7 @@ async def client(seeded):
         transport=transport, base_url="http://test", follow_redirects=False
     ) as session:
         response = await session.post(
-            "/login", data={"username": user.username, "password": PASSWORD}
+            "/login", data={"email": user.email, "password": PASSWORD}
         )
         assert response.status_code == 303, "login form did not authenticate"
         yield session
@@ -61,7 +61,7 @@ async def admin(seeded):
     from tests.integration.seed import seed_user
     from trouveur.web.auth import hash_password
 
-    admin_id, _ = await seed_user("overseer", is_admin=True)
+    admin_id, _ = await seed_user("overseer@example.test", is_admin=True)
     async with connect() as conn:
         await conn.execute(
             sa.update(app_user)
@@ -74,7 +74,7 @@ async def admin(seeded):
         transport=transport, base_url="http://test", follow_redirects=False
     ) as session:
         response = await session.post(
-            "/login", data={"username": "overseer", "password": PASSWORD}
+            "/login", data={"email": "overseer@example.test", "password": PASSWORD}
         )
         assert response.status_code == 303, "login form did not authenticate"
         yield session
@@ -721,7 +721,7 @@ async def test_an_admin_creates_an_account_and_its_password_is_shown_exactly_onc
     """There is no invitation email and no reset link, so the generated password has to reach the
     admin somehow -- and it must not reach the URL, the proxy log or the next page."""
     response = await admin.post(
-        "/users", data={"username": "newcomer", "email": "n@example.test", "credit": "5.00"}
+        "/users", data={"email": "newcomer@example.test", "credit": "5.00"}
     )
     assert response.status_code == 200, "the password must be rendered, never redirected to"
     shown = re.search(r"password <code>([^<]+)</code>", response.text)
@@ -731,7 +731,7 @@ async def test_an_admin_creates_an_account_and_its_password_is_shown_exactly_onc
     assert password not in (await admin.get("/users")).text, "the password was shown twice"
 
     async with connect() as conn:
-        created = await users_q.get_user_by_username(conn, "newcomer")
+        created = await users_q.get_user_by_email(conn, "newcomer@example.test")
         credit = await users_q.credit(conn, created.id)
     assert created is not None and created.is_admin is False
     assert credit.balance_usd == Decimal("5.00")
@@ -741,18 +741,23 @@ async def test_an_admin_creates_an_account_and_its_password_is_shown_exactly_onc
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as session:
         login = await session.post(
-            "/login", data={"username": "newcomer", "password": password},
+            "/login", data={"email": "newcomer@example.test", "password": password},
             follow_redirects=False,
         )
     assert login.status_code == 303, "the password shown does not work"
 
 
-async def test_a_duplicate_username_is_refused_rather_than_colliding(admin, seeded):
+async def test_a_duplicate_address_is_refused_rather_than_colliding(admin, seeded):
+    """Including in another case. The unique index is on lower(email), so `Verifier@...` and
+    `verifier@...` cannot both exist -- and the second account would be invisible until its owner
+    could not sign in, because what they typed matches a row that is not theirs."""
     async with connect() as conn:
-        existing = (await users_q.get_user(conn, seeded["user_id"])).username
-    response = await admin.post("/users", data={"username": existing})
-    assert response.status_code == 200
-    assert "already exists" in response.text
+        existing = (await users_q.get_user(conn, seeded["user_id"])).email
+
+    for variant in (existing, existing.upper(), f"  {existing.title()}  "):
+        response = await admin.post("/users", data={"email": variant})
+        assert response.status_code == 200
+        assert "already has an account" in response.text, variant
 
 
 async def test_changing_a_password_requires_the_current_one(client, seeded):
@@ -864,8 +869,104 @@ async def test_a_non_numeric_credit_grant_is_refused_rather_than_crashing(admin,
     async with connect() as conn:
         assert (await users_q.credit(conn, seeded["user_id"])).balance_usd == 0
 
-    created = await admin.post("/users", data={"username": "oddball", "credit": "nan"})
+    created = await admin.post("/users", data={"email": "oddball@example.test", "credit": "nan"})
     assert created.status_code == 200
     async with connect() as conn:
-        row = await users_q.get_user_by_username(conn, "oddball")
+        row = await users_q.get_user_by_email(conn, "oddball@example.test")
         assert (await users_q.credit(conn, row.id)).balance_usd == 0
+
+
+async def test_an_address_signs_in_whatever_case_it_is_typed_in(client, seeded):
+    """The login is folded on both sides. Unfolded, someone who capitalised their own address once
+    at sign-up cannot sign in the day they type it normally."""
+    async with connect() as conn:
+        email = (await users_q.get_user(conn, seeded["user_id"])).email
+
+    transport = httpx.ASGITransport(app=app)
+    for variant in (email.upper(), email.title(), f"  {email}  "):
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as session:
+            response = await session.post(
+                "/login", data={"email": variant, "password": PASSWORD}, follow_redirects=False
+            )
+        assert response.status_code == 303, f"{variant!r} could not sign in"
+
+
+async def test_the_stored_address_is_folded_so_the_index_can_refuse_a_duplicate(admin):
+    """Folded at the write too, not only at the lookup: the unique index is on lower(email), so a
+    mixed-case row would be an account nobody can find by what its owner types."""
+    await admin.post("/users", data={"email": "  MixedCase@Example.TEST  "})
+    async with connect() as conn:
+        row = await users_q.get_user_by_email(conn, "mixedcase@example.test")
+    assert row is not None and row.email == "mixedcase@example.test"
+
+
+async def test_a_name_typed_into_the_email_box_is_refused(admin):
+    """The one mistake the shallow check exists for. Accepted, it creates an account whose owner
+    can never sign in, because there is no address for them to type."""
+    for bad in ("newcomer", "", "   ", "two words@example.test", "a@@b"):
+        response = await admin.post("/users", data={"email": bad})
+        assert response.status_code == 200, f"{bad!r} produced {response.status_code}"
+        assert "email address" in response.text, bad
+    async with connect() as conn:
+        assert len(await users_q.list_users_with_credit(conn)) == 2, "a bad address made an account"
+
+
+async def test_a_display_name_defaults_to_the_local_part_and_is_editable(client, admin):
+    """What the nav shows is not the login. An address is long and would otherwise sit in every
+    screenshot, and nothing looks an account up by this."""
+    created = await admin.post("/users", data={"email": "ada.lovelace@example.test"})
+    assert created.status_code == 200
+    async with connect() as conn:
+        row = await users_q.get_user_by_email(conn, "ada.lovelace@example.test")
+    assert row.display_name == "ada.lovelace"
+
+    # The reader's own name, changed by them, is in the topbar on the very next page.
+    assert (await client.post(
+        "/settings/account", data={"display_name": "Renamed", "digest_enabled": "on"}
+    )).status_code == 303
+    body = (await client.get("/recommendations")).text
+    assert "<summary>Renamed</summary>" in body, (
+        "the name came from the session cookie, so it is a month stale after a rename"
+    )
+
+
+async def test_clearing_the_display_name_falls_back_rather_than_leaving_it_blank(client, seeded):
+    async with connect() as conn:
+        email = (await users_q.get_user(conn, seeded["user_id"])).email
+    assert (await client.post("/settings/account", data={"display_name": "   "})).status_code == 303
+    async with connect() as conn:
+        assert (
+            await users_q.get_user(conn, seeded["user_id"])
+        ).display_name == email.partition("@")[0]
+
+
+async def test_the_digest_switch_is_the_opt_out_and_costs_no_re_score(client, seeded):
+    """Every account has an address now, so a missing one can no longer be the way out of the
+    mail. It is not a SCORING_FIELD either: opting out of an email must not bill a re-score."""
+    async with connect() as conn:
+        before = (await users_q.get_profile(conn, seeded["user_id"])).version
+
+    assert (await client.post("/settings/account", data={"display_name": "x"})).status_code == 303
+    async with connect() as conn:
+        profile = await users_q.get_profile(conn, seeded["user_id"])
+    assert profile.digest_enabled is False, "an unticked box posts nothing, which is 'off'"
+    assert profile.version == before, "opting out of the digest billed a re-score"
+
+
+async def test_the_database_itself_refuses_a_case_variant_address(seeded):
+    """The guarantee that survives the application being wrong.
+
+    Folding in the route, in create_user and in the lookup are three layers that each make this
+    work, and a test passes while two of them are broken. The unique index is on lower(email), so
+    the duplicate is refused underneath all of them -- which is what stops an account nobody can
+    sign in to from ever existing.
+    """
+    async with connect() as conn:
+        email = (await users_q.get_user(conn, seeded["user_id"])).email
+
+    with pytest.raises(sa.exc.IntegrityError, match="uq_app_user_email"):
+        async with connect() as conn:
+            await conn.exec_driver_sql(
+                "INSERT INTO app_user (email, display_name, password_hash) VALUES ($1, $2, $3)",
+                (email.upper(), "shadow", "argon2$fake"),
+            )

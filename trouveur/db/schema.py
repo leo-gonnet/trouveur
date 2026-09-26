@@ -200,8 +200,13 @@ app_user = sa.Table(
     "app_user",
     metadata,
     sa.Column("id", sa.BigInteger, primary_key=True),
-    sa.Column("username", sa.Text, nullable=False, unique=True),
-    sa.Column("email", sa.Text),
+    # The login. Stored folded to lower case, and the unique index is on `lower(email)` (in the
+    # migration), so `Leo@x.com` cannot sit beside `leo@x.com` however it is written here -- the
+    # second account would be invisible until somebody could not log in.
+    sa.Column("email", sa.Text, nullable=False),
+    # What the UI shows, because an address is long and would otherwise be in every screenshot.
+    # Never an identifier: it is not unique and nothing looks an account up by it.
+    sa.Column("display_name", sa.Text, nullable=False, server_default=""),
     sa.Column("password_hash", sa.Text, nullable=False),
     # Creates accounts and grants credit, and needs no credit of its own. Its own daily ceiling
     # still applies: an admin is a reader with an unlimited balance, not an unmetered one.
@@ -241,6 +246,10 @@ user_profile = sa.Table(
     # both are the user's cost settings, neither is a SCORING_FIELD, and a column with a default
     # answers "nothing was posted" without the form having to distinguish it from "reset me".
     sa.Column("daily_ceiling_usd", sa.Numeric, nullable=False, server_default="0.25"),
+    # The third switch that is the user's own and not a SCORING_FIELD. It exists because every
+    # account now has an address: a missing one used to be the only way not to get the mail, and
+    # losing that silently is worse than not having had it.
+    sa.Column("digest_enabled", sa.Boolean, nullable=False, server_default="true"),
     sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False,
               server_default=sa.func.now()),
 )

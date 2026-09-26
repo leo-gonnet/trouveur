@@ -48,7 +48,7 @@ async def seed_corpus(gh_board, aa_listing, aa_detail):
     return aa_id
 
 
-async def seed_user(username="verifier", *, is_admin=False, **values):
+async def seed_user(email="verifier@example.test", *, is_admin=False, **values):
     """An ordinary account. `is_admin` is passed explicitly rather than left to create_user, which
     makes the FIRST account on an installation the admin -- so a fixture that took the default
     would silently be testing an admin's view of every page."""
@@ -58,7 +58,7 @@ async def seed_user(username="verifier", *, is_admin=False, **values):
 
     async with connect() as conn:
         user_id = await uq.create_user(
-            conn, username, "argon2$fake", f"{username}@example.test", is_admin=is_admin
+            conn, email, "argon2$fake", is_admin=is_admin
         )
         await uq.save_profile(conn, user_id, {"countries": ["DE", "AT"], **values})
         return user_id, profile_from_row(await uq.get_profile(conn, user_id))

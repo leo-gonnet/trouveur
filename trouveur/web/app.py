@@ -230,6 +230,9 @@ async def require_session(request: Request, call_next):
     # Set here, not per route: a route that forgot would hide the banner on exactly one page, and
     # the one page it hid it on would be the page that needed it.
     request.state.is_admin = False
+    # Read from the row on every request rather than from the cookie, so renaming yourself changes
+    # the topbar at once instead of at the next login a month later.
+    request.state.display_name = ""
     request.state.balance_usd = None
     request.state.out_of_credit = False
     request.state.scoring_unconfigured = False
@@ -245,6 +248,7 @@ async def require_session(request: Request, call_next):
                 auth.clear_cookie(revoked)
                 return revoked
             request.state.is_admin = bool(user.is_admin)
+            request.state.display_name = user.display_name
             if _is_admin_only(path) and not request.state.is_admin:
                 return RedirectResponse("/recommendations", status_code=303)
             # An admin needs no credit, so they are shown no balance and no warning about one.
@@ -269,16 +273,16 @@ async def login_form(request: Request):
 
 
 @app.post("/login", response_class=HTMLResponse)
-async def login(request: Request, username: str = Form(...), password: str = Form(...)):
+async def login(request: Request, email: str = Form(""), password: str = Form("")):
     settings = get_settings()
     async with connect() as conn:
-        user_id, message = await auth.authenticate(conn, settings, username, password)
+        user_id, message = await auth.authenticate(conn, settings, email, password)
     if user_id is None:
         return templates.TemplateResponse(
-            request, "login.html", {"error": message, "attempted": username}, status_code=401
+            request, "login.html", {"error": message, "attempted": email}, status_code=401
         )
     response = RedirectResponse("/recommendations", status_code=303)
-    auth.set_cookie(response, settings, auth.issue_session(settings, user_id, username))
+    auth.set_cookie(response, settings, auth.issue_session(settings, user_id))
     return response
 
 
@@ -349,7 +353,6 @@ async def recommendations(
             "paged": bool(forward or backward),
             "paused": profile_row is not None and not profile_row.scoring_enabled,
             "profile_version": profile_row.version if profile_row else 1,
-            "username": session["u"],
             "today": clock.today(),
         },
     )
@@ -432,7 +435,6 @@ async def search(
         "include_closed": include_closed,
         "page": page,
         "has_more": len(jobs) == limit,
-        "username": session["u"],
     }
     # HTMX swaps only the results table; a full navigation renders the whole page.
     if request.headers.get("HX-Request"):
@@ -448,7 +450,7 @@ async def job_detail(request: Request, public_id: str):
     if job is None:
         return HTMLResponse("Not found", status_code=404)
     return templates.TemplateResponse(
-        request, "job.html", {"active": "search", "job": job, "username": session["u"]}
+        request, "job.html", {"active": "search", "job": job}
     )
 
 
@@ -484,7 +486,6 @@ async def profile_form(request: Request):
             "active": "profile",
             "profile": profile,
             "rescore_estimate": pending,
-            "username": session["u"],
             "country_names": COUNTRY_NAMES,
             "language_names": LANGUAGES,
             "background_max_chars": BACKGROUND_MAX_CHARS,
@@ -543,6 +544,7 @@ async def profile_save(
 async def settings_form(request: Request):
     session = request.state.session
     async with connect() as conn:
+        user = await users_q.get_user(conn, session["uid"])
         profile = profile_from_row(await users_q.get_profile(conn, session["uid"]))
         credit = await users_q.credit(conn, session["uid"])
         grants = await users_q.credit_grants(conn, session["uid"])
@@ -557,13 +559,14 @@ async def settings_form(request: Request):
             "active": "settings",
             "model": settings.default_llm_model,
             "provider": settings.default_llm_provider or "",
+            "email": user.email,
+            "display_name": user.display_name,
             "profile": profile,
             "credit": credit,
             "grants": grants,
             "today": today,
             "month_to_date": month,
             "history": history,
-            "username": session["u"],
         },
     )
 
@@ -596,6 +599,28 @@ async def settings_scoring_save(
         # Only the switch turning back on is a reason to run; editing the ceiling is not.
         if enabled and not was_enabled:
             await _queue_match(conn, session["uid"])
+    return RedirectResponse("/settings?saved=1", status_code=303)
+
+
+@app.post("/settings/account", response_class=HTMLResponse)
+async def settings_account(
+    request: Request, display_name: str = Form(""), digest_enabled: str = Form("")
+):
+    """The name the UI shows, and whether the day's edition is also mailed.
+
+    The address itself is not editable here: it is the login, and changing it is the one edit that
+    can lock somebody out of their own account by a typo. An admin changes it on the Users page,
+    where there is somebody else to undo it.
+    """
+    session = request.state.session
+    async with connect() as conn:
+        user = await users_q.get_user(conn, session["uid"])
+        await users_q.set_display_name(
+            conn, session["uid"], auth.display_name_for(display_name, user.email)
+        )
+        await users_q.save_profile(
+            conn, session["uid"], {"digest_enabled": digest_enabled == "on"}
+        )
     return RedirectResponse("/settings?saved=1", status_code=303)
 
 
@@ -635,7 +660,10 @@ async def users_page(request: Request):
 
 @app.post("/users", response_class=HTMLResponse)
 async def users_create(
-    request: Request, username: str = Form(...), email: str = Form(""), credit: str = Form("")
+    request: Request,
+    email: str = Form(""),
+    display_name: str = Form(""),
+    credit: str = Form(""),
 ):
     """Create an account and show its password once.
 
@@ -644,24 +672,30 @@ async def users_create(
     Referer of whatever the reader clicks next.
     """
     session = request.state.session
-    wanted = username.strip()
+    try:
+        login = auth.clean_email(email)
+    except auth.InvalidEmail as exc:
+        return await _users_response(request, error=str(exc))
     async with connect() as conn:
-        if not wanted:
-            return await _users_response(request, error="A username is required.")
-        if await users_q.get_user_by_username(conn, wanted):
-            return await _users_response(request, error=f"{wanted!r} already exists.")
+        if await users_q.get_user_by_email(conn, login):
+            return await _users_response(request, error=f"{login} already has an account.")
 
         password = auth.generate_password()
         user_id = await users_q.create_user(
-            conn, wanted, auth.hash_password(password), email.strip() or None, is_admin=False
+            conn,
+            login,
+            auth.hash_password(password),
+            auth.display_name_for(display_name, login),
+            is_admin=False,
         )
         opening = max(_decimal(credit, Decimal(0)), Decimal(0))
         if opening > 0:
             await users_q.grant_credit(
                 conn, user_id, amount_usd=opening, granted_by=session["uid"], note="opening credit"
             )
-    log.info("user %s created account %s (id %s)", session["uid"], wanted, user_id)
-    return await _users_response(request, new_login=(wanted, password))
+    # The id, not the address: a log line is not the place to accumulate people's emails.
+    log.info("user %s created account %s", session["uid"], user_id)
+    return await _users_response(request, new_login=(login, password))
 
 
 @app.post("/users/{user_id}/credit")
@@ -715,7 +749,6 @@ async def _users_response(
             # The generated password, shown exactly once: in this response and nowhere after it.
             "new_login": new_login,
             "user_id": request.state.session["uid"],
-            "username": request.state.session["u"],
         },
     )
 
@@ -725,7 +758,7 @@ async def how_it_works(request: Request):
     return templates.TemplateResponse(
         request,
         "how_it_works.html",
-        {"active": "how_it_works", "username": request.state.session["u"]},
+        {"active": "how_it_works"},
     )
 
 
@@ -757,7 +790,6 @@ async def dashboard(request: Request):
             "stats": stats,
             "spend": spend,
             "sources": sorted(NORMALIZERS),
-            "username": session["u"],
         },
     )
 
@@ -808,7 +840,6 @@ async def _run_status() -> dict:
 
 @app.get("/admin", response_class=HTMLResponse)
 async def admin(request: Request):
-    session = request.state.session
     async with connect() as conn:
         schedule = await admin_q.get_schedule(conn)
         runs = await admin_q.recent_runs(conn)
@@ -822,7 +853,6 @@ async def admin(request: Request):
             "runs": runs,
             "sweeps": sweeps,
             "sources": sorted(NORMALIZERS),
-            "username": session["u"],
             **await _run_status(),
         },
     )

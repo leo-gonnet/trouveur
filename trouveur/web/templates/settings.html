@@ -90,6 +90,24 @@
   </section>
 
   <section class="section">
+    <div class="section-head"><h2>Account</h2></div>
+    <form method="post" action="/settings/account">
+      <label>Signed in as<input value="{{ email }}" disabled></label>
+      <span class="hint">Your email is your login. An administrator changes it, because a typo in
+        this one field would lock you out of your own account.</span>
+      <label>Display name <span class="hint">what the nav shows; empty falls back to the part
+        before the @</span>
+        <input name="display_name" value="{{ display_name }}" autocomplete="off"></label>
+      <label class="check">
+        <input type="checkbox" name="digest_enabled" value="on"
+               {% if profile.digest_enabled %}checked{% endif %}>
+        email me the day's edition
+      </label>
+      <p class="actions"><button class="primary" type="submit">Save</button></p>
+    </form>
+  </section>
+
+  <section class="section">
     <div class="section-head"><h2>Password</h2></div>
     <form method="post" action="/settings/password">
       <label>Current password<input name="current_password" type="password" autocomplete="current-password"></label>

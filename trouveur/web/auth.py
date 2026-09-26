@@ -44,6 +44,43 @@ def verify_password(password_hash: str, password: str) -> bool:
     return True
 
 
+class InvalidEmail(ValueError):
+    """An address that cannot be a login."""
+
+
+def clean_email(raw: str) -> str:
+    """The stored, comparable form of an address, or `InvalidEmail`.
+
+    Folded to lower case because an address is the login: unfolded, `Leo@x.com` and `leo@x.com` are
+    two accounts, and the second one is invisible until somebody cannot sign in -- what they typed
+    matches a row, just not theirs. The database holds the same rule as a unique index on
+    `lower(email)`, so a write that skipped this is refused rather than silently accepted.
+
+    The check is deliberately shallow. A strict RFC 5322 parser is a dependency and rejects
+    addresses that deliver perfectly well; what actually has to be excluded here is the empty
+    string, whitespace, and text with no `@` at all -- a name typed into the wrong box.
+    """
+    value = raw.strip().lower()
+    if not value or len(value) > 254:
+        raise InvalidEmail("An email address is required.")
+    local, separator, domain = value.partition("@")
+    if not separator or not local or not domain or "@" in domain:
+        raise InvalidEmail(f"{raw.strip()!r} is not an email address.")
+    if any(character.isspace() for character in value):
+        raise InvalidEmail("An email address cannot contain spaces.")
+    return value
+
+
+def display_name_for(given: str, email: str) -> str:
+    """What the UI calls this account. The part before the `@` when nothing was chosen.
+
+    Resolved once, when the account is created or renamed, and stored. Derived at every read
+    instead, it would change under the reader the day they changed their address -- and a name is
+    not something an address should be able to rewrite.
+    """
+    return given.strip() or email.partition("@")[0]
+
+
 def generate_password() -> str:
     """An initial password for an account an admin creates, shown to them once to pass on.
 
@@ -58,8 +95,15 @@ def _serializer(settings: Settings) -> URLSafeTimedSerializer:
     return URLSafeTimedSerializer(settings.session_secret, salt="trouveur-session")
 
 
-def issue_session(settings: Settings, user_id: int, username: str) -> str:
-    return _serializer(settings).dumps({"uid": user_id, "u": username})
+def issue_session(settings: Settings, user_id: int) -> str:
+    """The cookie carries the id and nothing else.
+
+    It used to carry the name as well, which every page then rendered. A name that can be edited
+    cannot be cached in a token that lasts a month: the topbar would keep the old one until the
+    next login. The middleware already loads the row on every request, so the name comes from
+    there -- one copy, always current.
+    """
+    return _serializer(settings).dumps({"uid": user_id})
 
 
 def read_session(settings: Settings, request: Request) -> dict | None:
@@ -92,15 +136,15 @@ def clear_cookie(response) -> None:
 
 
 async def authenticate(
-    conn, settings: Settings, username: str, password: str
+    conn, settings: Settings, email: str, password: str
 ) -> tuple[int | None, str]:
     """Verify credentials. Returns (user_id, message)."""
-    user = await users_q.get_user_by_username(conn, username)
+    user = await users_q.get_user_by_email(conn, email)
     if user is None:
         # Hash anyway, so the response time cannot be used to enumerate accounts.
         _hasher.hash(password)
-        log.warning("failed login attempt for unknown username")
-        return None, "Invalid username or password."
+        log.warning("failed login attempt for an unknown address")
+        return None, "Invalid email or password."
 
     if user.locked_until is not None:
         remaining = (user.locked_until - datetime.now(UTC)).total_seconds()
@@ -117,6 +161,8 @@ async def authenticate(
         max_attempts=settings.max_login_attempts,
     )
     if not ok:
-        log.warning("failed login attempt for username=%r", username)
-        return None, "Invalid username or password."
+        # The id, never the address: a log line is not the place to accumulate people's emails,
+        # and the id is what anyone reading this would look up anyway.
+        log.warning("failed login attempt for user %s", user.id)
+        return None, "Invalid email or password."
     return user.id, ""

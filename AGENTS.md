@@ -539,6 +539,11 @@ nothing that credit does not: one user's empty balance still cannot touch anothe
   spending. Off means **no paid call at all** runs for that user, expansion included, which is
   why `run_for_user` withholds the `Spending` rather than gating the rerank alone. Its existence is
   the gate, exactly as a stored credential's was.
+- **`digest_enabled` is the opt-out, and it is a switch rather than the absence of data.** A
+  missing email used to be the only way not to receive the digest, so opting out required having no
+  way to be reached at all; when every account gained an address that opt-out would have vanished
+  in silence. It lives beside `scoring_enabled` and is not a `SCORING_FIELD`: declining an email
+  must not bill a re-score.
 - **Recommendations shows no run statistics at all.** `retrieved`/`passed`/`scored` and the cost
   of the last run are diagnostics; they live on the dashboard. The page is a reading list, and
   "450 candidates" is not a sentence a reader can act on.
@@ -671,6 +676,29 @@ nothing that credit does not: one user's empty balance still cannot touch anothe
   empty, because at that moment there is provably nobody else it could be. Every later account is
   created by an admin and is not one. A test fixture must pass `is_admin` explicitly or it silently
   tests an admin's view of every page.
+- **The email is the login and the display name is what the UI shows; they are not the same
+  field.** One identifier, not two -- the address already existed, the digest already needed it,
+  and an admin already typed it -- but an address is long and would otherwise sit in every
+  screenshot, so the name is its own column. It is not unique and nothing ever looks an account up
+  by it.
+- **The address is folded to lower case, and the unique index is on `lower(email)`.** Folding only
+  in the form leaves the database willing to hold `Leo@x.com` beside `leo@x.com`, and the second
+  account is invisible until its owner cannot sign in -- what they type matches a row, just not
+  theirs. `clean_email`, `create_user` and `get_user_by_email` all fold, which means a test can
+  pass with two of the three broken; the index is the guarantee, so it is guarded directly.
+- **Validating an address is deliberately shallow** (`auth.clean_email`): non-empty, one `@`, no
+  whitespace. A strict RFC parser is a dependency and rejects addresses that deliver. What has to
+  be caught is a NAME typed into the email box, which would create an account whose owner can
+  never sign in.
+- **The display name is resolved once, at creation or rename, and stored** (`display_name_for`,
+  falling back to the part before the `@`). Derived at every read it would change under the reader
+  the day they changed their address, and a name is not something an address should rewrite.
+- **The session cookie carries the id and nothing else.** It used to carry the name too, which
+  every page rendered -- and a name that can be edited cannot be cached in a token that lasts a
+  month, or the topbar keeps the old one until the next login. The middleware already loads the
+  row, so no route passes a name at all.
+- **A login failure logs the user id, never the address.** A log file is not the place to
+  accumulate people's email addresses, and the id is what anyone reading it would look up anyway.
 - **Styling lives in one file:** `web/static/app.css`, light only, one system sans-serif, the
   logo's navy on white. The logo's red-orange is used in the logo and nowhere else, and there
   is no display font: that combination read as another product's theme. No inline `<style>`
@@ -861,6 +889,14 @@ still holds the old readings and no re-derive has been scheduled.
   - **Changing a password requires the current one**, so a borrowed session cannot lock the owner
     out.
   - **Settings states the monthly worst case and offers no monthly ceiling field.**
+  - **An address signs in whatever case it is typed in**, and the DATABASE refuses a case-variant
+    duplicate -- asserted against the index itself, because the three app-side foldings mean a
+    weaker test passes while two of them are broken.
+  - **A name typed into the email box is refused**, rather than creating an account whose owner can
+    never sign in.
+  - **A display name defaults to the part before the `@`, is editable, and reaches the topbar on
+    the next page** rather than at the next login -- it is read from the row, not from the cookie.
+  - **Declining the digest is a switch and bills no re-score.**
   - **An edition is paged by cursor, never by OFFSET**, and the cursor's columns match the sort
     exactly. The dismiss filter runs before the page is cut, so an offset moves under the reader:
     dismissing what is on page one makes the "next" link they already have point one row too far,
@@ -1021,7 +1057,7 @@ uv run trouveur match --user 1            # retrieve, cut, rerank for one user
 uv run trouveur tenants list             # the crawl set, with per-tenant health
 uv run trouveur tenants add greenhouse n26   # accepts a slug or a full careers URL
 uv run trouveur tenants import --dry-run  # preload from tenants.local.toml (gitignored)
-uv run trouveur create-user               # the FIRST login, which becomes the admin
+uv run trouveur create-user --email me@example.com   # the FIRST login; it becomes the admin
 uv run trouveur serve                     # dev server on 127.0.0.1:8080
 uv run trouveur runner                    # scheduler + queue workers
 ```

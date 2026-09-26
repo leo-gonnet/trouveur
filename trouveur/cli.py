@@ -388,13 +388,24 @@ def tenants_remove(source: str, scope: str) -> None:
 
 
 @main.command("create-user")
-@click.option("--username", prompt=True)
-@click.option("--email", default="", help="Optional; without one this user gets no digest.")
-def create_user(username: str, email: str) -> None:
+@click.option("--email", prompt=True, help="The login, and where the digest is sent.")
+@click.option("--name", default="", help="What the UI shows. Defaults to the part before the @.")
+def create_user(email: str, name: str) -> None:
     """Create a login. The first one is the admin, who creates the rest on the Users page."""
     from trouveur.db.engine import connect
     from trouveur.db.queries import users as users_q
-    from trouveur.web.auth import MIN_PASSWORD_CHARS, hash_password
+    from trouveur.web.auth import (
+        MIN_PASSWORD_CHARS,
+        InvalidEmail,
+        clean_email,
+        display_name_for,
+        hash_password,
+    )
+
+    try:
+        login = clean_email(email)
+    except InvalidEmail as exc:
+        raise SystemExit(str(exc)) from exc
 
     password = getpass.getpass("Password: ")
     if len(password) < MIN_PASSWORD_CHARS:
@@ -406,10 +417,10 @@ def create_user(username: str, email: str) -> None:
 
     async def _run() -> tuple[int, bool]:
         async with connect() as conn:
-            if await users_q.get_user_by_username(conn, username):
-                raise SystemExit(f"A user named {username!r} already exists.")
+            if await users_q.get_user_by_email(conn, login):
+                raise SystemExit(f"{login} already has an account.")
             user_id = await users_q.create_user(
-                conn, username, hash_password(password), email.strip() or None
+                conn, login, hash_password(password), display_name_for(name, login)
             )
             # Read back rather than inferred here: create_user decides it, and a second answer in
             # this command could disagree with the row.
@@ -417,7 +428,7 @@ def create_user(username: str, email: str) -> None:
 
     user_id, is_admin = asyncio.run(_run())
     click.echo(
-        f"created user {username} (id {user_id})"
+        f"created user {login} (id {user_id})"
         + (" as the admin; create the rest from the Users page" if is_admin else "")
     )
 

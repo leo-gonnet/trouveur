@@ -20,9 +20,15 @@ async def send_digests(settings: Settings) -> int:
 
     sent = 0
     for user in users:
-        if not user.is_active or not user.email:
+        if not user.is_active:
             continue
         async with connect() as conn:
+            # Every account has an address now, so the switch is what decides this. It used to be
+            # decided by the address being missing, which meant opting out required having no way
+            # to be reached at all.
+            profile = await users_q.get_profile(conn, user.id)
+            if profile is None or not profile.digest_enabled:
+                continue
             rows = await match_q.pending_digest(conn, user.id)
             if not rows:
                 continue
