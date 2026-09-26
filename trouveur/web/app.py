@@ -30,7 +30,6 @@ from trouveur.db.queries import admin as admin_q
 from trouveur.db.queries import freshness
 from trouveur.db.queries import match as match_q
 from trouveur.db.queries import users as users_q
-from trouveur.match import rerank
 from trouveur.match.pipeline import profile_from_row
 from trouveur.models import (
     BACKGROUND_MAX_CHARS,
@@ -469,7 +468,6 @@ async def settings_form(request: Request):
             "active": "settings",
             "model": settings.default_llm_model,
             "provider": settings.default_llm_provider or "",
-            "rerank_limit": rerank.RERANK_LIMIT,
             "monthly_budget_usd": settings.monthly_budget_usd,
             "profile": profile,
             # Never the key itself, not even to the user who set it.

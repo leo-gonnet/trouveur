@@ -224,11 +224,10 @@ async def _rerank_needles(
     cost = Decimal(0)
     errors: list[str] = []
 
-    for start in range(0, len(rows), rerank.BATCH_SIZE):
-        batch = rows[start : start + rerank.BATCH_SIZE]
+    for row in rows:
         try:
-            scored, usage = await rerank.score_batch(
-                settings, profile, batch,
+            score, usage = await rerank.score_one(
+                settings, profile, row,
                 api_key=api_key, model=model,
                 provider_pin=settings.default_llm_provider,
                 # The truncated background, not a distilled one: building one would make this
@@ -237,13 +236,12 @@ async def _rerank_needles(
             )
         except llm.LlmError as exc:
             errors.append(str(exc))
-            log.warning("rerank batch failed for persona %s: %s", profile.user_id, exc)
+            log.warning("scoring failed for persona %s: %s", profile.user_id, exc)
             break
         cost += usage.cost_usd
-        for score in scored:
-            needle = graded.get(score.id)
-            if needle is not None:
-                scores[needle["id"]] = score.score
+        needle = graded.get(row.job_id)
+        if score is not None and needle is not None:
+            scores[needle["id"]] = score.score
 
     return {
         "model": model,

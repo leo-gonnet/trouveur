@@ -144,7 +144,7 @@ async def test_a_posting_cannot_be_recommended_twice_under_one_profile_version(s
 
 
 async def test_a_posting_never_published_belongs_to_no_edition(seeded):
-    """Retrieval is cumulative and RERANK_LIMIT caps scoring; unscored is not a recommendation."""
+    """Retrieval is cumulative and can outrun scoring; unscored is not a recommendation."""
     user_id = seeded["user_id"]
     await _all_match_ids(user_id)
     async with connect() as conn:

@@ -156,7 +156,7 @@ def _arguments(ctx: dict) -> dict[str, dict]:
         },
         "match.publish_edition": {"rows": [ctx["edition_row"]]},
         "match.upsert_matches": {"rows": [ctx["match_row"]]},
-        "match.pending_rerank": {"user_id": user_id, "profile_version": 1, "limit": 5},
+        "match.pending_rerank": {"user_id": user_id, "profile_version": 1},
         "match.count_pending_rerank": {"user_id": user_id, "profile_version": 1},
         "match.scoreable_rows": {"job_ids": [job_id]},
         "match.cached_scores": {

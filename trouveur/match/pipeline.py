@@ -6,6 +6,7 @@ another's results. Retrieval is free and re-runnable; only the last stage costs 
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -290,9 +291,7 @@ async def _score_pending(
     failed batch still publishes what it did manage to score.
     """
     scored: list[dict] = []
-    pending = await match_q.pending_rerank(
-        conn, profile.user_id, profile.version, rerank.RERANK_LIMIT
-    )
+    pending = await match_q.pending_rerank(conn, profile.user_id, profile.version)
     if not pending:
         return scored
 
@@ -328,10 +327,32 @@ async def _score_pending(
     spent = Decimal(spend_row.cost_usd) if spend_row else Decimal(0)
     budget = Decimal(credential.monthly_budget_usd)
     # Pessimistic, not zero: a zero estimate would always pass the ceiling test.
-    estimate = Decimal("0.02")
+    estimate = Decimal("0.002")
+    failures: list[str] = []
 
-    for start in range(0, len(uncached), rerank.BATCH_SIZE):
-        if rerank.would_exceed_budget(spent, budget, estimate):
+    async def attempt(row):
+        """One posting's call, with the one failure the caller can do something about caught.
+
+        Returned rather than raised so a wave survives a single timeout: at a few thousand calls a
+        run, ending the whole stage on the first blip would leave most of the corpus unscored. Only
+        LlmError is caught -- anything else is a bug and must not be swallowed per posting.
+        """
+        try:
+            return await rerank.score_one(
+                settings, profile, row,
+                api_key=api_key, model=settings.default_llm_model,
+                provider_pin=settings.default_llm_provider,
+                background=background,
+            )
+        except llm.LlmError as exc:
+            return exc
+
+    for start in range(0, len(uncached), rerank.CONCURRENCY):
+        wave = uncached[start : start + rerank.CONCURRENCY]
+        # Before the wave goes out, and priced for the whole wave: its calls are issued together,
+        # so the ceiling has to be tested against what all of them can cost. Never after -- a
+        # retry loop on someone else's card is not something to discover from the user.
+        if rerank.would_exceed_budget(spent, budget, estimate * len(wave)):
             report.stopped_on_budget = True
             log.info(
                 "user %s reached the monthly ceiling ($%.2f of $%.2f); %d jobs left unscored",
@@ -339,32 +360,23 @@ async def _score_pending(
             )
             break
 
-        batch = uncached[start : start + rerank.BATCH_SIZE]
-        try:
-            scores, usage = await rerank.score_batch(
-                settings, profile, batch,
-                api_key=api_key, model=settings.default_llm_model,
-                provider_pin=settings.default_llm_provider,
-                background=background,
-            )
-        except llm.LlmError as exc:
-            report.errors.append(str(exc))
-            log.warning("rerank batch failed for user %s: %s", profile.user_id, exc)
-            break
+        results = await asyncio.gather(*(attempt(row) for row in wave))
 
-        spent = await users_q.add_spend(
-            conn, profile.user_id, tokens_in=usage.tokens_in,
-            tokens_out=usage.tokens_out, cost_usd=usage.cost_usd,
-        )
-        report.cost_usd += usage.cost_usd
-        if usage.cost_usd > 0:
-            estimate = usage.cost_usd
-
-        by_id = {row.job_id: row for row in batch}
         updates, cache_rows = [], []
-        for score in scores:
-            row = by_id.get(score.id)
-            if row is None:
+        tokens_in = tokens_out = 0
+        cost = Decimal(0)
+        for row, outcome in zip(wave, results, strict=True):
+            if isinstance(outcome, llm.LlmError):
+                failures.append(str(outcome))
+                continue
+            score, usage = outcome
+            tokens_in += usage.tokens_in
+            tokens_out += usage.tokens_out
+            cost += usage.cost_usd
+            estimate = max(estimate, usage.cost_usd)
+            # A response that could not be parsed is billed and left unscored, never cached and
+            # never recorded as a zero: the next run asks again.
+            if score is None:
                 continue
             updates.append(
                 {
@@ -380,9 +392,25 @@ async def _score_pending(
                     "model": settings.default_llm_model,
                 }
             )
+
+        if tokens_in or tokens_out or cost:
+            spent = await users_q.add_spend(
+                conn, profile.user_id,
+                tokens_in=tokens_in, tokens_out=tokens_out, cost_usd=cost,
+            )
+        report.cost_usd += cost
         await match_q.apply_scores(conn, profile.user_id, updates)
         await match_q.put_cached_scores(conn, cache_rows)
         report.scored += len(updates)
         scored.extend(updates)
+
+        # Every call in the wave failed: that is the key, the credit or the provider, not a blip,
+        # and the next wave would fail the same way on the user's own card.
+        if all(isinstance(outcome, llm.LlmError) for outcome in results):
+            log.warning("every scoring call failed for user %s; stopping", profile.user_id)
+            break
+
+    if failures:
+        report.errors.append(f"{len(failures)} scoring call(s) failed: {failures[0]}")
 
     return scored

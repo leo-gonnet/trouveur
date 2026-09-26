@@ -9,9 +9,21 @@ from trouveur.match.expand import build_prompt as expand_prompt
 from trouveur.match.expand import combine, deterministic_queries, parse_response
 from trouveur.match.fuse import reciprocal_rank_fusion
 from trouveur.match.rerank import build_prompt as rerank_prompt
-from trouveur.match.rerank import parse_response as parse_scores
-from trouveur.match.rerank import would_exceed_budget
+from trouveur.match.rerank import parse_score, would_exceed_budget
 from trouveur.models import UserProfile
+
+
+class _Advert:
+    """The columns `pending_rerank` selects, as the prompt builder reads them."""
+
+    job_id = 1
+    title = "Nachhaltigkeitsmanager"
+    company = "Beispiel GmbH"
+    description = "Wir suchen..."
+    locations = [{"raw": "Wien"}]
+    salary_min_eur_year = None
+    salary_max_eur_year = None
+    work_mode = "hybrid"
 
 
 def test_fusion_rewards_agreement_between_retrievers():
@@ -38,7 +50,7 @@ def test_fusion_of_nothing_is_empty():
     assert reciprocal_rank_fusion([[], []]) == []
 
 
-def test_budget_is_checked_before_a_batch_not_after():
+def test_budget_is_checked_before_a_call_not_after():
     assert would_exceed_budget(Decimal("1.00"), Decimal("5.00"), Decimal("0.05")) is False
     assert would_exceed_budget(Decimal("4.99"), Decimal("5.00"), Decimal("0.05")) is True
 
@@ -50,20 +62,36 @@ def test_zero_budget_blocks_every_call():
 
 def test_malformed_score_response_yields_nothing_never_zero():
     """Scoring garbage as 0 would cache a wrong verdict and hide good jobs permanently."""
-    assert parse_scores("I'm sorry, I cannot help with that.") == []
-    assert parse_scores("") == []
-    assert parse_scores("[{broken json") == []
+    assert parse_score("I'm sorry, I cannot help with that.") is None
+    assert parse_score("") is None
+    assert parse_score("{broken json") is None
 
 
 def test_out_of_range_scores_are_discarded_not_clamped():
     # Clamping would invent a score the model never gave.
-    assert parse_scores('[{"id": 1, "score": 500}]') == []
-    assert [score.score for score in parse_scores('[{"id": 1, "score": 88}]')] == [88]
+    assert parse_score('{"score": 500}') is None
+    assert parse_score('{"score": 88}').score == 88
 
 
-def test_partial_batch_keeps_the_entries_that_parsed():
-    scores = parse_scores('[{"id": 1, "score": 90}, {"id": 2, "score": "bad"}]')
-    assert [score.id for score in scores] == [1]
+def test_the_prompt_carries_exactly_one_advert():
+    """Scoring is one posting per call, and that is a quality decision, not a cost one.
+
+    With ten in a prompt, a posting's score moved with where it sat in the list -- slot 0 ran 8-15
+    points above slot 9 -- and batches were filled in retrieval order, so the bias did not wash
+    out. Anything that puts a second advert back in this prompt reintroduces that silently.
+    """
+    prompt = rerank_prompt(UserProfile(user_id=1, title="x"), _Advert())
+    assert prompt.count("description:") == 1
+    assert "JOB ADVERT" in prompt
+    # No id to key a score on, because there is only ever one posting to key it to.
+    assert "id=" not in prompt
+
+
+def test_the_profile_block_comes_before_the_advert():
+    """Identical across every call of a run, so a provider that caches prompt prefixes gets it
+    free. Advert first would make each call a fresh prefix and cache nothing."""
+    prompt = rerank_prompt(UserProfile(user_id=1, title="x"), _Advert())
+    assert prompt.index("CANDIDATE PROFILE") < prompt.index("JOB ADVERT")
 
 
 def test_expansion_works_without_a_model():
@@ -91,11 +119,11 @@ def test_the_reranker_reads_the_summarised_background_not_the_raw_field():
 
     `background` is distilled once per profile version and passed in; the raw field on the
     profile is never sent to this prompt. Reading `profile.background` here instead would look
-    identical in a diff and multiply a 4,000-character CV across every batch of ten postings --
-    fifteen times over at the default rerank_limit, on the user's own card.
+    identical in a diff and send a 4,000-character CV once per posting scored -- thousands of times
+    in a run, on the user's own card.
     """
     profile = UserProfile(user_id=1, title="Wirtschaftsingenieur", background="RAW CV " * 500)
-    prompt = rerank_prompt(profile, [], background="LCA, ISO 14001, circular economy")
+    prompt = rerank_prompt(profile, _Advert(), background="LCA, ISO 14001, circular economy")
 
     assert "LCA, ISO 14001, circular economy" in prompt
     assert "RAW CV" not in prompt
@@ -104,7 +132,7 @@ def test_the_reranker_reads_the_summarised_background_not_the_raw_field():
 def test_the_rerank_prompt_says_unstated_rather_than_omitting_the_background():
     """An empty line the model has to interpret is worse than a stated absence, and the rest of
     the profile block already uses this word for it."""
-    prompt = rerank_prompt(UserProfile(user_id=1, title="x"), [])
+    prompt = rerank_prompt(UserProfile(user_id=1, title="x"), _Advert())
     assert "background: unstated" in prompt
 
 

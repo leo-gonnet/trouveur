@@ -23,6 +23,7 @@ Revision ID: 0014_location_only_filter
 """
 
 import sqlalchemy as sa
+
 from alembic import op
 
 revision = "0014_location_only_filter"

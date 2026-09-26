@@ -152,9 +152,15 @@ async def upsert_matches(conn: AsyncConnection, rows: Sequence[dict]) -> int:
 
 
 async def pending_rerank(
-    conn: AsyncConnection, user_id: int, profile_version: int, limit: int
+    conn: AsyncConnection, user_id: int, profile_version: int
 ) -> list[sa.Row]:
-    """Jobs this user has retrieved and not yet been scored for, best first."""
+    """Jobs this user has retrieved and not yet been scored for, best first.
+
+    Unbounded on purpose. A cap here decided how long the Recommendations page was as a side effect
+    of keeping the bill small, so after a profile change a user met their own corpus 150 postings a
+    day for a fortnight. What bounds the work now is how many candidates survive fusion, and what
+    bounds the spend is the user's monthly ceiling -- in dollars, where they set it.
+    """
     return list(
         await conn.execute(
             sa.text(
@@ -169,10 +175,9 @@ async def pending_rerank(
                   AND j.closed_at IS NULL
                   AND (m.llm_score IS NULL OR m.profile_version < :profile_version)
                 ORDER BY m.retrieval_score DESC NULLS LAST
-                LIMIT :limit
                 """
             ),
-            {"user_id": user_id, "profile_version": profile_version, "limit": limit},
+            {"user_id": user_id, "profile_version": profile_version},
         )
     )
 
