@@ -397,11 +397,6 @@ async def _score_pending(
     if not uncached:
         return scored
 
-    # Read again here rather than reused from the gate: the expansion stage above has spent since,
-    # and it spent out of the same day and the same credit.
-    ceiling_left, credit_left = await _headroom(
-        conn, profile, unlimited=spending.unlimited_credit
-    )
     # Pessimistic, not zero: a zero estimate would always pass the ceiling test.
     estimate = Decimal("0.002")
     failures: list[str] = []
@@ -428,6 +423,15 @@ async def _score_pending(
 
     for start in range(0, len(uncached), rerank.BLOCK):
         block = uncached[start : start + rerank.BLOCK]
+        # Re-read per block rather than decremented from a snapshot taken once. What is left has to
+        # come from the database, because this process is not the only thing that can have spent:
+        # the expansion stage already did, and a second runner draining a match-only run for the
+        # same user is claimed with SKIP LOCKED precisely so it CAN proceed in parallel. Against a
+        # process-local belief, two runs would each authorise a full day's ceiling. Two indexed
+        # reads per 25 postings, against 25 model calls -- the cost is not measurable.
+        ceiling_left, credit_left = await _headroom(
+            conn, profile, unlimited=spending.unlimited_credit
+        )
         # Before the block goes out, and priced for the whole block: its calls are issued
         # together, so a check against one call's cost would authorise all of them. Never after --
         # a retry loop that empties someone's credit is not something to discover from them.
@@ -489,10 +493,6 @@ async def _score_pending(
                 conn, profile.user_id,
                 tokens_in=tokens_in, tokens_out=tokens_out, cost_usd=cost,
             )
-        # Both limits fall by what was actually billed, so neither needs re-reading per block.
-        ceiling_left -= cost
-        if credit_left is not None:
-            credit_left -= cost
         report.cost_usd += cost
         await match_q.apply_scores(conn, profile.user_id, updates)
         await match_q.put_cached_scores(conn, cache_rows)

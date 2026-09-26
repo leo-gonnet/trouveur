@@ -164,11 +164,32 @@ def _choices(raw: list[str], allowed: Iterable[str], what: str) -> list[str]:
     return list(dict.fromkeys(values))
 
 
+# Every field this parses is an amount of money -- a daily ceiling, a credit grant -- so nine
+# digits either side of the point is already absurd for both. The bound is not fussiness:
+# `1e999999999` is a perfectly FINITE Decimal that asyncpg refuses to encode ("exponent is too
+# large"), which is the same 500 one layer further down, raised from inside the write.
+_MONEY_DIGITS = 9
+
+
 def _decimal(raw: str, default: Decimal) -> Decimal:
+    """A money field from a form, or `default` if it is not a usable amount.
+
+    Three ways a string gets past `Decimal()` without raising, and all three used to reach a
+    column: `nan`, which raises InvalidOperation from the first `>` or `max()` that touches it --
+    an uncaught 500 on a form meant to fall back; `inf`, which is worse than a crash because it is
+    accepted as a spending ceiling and silently removes the cap; and an absurd exponent, which
+    fails at the driver instead.
+    """
     try:
-        return Decimal(raw.strip() or "0")
+        value = Decimal(raw.strip() or "0")
     except (InvalidOperation, ValueError):
         return default
+    # `adjusted()` reads the exponent off the tuple and does no arithmetic, which matters because
+    # `abs()` on one of these raises Overflow before any comparison of ours could reject it.
+    if not value.is_finite() or not -_MONEY_DIGITS <= value.adjusted() <= _MONEY_DIGITS:
+        return default
+    # In range but written with a scale no money column has a use for: 0.00001 is not a rate here.
+    return value.quantize(Decimal("0.0001")) if value.as_tuple().exponent < -4 else value
 
 
 # Public by opt-in, never by omission: the failure mode of forgetting about auth is "locked".
@@ -215,7 +236,15 @@ async def require_session(request: Request, call_next):
     if session is not None and not _is_public(path):
         async with connect() as conn:
             user = await users_q.get_user(conn, session["uid"])
-            request.state.is_admin = bool(user is not None and user.is_admin)
+            # Checked on every request, not only at login: a session is a signed token with a
+            # 30-day life, so an admin disabling an account would otherwise revoke nothing the
+            # holder of that cookie can still do -- for a month, while the Users page says
+            # "cannot log in". Covers a deleted account's surviving cookie too.
+            if user is None or not user.is_active:
+                revoked = RedirectResponse("/login", status_code=303)
+                auth.clear_cookie(revoked)
+                return revoked
+            request.state.is_admin = bool(user.is_admin)
             if _is_admin_only(path) and not request.state.is_admin:
                 return RedirectResponse("/recommendations", status_code=303)
             # An admin needs no credit, so they are shown no balance and no warning about one.

@@ -576,3 +576,47 @@ async def test_a_balance_is_granted_minus_spent_and_a_grant_never_overwrites_one
     assert credit.spent_usd == Decimal("1.25")
     assert credit.balance_usd == Decimal("6.25")
     assert len(grants) == 2, "a grant must stay on the record"
+
+
+async def test_spend_from_elsewhere_is_seen_between_blocks_not_only_at_the_start(
+    clean_db, gh_board, aa_listing, aa_detail, monkeypatch
+):
+    """What is left has to be re-read from the database, never decremented from a snapshot.
+
+    This process is not the only thing that can spend a user's credit: the expansion stage already
+    did, and a match-only run claimed by a second runner with SKIP LOCKED is meant to proceed in
+    parallel. Against a process-local belief, two concurrent runs would each authorise a full day's
+    ceiling. Simulated here by spending out of band while the scorer is between blocks.
+    """
+    from trouveur.config import get_settings
+    from trouveur.db.engine import connect
+    from trouveur.db.queries import users as uq
+    from trouveur.match import llm, pipeline, rerank
+
+    await seed_corpus(gh_board, aa_listing, aa_detail)
+    user_id, profile, spending, job_ids = await _funded_user(credit="5", ceiling="1.00")
+    monkeypatch.setattr(rerank, "BLOCK", 1)
+    calls = []
+
+    async def score_one(settings, prof, candidate, **kwargs):
+        calls.append(candidate.job_id)
+        # Somebody else's run bills the rest of this user's ceiling while we are mid-block.
+        if len(calls) == 1:
+            async with connect() as other:
+                await uq.add_spend(
+                    other, user_id, tokens_in=1, tokens_out=1, cost_usd=Decimal("1.00")
+                )
+        return (
+            rerank._Score(score=90, reason="x"),
+            llm.Usage(tokens_in=500, tokens_out=40, cost_usd=Decimal("0.0001")),
+        )
+
+    monkeypatch.setattr(rerank, "score_one", score_one)
+    report = pipeline.MatchReport(user_id=user_id)
+    async with connect() as conn:
+        await pipeline._score_pending(
+            conn, get_settings(), profile, spending, report, job_ids
+        )
+
+    assert len(calls) == 1, "the ceiling was tested against a stale in-process snapshot"
+    assert report.stopped_on_ceiling is True

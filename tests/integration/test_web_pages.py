@@ -815,3 +815,57 @@ async def test_an_admin_is_shown_no_balance_because_they_need_none(admin):
     # to act on and must still reach them.
     assert "Your credit is used up" not in body, "an admin was told to top themselves up"
     assert 'title="LLM credit remaining"' not in body, "an admin was shown a balance"
+
+
+async def test_disabling_an_account_revokes_the_session_it_already_holds(client, admin, seeded):
+    """Not only future logins. A session is a signed token with a 30-day life, so checking
+    is_active at login alone means an admin disabling an account revokes nothing its holder can
+    already do -- for a month, while the Users page says "cannot log in"."""
+    assert (await client.get("/recommendations")).status_code == 200
+
+    response = await admin.post(f"/users/{seeded['user_id']}/active", data={"is_active": "off"})
+    assert response.status_code == 303
+
+    revoked = await client.get("/recommendations")
+    assert revoked.status_code == 303, "a disabled account kept browsing on its existing session"
+    assert revoked.headers["location"].startswith("/login")
+    # And the cookie is cleared, so they are not bounced between /login and a dead session.
+    assert "trouveur_session=" in revoked.headers.get("set-cookie", "")
+
+    # Every page, not just the one: the check is in the middleware.
+    for path in ("/settings", "/search", "/profile"):
+        assert (await client.get(path)).status_code == 303, path
+
+
+async def test_a_non_numeric_ceiling_falls_back_instead_of_500ing(client, seeded):
+    """`Decimal("nan")` and `Decimal("inf")` PARSE, so neither reaches the except clause. A NaN
+    then raises from the first comparison that touches it -- a 500 on a form meant to fall back --
+    and an Infinity is worse than a crash: accepted as a ceiling, it removes the cap entirely."""
+    async with connect() as conn:
+        await users_q.save_profile(conn, seeded["user_id"], {"daily_ceiling_usd": Decimal("0.25")})
+
+    for bad in ("nan", "inf", "-inf", "NaN", "abc", "1e999999999"):
+        response = await client.post(
+            "/settings/scoring", data={"scoring_enabled": "on", "daily_ceiling_usd": bad}
+        )
+        assert response.status_code == 303, f"{bad!r} produced {response.status_code}"
+        async with connect() as conn:
+            ceiling = (await users_q.get_profile(conn, seeded["user_id"])).daily_ceiling_usd
+        assert ceiling == Decimal("0.25"), f"{bad!r} was stored as a ceiling of {ceiling}"
+
+
+async def test_a_non_numeric_credit_grant_is_refused_rather_than_crashing(admin, seeded):
+    """The same helper, reached through the two money fields this page added."""
+    for bad in ("nan", "inf", "abc"):
+        response = await admin.post(
+            f"/users/{seeded['user_id']}/credit", data={"amount_usd": bad, "note": "probe"}
+        )
+        assert response.status_code == 303, f"{bad!r} produced {response.status_code}"
+    async with connect() as conn:
+        assert (await users_q.credit(conn, seeded["user_id"])).balance_usd == 0
+
+    created = await admin.post("/users", data={"username": "oddball", "credit": "nan"})
+    assert created.status_code == 200
+    async with connect() as conn:
+        row = await users_q.get_user_by_username(conn, "oddball")
+        assert (await users_q.credit(conn, row.id)).balance_usd == 0

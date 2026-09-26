@@ -844,6 +844,16 @@ still holds the old readings and no re-derive has been scheduled.
     ceiling would never lift.
   - **A balance is grants minus spend, and a second grant adds to the first** rather than replacing
     it.
+  - **What is left of a limit is re-read from the database between blocks**, never decremented from
+    a snapshot: the expansion stage spends out of the same day, and a second runner draining a
+    match-only run is claimed with SKIP LOCKED precisely so it CAN proceed in parallel. Against a
+    process-local belief two runs each authorise a full day's ceiling.
+  - **Disabling an account revokes the session it already holds**, on every page. A session is a
+    signed token with a 30-day life, so checking `is_active` at login alone revokes nothing its
+    holder can already do.
+  - **A money field accepts no `nan`, `inf` or absurd exponent.** All three PARSE: `nan` raises from
+    the first comparison, `inf` is accepted as a ceiling and silently removes the cap, and
+    `1e999999999` is finite but fails at the driver.
   - **Every admin route refuses an ordinary user**, parametrized over the prefix so a new admin
     route is covered the moment it exists.
   - **A generated password is shown exactly once**, in the response that created the account, and
