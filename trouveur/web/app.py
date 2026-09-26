@@ -238,11 +238,16 @@ EDITION_PAGE = 50
 
 
 @app.get("/recommendations", response_class=HTMLResponse)
-async def recommendations(request: Request, edition: str = "", v: int = 0, page: int = 1):
+async def recommendations(
+    request: Request, edition: str = "", v: int = 0, after: str = "", before: str = ""
+):
     """One edition. The latest by default; every earlier one stays reachable and never changes.
 
     An edition is a (day, profile version) pair rather than a day, so changing a profile adds one
     beside what you were already shown instead of replacing it.
+
+    Paged by cursor rather than by page number, because dismissing a posting shrinks the edition
+    and page numbers would then skip whatever crossed the boundary. See `match_q.edition`.
 
     A day rather than one growing list, which had no time axis: a strong posting from three weeks
     ago outranked everything that arrived this morning until it was dismissed. There is nothing
@@ -250,20 +255,24 @@ async def recommendations(request: Request, edition: str = "", v: int = 0, page:
     key, so the page is a reading list rather than a console.
     """
     session = request.state.session
-    page = max(page, 1)
     limit = EDITION_PAGE
+    forward, backward = _cursor(after), _cursor(before)
     async with connect() as conn:
         profile_row = await users_q.get_profile(conn, session["uid"])
         available = await match_q.editions(conn, session["uid"])
         chosen = _chosen_edition(edition, v, available)
-        jobs = (
+        # One more than a page, so "is there another page" is answered by the rows themselves
+        # rather than by a second count that could disagree with them.
+        rows = (
             await match_q.edition(
                 conn, session["uid"], chosen.day, chosen.profile_version,
-                limit=limit, offset=(page - 1) * limit,
+                limit=limit + 1, after=forward, before=backward,
             )
             if chosen
             else []
         )
+    spilled = len(rows) > limit
+    jobs = rows[-limit:] if backward else rows[:limit]
     index = available.index(chosen) if chosen else -1
     return templates.TemplateResponse(
         request,
@@ -275,14 +284,32 @@ async def recommendations(request: Request, edition: str = "", v: int = 0, page:
             "edition": chosen,
             "older": available[index + 1] if 0 <= index < len(available) - 1 else None,
             "newer": available[index - 1] if index > 0 else None,
-            "page": page,
-            "has_more": len(jobs) == limit,
+            # Reading backwards, there is always a page ahead: it is the one we came from.
+            "next_cursor": _format_cursor(jobs[-1]) if jobs and (spilled or backward) else "",
+            "prev_cursor": (
+                _format_cursor(jobs[0]) if jobs and (forward or (backward and spilled)) else ""
+            ),
+            "paged": bool(forward or backward),
             "paused": profile_row is not None and not profile_row.scoring_enabled,
             "profile_version": profile_row.version if profile_row else 1,
             "username": session["u"],
             "today": clock.today(),
         },
     )
+
+
+def _cursor(raw: str) -> tuple[int, int] | None:
+    """A (score, job id) cursor as it travels in a URL. Anything unreadable starts from the top,
+    which is the same thing a stale link should do."""
+    score, _, job_id = raw.partition("_")
+    try:
+        return int(score), int(job_id)
+    except ValueError:
+        return None
+
+
+def _format_cursor(row) -> str:
+    return f"{row.llm_score}_{row.id}"
 
 
 def _chosen_edition(requested: str, version: int, available: list):

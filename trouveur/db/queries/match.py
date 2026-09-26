@@ -366,6 +366,50 @@ async def editions(conn: AsyncConnection, user_id: int) -> list[sa.Row]:
     )
 
 
+# Paged by cursor, never by OFFSET. The dismiss filter above runs BEFORE the page is cut, so with
+# OFFSET the page boundaries move whenever the reader dismisses something: dismiss three on page
+# one, open page two, and the three postings that shifted up past the boundary are never shown on
+# any page. Dismissing is an htmx swap of the one widget, so the list the reader is looking at does
+# not shrink under them and there is nothing on screen to suggest it happened.
+#
+# A cursor is anchored to a row instead of to a count, so it survives the set changing underneath
+# it. The order has to be total for that to work, which is why the tiebreak is job_id -- unique
+# within an edition, since it is part of the key -- rather than posted_at, which is nullable and
+# repeats. Higher job_id is later ingestion, so among equal scores it still reads newest first.
+_EDITION_SQL_TEMPLATE = f"""
+SELECT j.id, j.public_id, j.url, j.title, j.company, j.posted_at, j.source,
+       j.closed_at, j.locations, f.countries, f.cities,
+       f.work_mode::text AS work_mode,
+       f.salary_min_eur_year, f.salary_max_eur_year,
+       e.llm_score, e.llm_reason, e.llm_red_flags,
+       coalesce(m.state::text, 'new') AS state
+FROM user_edition_item e
+JOIN job j ON j.id = e.job_id
+JOIN job_facet f ON f.job_id = j.id
+{_EDITION_STATE}
+WHERE e.user_id = :user_id
+  AND e.day = CAST(:day AS date)
+  AND e.profile_version = :profile_version
+  AND {_NOT_DISMISSED}
+  AND {{cursor}}
+ORDER BY e.llm_score {{direction}}, e.job_id {{direction}}
+LIMIT :limit
+"""
+
+_NO_CURSOR = "TRUE"
+_BEFORE_CURSOR = (
+    "(e.llm_score, e.job_id) < (CAST(:cursor_score AS smallint), CAST(:cursor_job AS bigint))"
+)
+_AFTER_CURSOR = (
+    "(e.llm_score, e.job_id) > (CAST(:cursor_score AS smallint), CAST(:cursor_job AS bigint))"
+)
+
+
+@lru_cache(maxsize=4)
+def _edition_sql(cursor: str, direction: str) -> str:
+    return _EDITION_SQL_TEMPLATE.format(cursor=cursor, direction=direction)
+
+
 async def edition(
     conn: AsyncConnection,
     user_id: int,
@@ -373,46 +417,36 @@ async def edition(
     profile_version: int,
     *,
     limit: int,
-    offset: int = 0,
+    after: tuple[int, int] | None = None,
+    before: tuple[int, int] | None = None,
 ) -> list[sa.Row]:
     """One page of one edition, best first. No score cut: the edition is the cut.
 
     The score, reason and red flags are the EDITION's, not user_job_match's -- that row holds the
     current verdict, and reading it here would let a later re-score rewrite what this day said.
 
-    Paged because nothing bounds an edition's length any more. The old scoring cap of 150 was
-    doing that job as a side effect, and the day a profile changes an edition can hold thousands.
-    The dropdown's count is still the whole day, from `editions()`: a page is how much is being
-    read at once, not how much the day held.
+    Paged because nothing bounds an edition's length any more: the old scoring cap of 150 did that
+    job as a side effect, and a profile change can publish an edition of thousands. `after` and
+    `before` are (score, job_id) cursors; `before` reads backwards and the rows come back in
+    display order either way. The dropdown's count is still the whole edition, from `editions()`:
+    a page is how much is read at once, not how much the day held.
     """
-    return list(
-        await conn.execute(
-            sa.text(
-                f"""
-                SELECT j.id, j.public_id, j.url, j.title, j.company, j.posted_at, j.source,
-                       j.closed_at, j.locations, f.countries, f.cities,
-                       f.work_mode::text AS work_mode,
-                       f.salary_min_eur_year, f.salary_max_eur_year,
-                       e.llm_score, e.llm_reason, e.llm_red_flags,
-                       coalesce(m.state::text, 'new') AS state
-                FROM user_edition_item e
-                JOIN job j ON j.id = e.job_id
-                JOIN job_facet f ON f.job_id = j.id
-                {_EDITION_STATE}
-                WHERE e.user_id = :user_id
-                  AND e.day = CAST(:day AS date)
-                  AND e.profile_version = :profile_version
-                  AND {_NOT_DISMISSED}
-                ORDER BY e.llm_score DESC, j.posted_at DESC NULLS LAST
-                LIMIT :limit OFFSET :offset
-                """
-            ),
-            {
-                "user_id": user_id, "day": day, "profile_version": profile_version,
-                "limit": limit, "offset": offset,
-            },
-        )
-    )
+    params: dict[str, Any] = {
+        "user_id": user_id,
+        "day": day,
+        "profile_version": profile_version,
+        "limit": limit,
+    }
+    cursor, direction = _NO_CURSOR, "DESC"
+    if before is not None:
+        cursor, direction = _AFTER_CURSOR, "ASC"
+        params["cursor_score"], params["cursor_job"] = before
+    elif after is not None:
+        cursor, direction = _BEFORE_CURSOR, "DESC"
+        params["cursor_score"], params["cursor_job"] = after
+
+    rows = list(await conn.execute(sa.text(_edition_sql(cursor, direction)), params))
+    return list(reversed(rows)) if direction == "ASC" else rows
 
 
 async def publish_edition(conn: AsyncConnection, rows: Sequence[dict]) -> int:

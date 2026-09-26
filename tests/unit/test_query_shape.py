@@ -12,7 +12,13 @@ import re
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
-from trouveur.db.queries.match import _LEXICAL_SQL, _SEARCH_SQL, edition, editions
+from trouveur.db.queries.match import (
+    _EDITION_SQL_TEMPLATE,
+    _LEXICAL_SQL,
+    _NOT_DISMISSED,
+    _SEARCH_SQL,
+    editions,
+)
 
 DIALECT = postgresql.asyncpg.dialect()
 
@@ -67,19 +73,37 @@ def test_search_left_joins_match_state_so_unmatched_jobs_still_appear():
 
 
 def test_an_edition_has_no_score_cut_only_a_page():
-    """Still narrower than Search -- scored only -- but nothing inside the day is hidden.
+    """Still narrower than Search -- scored only -- but nothing inside the edition is hidden.
 
-    A threshold hid postings the user had already paid to have scored, behind a number they had to
-    guess. The day is the cut. The LIMIT here is a page the reader walks with OFFSET, not a
-    ceiling: every posting in the day is reachable, which is the property a threshold broke.
+    A threshold hid postings the user had already paid to have scored, behind a number they had
+    to guess. The edition is the cut, and the LIMIT is a page the reader walks: every posting in
+    it stays reachable, which is the property a threshold broke.
     """
-    import inspect
+    assert ":threshold" not in _EDITION_SQL_TEMPLATE
+    assert "llm_score >=" not in _EDITION_SQL_TEMPLATE
+    assert "LIMIT :limit" in _EDITION_SQL_TEMPLATE
 
-    body = inspect.getsource(edition)
-    assert ":threshold" not in body
-    assert "llm_score >=" not in body
-    assert "LIMIT :limit OFFSET :offset" in body, "a page must be walkable, not a fixed cut"
-    assert "ORDER BY e.llm_score DESC" in body
+
+def test_an_edition_is_paged_by_cursor_and_never_by_offset():
+    """OFFSET skips postings, silently, whenever the reader dismisses one.
+
+    The dismiss filter runs before the page is cut, so dismissing three on page one shifts three
+    postings up past the page-two boundary and none of them is ever shown again. Dismissing is an
+    htmx swap of the one widget, so the list on screen does not shrink and nothing suggests it
+    happened. A cursor is anchored to a row rather than to a count, so it survives the set
+    changing underneath it -- which needs the order to be TOTAL, hence job_id as the tiebreak.
+    """
+    from trouveur.db.queries.match import _AFTER_CURSOR, _BEFORE_CURSOR, _edition_sql
+
+    forward = _edition_sql(_BEFORE_CURSOR, "DESC")
+    backward = _edition_sql(_AFTER_CURSOR, "ASC")
+    for sql in (forward, backward):
+        assert "OFFSET" not in sql.upper(), "an edition must not page by offset"
+        # The cursor and the sort must name the same columns in the same order, or a page can
+        # repeat a row or step over one.
+        assert "(e.llm_score, e.job_id)" in sql, "the cursor is not a total order"
+    assert "ORDER BY e.llm_score DESC, e.job_id DESC" in forward
+    assert "ORDER BY e.llm_score ASC, e.job_id ASC" in backward
 
 
 def test_an_edition_is_read_from_its_own_table_not_derived_from_a_score():
@@ -91,15 +115,15 @@ def test_an_edition_is_read_from_its_own_table_not_derived_from_a_score():
     """
     import inspect
 
-    for query in (edition, editions):
-        body = inspect.getsource(query)
-        assert "user_edition_item" in body, f"{query.__name__} does not read the edition table"
-        assert "m.scored_at" not in body, f"{query.__name__} still buckets by scored_at"
+    for name, body in (("edition", _EDITION_SQL_TEMPLATE),
+                       ("editions", inspect.getsource(editions))):
+        assert "user_edition_item" in body, f"{name} does not read the edition table"
+        assert "m.scored_at" not in body, f"{name} still buckets by scored_at"
         assert "m.llm_score" not in body, (
-            f"{query.__name__} reads the current score, not the published one"
+            f"{name} reads the current score, not the published one"
         )
         assert not re.search(r"WHERE[^;]*j\.posted_at::date", body), (
-            f"{query.__name__} buckets by publication date"
+            f"{name} buckets by publication date"
         )
 
 
@@ -111,9 +135,10 @@ def test_a_published_edition_keeps_a_posting_that_has_since_closed():
     """
     import inspect
 
-    for query in (edition, editions):
-        assert "closed_at IS NULL" not in inspect.getsource(query), (
-            f"{query.__name__} drops postings that closed after the edition was published"
+    for name, body in (("edition", _EDITION_SQL_TEMPLATE),
+                       ("editions", inspect.getsource(editions))):
+        assert "closed_at IS NULL" not in body, (
+            f"{name} drops postings that closed after the edition was published"
         )
 
 
@@ -125,20 +150,18 @@ def test_an_edition_and_its_count_agree_about_dismissed_postings():
     """
     import inspect
 
-    from trouveur.db.queries.match import _NOT_DISMISSED
-
     assert "dismissed" in _NOT_DISMISSED
-    for query in (edition, editions):
-        assert "_NOT_DISMISSED" in inspect.getsource(query), (
-            f"{query.__name__} does not share the dismissed filter"
-        )
+    # The page renders the shared clause at import; the count interpolates it at call time.
+    assert _NOT_DISMISSED in _EDITION_SQL_TEMPLATE, "the page does not share the filter"
+    assert "_NOT_DISMISSED" in inspect.getsource(editions), "the count does not share the filter"
 
 
 def test_an_edition_is_ordered_by_score_descending():
-    """Within a day the page is a ranking, and the order is the whole product."""
-    import inspect
+    """Within an edition the page is a ranking, and the order is the whole product."""
+    assert re.search(r"ORDER BY\s+e\.llm_score \{direction\}", _EDITION_SQL_TEMPLATE)
+    from trouveur.db.queries.match import _edition_sql
 
-    assert re.search(r"ORDER BY\s+e\.llm_score DESC", inspect.getsource(edition))
+    assert "ORDER BY e.llm_score DESC" in _edition_sql("TRUE", "DESC")
 
 
 def test_the_digest_is_bounded_by_count_and_not_by_score():

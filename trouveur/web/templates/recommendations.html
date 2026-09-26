@@ -29,21 +29,20 @@
   <div class="results">
     {% for job in jobs %}{{ m.job_card(job) }}{% endfor %}
   </div>
-  {% if has_more or page > 1 %}
+  {% if next_cursor or prev_cursor %}
   <div class="pager">
-    {% if page > 1 %}
-      <a class="pill" href="{{ m.edition_href(edition, page - 1) }}">← previous</a>
+    {% if prev_cursor %}
+      <a class="pill" href="{{ m.edition_href(edition, before=prev_cursor) }}">← previous</a>
     {% endif %}
-    <span class="hint">page {{ page }}</span>
-    {% if has_more %}
-      <a class="pill" href="{{ m.edition_href(edition, page + 1) }}">next →</a>
+    {% if next_cursor %}
+      <a class="pill" href="{{ m.edition_href(edition, after=next_cursor) }}">next →</a>
     {% endif %}
   </div>
   {% endif %}
-{% elif editions and page > 1 %}
+{% elif editions and paged %}
 <p class="empty">
-  Nothing on page {{ page }}. <a href="{{ m.edition_href(edition) }}">Back to the
-  start of this edition.</a>
+  Nothing further in this edition.
+  <a href="{{ m.edition_href(edition) }}">Back to the start of it.</a>
 </p>
 {% elif editions %}
 <p class="empty">

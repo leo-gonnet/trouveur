@@ -537,9 +537,10 @@ so the deployment has no LLM spend of its own and one user's exhausted budget ca
   the query layer, not just the UI.
 - **There is no score threshold, and re-adding one is a regression.** It hid postings the user had
   already paid to have scored, behind a number they had to guess — and guessing it low enough to
-  see them made it meaningless. The page is paged, fifty at a time, walked with OFFSET rather than
-  cut — every posting in the day stays reachable, which is the property a threshold broke. The page
-  shows what was paid for and the reader draws their own line, so **the ordering is the product**:
+  see them made it meaningless. The page is paged, fifty at a time, **by cursor and never by
+  OFFSET** — every posting in the edition stays reachable, which is the property a threshold broke.
+  The page shows what was paid for and the reader draws their own line, so **the ordering is the
+  product**:
   `ORDER BY e.llm_score DESC` is load-bearing, not cosmetic. The digest is bounded the same way,
   by count rather than by score.
 - **The score is the first thing on a row and it is coloured** (`score_pill`, `.score.high/.mid/
@@ -571,6 +572,10 @@ so the deployment has no LLM spend of its own and one user's exhausted budget ca
   them, so `Wien` and `Vienna` coexist and a `f.cities && :cities` clause would silently lose
   one of them, plus every suburb and every multi-site posting. The prompt carries them instead
   and the system prompt says they are a preference. Do not "finish" the filter.
+- **An edition is paged by cursor, and the order it pages by must be TOTAL.** `(llm_score,
+  job_id)`, tiebroken on `job_id` because it is part of the key and therefore unique within an
+  edition -- `posted_at` is nullable and repeats, so a page built on it can repeat or skip a row.
+  Higher `job_id` is later ingestion, so among equal scores it still reads newest first.
 - **An edition is stored, not derived, and never rewritten** (`user_edition_item`). It holds the
   score, reason and flags the reader was SHOWN; `user_job_match` holds the current verdict. That
   duplication is the feature. Derived by grouping `scored_at::date`, a posting re-scored later
@@ -782,7 +787,11 @@ still holds the old readings and no re-derive has been scheduled.
     moved scores by slot position, and profile-first is what a prompt-prefix cache reuses.
   - **One failed scoring call does not lose the rest of its wave**, and the ceiling is tested before
     a wave is issued rather than after it is billed.
-  - **An edition is paged, not cut**: `LIMIT ... OFFSET`, so every posting in the day is reachable.
+  - **An edition is paged by cursor, never by OFFSET**, and the cursor's columns match the sort
+    exactly. The dismiss filter runs before the page is cut, so an offset moves under the reader:
+    dismissing what is on page one makes the "next" link they already have point one row too far,
+    and the posting that crossed the boundary is unreachable from any page. Nothing on screen
+    hints at it, because dismissing swaps only the one widget.
   - **A daily run sees only the last sweep's additions**, a new arrival is dated by when WE got it
     rather than when it was posted, and a match-only run looks over the whole retained horizon.
   - **Scoring stops after two CONSECUTIVE weak blocks, not two in total**, and everything it did

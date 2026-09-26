@@ -11,6 +11,7 @@ reaches the same code a browser would for a fraction of the maintenance.
 
 from __future__ import annotations
 
+import re
 from datetime import date
 from decimal import Decimal
 
@@ -628,10 +629,9 @@ async def test_the_card_states_how_old_the_advert_is(client, seeded):
 async def test_a_long_edition_is_paged_and_the_pager_renders(client, seeded, monkeypatch):
     """Nothing bounds an edition's length any more, so the page has to.
 
-    The scoring cap of 150 used to decide this as a side effect; the day a profile changes an
-    edition can hold thousands. Rendered with a page size of one rather than a fixture of 51
-    postings, because a fixture that fits on one page never executes the pager markup at all --
-    and under StrictUndefined a name the route forgot to pass fails only when it is reached.
+    Rendered with a page size of one rather than a fixture of 51 postings, because a fixture that
+    fits on one page never executes the pager markup at all -- and under StrictUndefined a name
+    the route forgot to pass fails only when it is reached.
     """
     from trouveur.web import app as web_app
 
@@ -641,15 +641,54 @@ async def test_a_long_edition_is_paged_and_the_pager_renders(client, seeded, mon
     await _publish(user_id, ids, day)
     monkeypatch.setattr(web_app, "EDITION_PAGE", 1)
 
-    first = (await client.get(f"/recommendations?edition={day}&page=1")).text
-    assert "page 1" in first
+    first = (await client.get(f"/recommendations?edition={day}&v=1")).text
     assert "next" in first
     assert "previous" not in first
 
-    second = (await client.get(f"/recommendations?edition={day}&page=2")).text
-    assert "page 2" in second
+    cursor = re.search(r"after=(\d+_\d+)", first).group(1)
+    second = (await client.get(f"/recommendations?edition={day}&v=1&after={cursor}")).text
     assert "previous" in second
 
-    past_the_end = await client.get(f"/recommendations?edition={day}&page=99")
+    past_the_end = await client.get(f"/recommendations?edition={day}&v=1&after=0_0")
     assert past_the_end.status_code == 200
-    assert "Nothing on page 99" in past_the_end.text
+    assert "Nothing further in this edition" in past_the_end.text
+
+
+async def test_dismissing_on_one_page_does_not_skip_the_next_page(client, seeded, monkeypatch):
+    """The reason an edition is paged by cursor and not by offset.
+
+    The dismiss filter runs before the page is cut, so with OFFSET the boundary moves under the
+    reader: they are looking at page one, they dismiss what is on it, and the "next" link they
+    already have now points one row too far. The posting that shifted across the boundary is
+    never shown on any page, and nothing says so -- dismissing is an htmx swap of the single
+    widget, so the list on screen does not shrink to hint at it either.
+
+    A cursor is anchored to the row the reader last saw, so it means the same thing before and
+    after the set changes underneath it.
+    """
+    from trouveur.web import app as web_app
+
+    user_id = seeded["user_id"]
+    ids = await _all_match_ids(user_id)
+    assert len(ids) >= 3, "the skip needs a page to fall off the end of"
+    day = date(2026, 9, 14)
+    await _publish(user_id, ids, day)
+    monkeypatch.setattr(web_app, "EDITION_PAGE", 1)
+
+    # Every posting is published at the same score, so the order is the tiebreak: job_id DESC.
+    first, second = sorted(ids, reverse=True)[:2]
+
+    page_one = (await client.get(f"/recommendations?edition={day}&v=1")).text
+    assert f'/job/{first}/state' in page_one
+    next_link = re.search(r'href="([^"]*after=[^"]*)"', page_one).group(1).replace("&amp;", "&")
+
+    # The reader dismisses what is on the page they are looking at, then follows the link that
+    # was already rendered for them.
+    assert (
+        await client.post(f"/job/{first}/state", data={"state": "dismissed"})
+    ).status_code == 200
+
+    page_two = (await client.get(next_link)).text
+    assert f'/job/{second}/state' in page_two, (
+        "the posting after the dismissed one was stepped over and is now unreachable"
+    )

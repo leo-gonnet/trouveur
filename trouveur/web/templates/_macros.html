@@ -12,7 +12,7 @@
   {%- endif -%}
 {% endmacro %}
 
-{% macro edition_href(row, page=1) %}/recommendations?edition={{ row.day }}&v={{ row.profile_version }}{% if page > 1 %}&page={{ page }}{% endif %}{% endmacro %}
+{% macro edition_href(row, after='', before='') %}/recommendations?edition={{ row.day }}&v={{ row.profile_version }}{% if after %}&after={{ after }}{% endif %}{% if before %}&before={{ before }}{% endif %}{% endmacro %}
 
 {% macro places(job) %}
   {%- set names = (job.cities or []) | list -%}

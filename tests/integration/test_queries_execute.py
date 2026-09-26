@@ -150,8 +150,7 @@ def _arguments(ctx: dict) -> dict[str, dict]:
         },
         "match.editions": {"user_id": user_id},
         "match.edition": {
-            "user_id": user_id, "day": _today(), "profile_version": 1,
-            "limit": 50, "offset": 0,
+            "user_id": user_id, "day": _today(), "profile_version": 1, "limit": 50,
         },
         "match.publish_edition": {"rows": [ctx["edition_row"]]},
         "match.upsert_matches": {"rows": [ctx["match_row"]]},
