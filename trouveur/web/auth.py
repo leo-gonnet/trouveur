@@ -1,12 +1,14 @@
 """Session auth.
 
-There is deliberately no registration route, no password reset and no user-listing endpoint:
-`trouveur create-user` on the server is the only way to create a login.
+There is deliberately no registration route and no password reset. An account is created by an
+admin -- on the Users page, or with `trouveur create-user` for the FIRST one, which is the only
+account that cannot have been created by an admin because there was none.
 """
 
 from __future__ import annotations
 
 import logging
+import secrets
 from datetime import UTC, datetime
 
 from argon2 import PasswordHasher
@@ -22,9 +24,34 @@ log = logging.getLogger(__name__)
 COOKIE_NAME = "trouveur_session"
 _hasher = PasswordHasher()
 
+# This login faces the internet, so it is the same floor wherever a password is set -- the CLI, the
+# admin's Users page and a user changing their own.
+MIN_PASSWORD_CHARS = 12
+
 
 def hash_password(password: str) -> str:
     return _hasher.hash(password)
+
+
+def verify_password(password_hash: str, password: str) -> bool:
+    """Check a password with no side effect. `authenticate` is for logging IN: it counts failures
+    and can lock the account, which is wrong for confirming the password of a session that is
+    already open -- five typos there would lock the owner out of their own account."""
+    try:
+        _hasher.verify(password_hash, password)
+    except (VerifyMismatchError, VerificationError):
+        return False
+    return True
+
+
+def generate_password() -> str:
+    """An initial password for an account an admin creates, shown to them once to pass on.
+
+    Random rather than memorable. A two-word-plus-digits password is nicer to read down a phone,
+    and at roughly thirty bits it is also guessable; this is sixteen url-safe characters, and the
+    person can replace it with something they like from Settings.
+    """
+    return secrets.token_urlsafe(12)
 
 
 def _serializer(settings: Settings) -> URLSafeTimedSerializer:
@@ -80,12 +107,7 @@ async def authenticate(
         if remaining > 0:
             return None, f"Too many failed attempts. Try again in {int(remaining // 60) + 1} min."
 
-    ok = user.is_active
-    if ok:
-        try:
-            _hasher.verify(user.password_hash, password)
-        except (VerifyMismatchError, VerificationError):
-            ok = False
+    ok = user.is_active and verify_password(user.password_hash, password)
 
     await users_q.record_login_result(
         conn,

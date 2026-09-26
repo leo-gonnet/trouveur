@@ -1,4 +1,4 @@
-"""Guards for the embedding seam, credential handling, the work queue and the schedule."""
+"""Guards for the embedding seam, the work queue, spending and the schedule."""
 
 from __future__ import annotations
 
@@ -109,34 +109,6 @@ def test_embedding_text_puts_discriminating_fields_before_prose():
     assert text.startswith("Process Engineer\nACME\nWien")
     # Bounded on purpose: the model's context is finite, so the cut is chosen, not accidental.
     assert len(text) < 2000
-
-
-def test_credentials_round_trip_without_leaking_the_key(monkeypatch):
-    monkeypatch.setenv("ENCRYPTION_KEY", "a-test-encryption-secret")
-    from trouveur import crypto
-
-    crypto._cipher.cache_clear()
-    from trouveur.config import get_settings
-
-    assert get_settings().encryption_key == "a-test-encryption-secret"
-
-    secret = "sk-or-v1-supersecrettoken"
-    token = crypto.encrypt(secret)
-    assert crypto.decrypt(token) == secret
-    assert secret.encode() not in token
-    # The fingerprint must not be key material: it is shown in a UI and pasted into support threads.
-    assert secret[-4:] not in crypto.fingerprint(secret)
-    crypto._cipher.cache_clear()
-
-
-def test_encryption_refuses_the_development_default(monkeypatch):
-    monkeypatch.setenv("ENCRYPTION_KEY", "dev-only-insecure-encryption-key")
-    from trouveur import crypto
-
-    crypto._cipher.cache_clear()
-    with pytest.raises(crypto.CredentialError, match="ENCRYPTION_KEY"):
-        crypto.encrypt("anything")
-    crypto._cipher.cache_clear()
 
 
 _CUTOFF = datetime(2026, 9, 14, tzinfo=UTC)

@@ -187,19 +187,21 @@ def _arguments(ctx: dict) -> dict[str, dict]:
         },
         "users.get_profile": {"user_id": user_id},
         "users.save_profile": {"user_id": user_id, "values": {"title": "Probe"}},
-        "users.has_credential": {"user_id": user_id},
-        "users.get_credential": {"user_id": user_id},
-        "users.save_credential": {
-            "user_id": user_id, "api_key_encrypted": b"probe", "api_key_fingerprint": "probe",
-            "model": "probe/model", "provider_pin": None, "monthly_budget_usd": Decimal("1"),
+        "users.set_password": {"user_id": user_id, "password_hash": "argon2$probe"},
+        "users.set_active": {"user_id": user_id, "is_active": True},
+        "users.credit": {"user_id": user_id},
+        "users.list_users_with_credit": {},
+        "users.grant_credit": {
+            "user_id": user_id, "amount_usd": Decimal("1.00"), "granted_by": user_id,
+            "note": "probe",
         },
-        "users.update_budget": {"user_id": user_id, "monthly_budget_usd": Decimal("2")},
-        "users.month_spend": {"user_id": user_id},
+        "users.credit_grants": {"user_id": user_id},
+        "users.today_spend": {"user_id": user_id},
+        "users.month_to_date_spend": {"user_id": user_id},
         "users.add_spend": {
             "user_id": user_id, "tokens_in": 1, "tokens_out": 1, "cost_usd": Decimal("0.001"),
         },
         "users.spend_history": {"user_id": user_id},
-        "users.delete_credential": {"user_id": user_id},
     }
 
 

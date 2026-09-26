@@ -173,7 +173,8 @@ async def _execute(settings: Settings, run) -> None:
                 "retrieved": match.retrieved,
                 "scored": match.scored,
                 "cost_usd": str(match.cost_usd),
-                "stopped_on_budget": match.stopped_on_budget,
+                "stopped_on_ceiling": match.stopped_on_ceiling,
+                "stopped_on_credit": match.stopped_on_credit,
                 "stopped_on_scores": match.stopped_on_scores,
             }
             for match in matches
@@ -203,7 +204,8 @@ async def _execute_match_only(settings: Settings, run) -> None:
                 "retrieved": match.retrieved,
                 "scored": match.scored,
                 "cost_usd": str(match.cost_usd),
-                "stopped_on_budget": match.stopped_on_budget,
+                "stopped_on_ceiling": match.stopped_on_ceiling,
+                "stopped_on_credit": match.stopped_on_credit,
                 "stopped_on_scores": match.stopped_on_scores,
             }
         ],

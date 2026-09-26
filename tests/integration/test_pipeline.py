@@ -188,21 +188,25 @@ async def test_bumping_a_version_refills_the_queue(clean_db, gh_board, aa_listin
     assert queued == 3
 
 
-async def _credentialled_user(monkeypatch, *, budget="5"):
-    """A user with matches waiting to be scored and a key to score them with."""
-    from trouveur.crypto import encrypt
+async def _funded_user(*, credit="5", ceiling="5", admin=False):
+    """A user with matches waiting to be scored and the means to pay for scoring them.
+
+    `credit` and `ceiling` are separate on purpose: they are the two independent limits, and a test
+    that could only move both together could not tell which one stopped a run.
+    """
     from trouveur.db.engine import connect
     from trouveur.db.queries import match as mq
     from trouveur.db.queries import users as uq
 
-    monkeypatch.setenv("ENCRYPTION_KEY", "a-test-encryption-secret")
     user_id, profile = await seed_user(title="Process Engineer")
+    # The ceiling is read off the profile the scorer is handed, so it is set here rather than
+    # written and read back: the column's round trip is test_queries_execute's job.
+    profile = profile.model_copy(update={"daily_ceiling_usd": Decimal(ceiling)})
     async with connect() as conn:
-        await uq.save_credential(
-            conn, user_id,
-            api_key_encrypted=encrypt("sk-test"), api_key_fingerprint="sk-…test",
-            model="test/model", provider_pin=None, monthly_budget_usd=Decimal(budget),
-        )
+        if Decimal(credit) > 0:
+            await uq.grant_credit(
+                conn, user_id, amount_usd=Decimal(credit), granted_by=user_id, note="test"
+            )
         job_ids = [
             row[0] for row in await conn.exec_driver_sql("SELECT id FROM job ORDER BY id")
         ]
@@ -214,8 +218,11 @@ async def _credentialled_user(monkeypatch, *, budget="5"):
                 for job_id in job_ids
             ],
         )
-        credential = await uq.get_credential(conn, user_id)
-    return user_id, profile, credential, job_ids
+    from trouveur.match.pipeline import Spending
+
+    # What `_allowance` would have returned. Built rather than called, because these tests exercise
+    # the scorer and not the gate in front of it.
+    return user_id, profile, Spending(api_key="sk-test", unlimited_credit=admin), job_ids
 
 
 async def test_one_failed_call_does_not_lose_the_rest_of_the_wave(
@@ -229,7 +236,7 @@ async def test_one_failed_call_does_not_lose_the_rest_of_the_wave(
     from trouveur.match import llm, pipeline, rerank
 
     await seed_corpus(gh_board, aa_listing, aa_detail)
-    user_id, profile, credential, job_ids = await _credentialled_user(monkeypatch)
+    user_id, profile, spending, job_ids = await _funded_user()
     doomed = job_ids[0]
 
     async def score_one(settings, prof, candidate, **kwargs):
@@ -244,7 +251,7 @@ async def test_one_failed_call_does_not_lose_the_rest_of_the_wave(
     report = pipeline.MatchReport(user_id=user_id)
     async with connect() as conn:
         scored = await pipeline._score_pending(
-            conn, get_settings(), profile, credential, report, job_ids
+            conn, get_settings(), profile, spending, report, job_ids
         )
         still_pending = await mq.pending_rerank(conn, user_id, profile.version, job_ids)
 
@@ -266,7 +273,7 @@ async def test_an_unparseable_response_leaves_a_posting_unscored_never_zero(
     from trouveur.match import llm, pipeline, rerank
 
     await seed_corpus(gh_board, aa_listing, aa_detail)
-    user_id, profile, credential, job_ids = await _credentialled_user(monkeypatch)
+    user_id, profile, spending, job_ids = await _funded_user()
 
     async def score_one(settings, prof, candidate, **kwargs):
         return None, llm.Usage(tokens_in=500, tokens_out=40, cost_usd=Decimal("0.0001"))
@@ -275,7 +282,7 @@ async def test_an_unparseable_response_leaves_a_posting_unscored_never_zero(
     report = pipeline.MatchReport(user_id=user_id)
     async with connect() as conn:
         assert await pipeline._score_pending(
-            conn, get_settings(), profile, credential, report, job_ids
+            conn, get_settings(), profile, spending, report, job_ids
         ) == []
         # Billed, because the call was made -- but nothing cached, so the next run asks again.
         pending = await mq.pending_rerank(conn, user_id, profile.version, job_ids)
@@ -297,7 +304,7 @@ async def test_the_ceiling_stops_the_run_before_the_wave_is_sent(
     from trouveur.match import pipeline, rerank
 
     await seed_corpus(gh_board, aa_listing, aa_detail)
-    user_id, profile, credential, job_ids = await _credentialled_user(monkeypatch, budget="0")
+    user_id, profile, spending, job_ids = await _funded_user(ceiling="0")
 
     calls = []
 
@@ -309,10 +316,10 @@ async def test_the_ceiling_stops_the_run_before_the_wave_is_sent(
     report = pipeline.MatchReport(user_id=user_id)
     async with connect() as conn:
         assert await pipeline._score_pending(
-            conn, get_settings(), profile, credential, report, job_ids
+            conn, get_settings(), profile, spending, report, job_ids
         ) == []
     assert calls == []
-    assert report.stopped_on_budget is True
+    assert report.stopped_on_ceiling is True
 
 
 async def test_scoring_stops_when_two_blocks_in_a_row_score_badly(
@@ -330,7 +337,7 @@ async def test_scoring_stops_when_two_blocks_in_a_row_score_badly(
     from trouveur.match import llm, pipeline, rerank
 
     await seed_corpus(gh_board, aa_listing, aa_detail)
-    user_id, profile, credential, job_ids = await _credentialled_user(monkeypatch)
+    user_id, profile, spending, job_ids = await _funded_user()
     monkeypatch.setattr(rerank, "BLOCK", 1)
     verdicts = iter([10, 10, 95])
     calls = []
@@ -346,7 +353,7 @@ async def test_scoring_stops_when_two_blocks_in_a_row_score_badly(
     report = pipeline.MatchReport(user_id=user_id)
     async with connect() as conn:
         scored = await pipeline._score_pending(
-            conn, get_settings(), profile, credential, report, job_ids
+            conn, get_settings(), profile, spending, report, job_ids
         )
         still_pending = await mq.pending_rerank(conn, user_id, profile.version, job_ids)
 
@@ -371,7 +378,7 @@ async def test_one_good_block_resets_the_patience(
     from trouveur.match import llm, pipeline, rerank
 
     await seed_corpus(gh_board, aa_listing, aa_detail)
-    user_id, profile, credential, job_ids = await _credentialled_user(monkeypatch)
+    user_id, profile, spending, job_ids = await _funded_user()
     monkeypatch.setattr(rerank, "BLOCK", 1)
     verdicts = iter([10, 95, 10])
     calls = []
@@ -387,8 +394,185 @@ async def test_one_good_block_resets_the_patience(
     report = pipeline.MatchReport(user_id=user_id)
     async with connect() as conn:
         await pipeline._score_pending(
-            conn, get_settings(), profile, credential, report, job_ids
+            conn, get_settings(), profile, spending, report, job_ids
         )
 
     assert len(calls) == len(job_ids), "a good block did not reset the patience"
     assert report.stopped_on_scores is False
+
+
+async def test_a_user_with_no_credit_buys_nothing_at_all(
+    clean_db, gh_board, aa_listing, aa_detail, monkeypatch
+):
+    """The gate that replaced "has this user a key".
+
+    Asserted over the WHOLE run rather than over the scorer, because the expansion stage is billed
+    too: gating the rerank alone would still bill three calls per profile version to a user who has
+    been granted nothing. Retrieval is free and must still have run.
+    """
+    from trouveur.match import expand, pipeline, rerank
+
+    await seed_corpus(gh_board, aa_listing, aa_detail)
+    user_id, _, _, _ = await _funded_user(credit="0")
+
+    calls: list[str] = []
+
+    async def refuse(*args, **kwargs):
+        calls.append("paid")
+        raise AssertionError("no paid call may be made for a user with no credit")
+
+    monkeypatch.setattr(rerank, "score_one", refuse)
+    monkeypatch.setattr(expand, "expand_with_model", refuse)
+    monkeypatch.setattr(expand, "expand_adverts", refuse)
+    monkeypatch.setattr(expand, "summarise_background", refuse)
+
+    report = await pipeline.run_for_user(user_id, whole_horizon=True)
+
+    assert calls == []
+    assert report.cost_usd == 0
+    assert report.scored == 0
+    assert report.retrieved > 0, "retrieval is free and must run regardless"
+
+
+async def test_an_admin_needs_no_credit_but_is_still_capped_by_their_own_ceiling(
+    clean_db, gh_board, aa_listing, aa_detail, monkeypatch
+):
+    """An admin grants credit and has none of their own, so the balance cannot apply to them. The
+    daily ceiling still does: an unlimited balance is not a reason to be unmetered."""
+    from trouveur.config import get_settings
+    from trouveur.db.engine import connect
+    from trouveur.match import llm, pipeline, rerank
+
+    await seed_corpus(gh_board, aa_listing, aa_detail)
+    user_id, profile, spending, job_ids = await _funded_user(
+        credit="0", ceiling="5", admin=True
+    )
+    assert spending.unlimited_credit is True
+
+    async def score_one(settings, prof, candidate, **kwargs):
+        return (
+            rerank._Score(score=80, reason="x"),
+            llm.Usage(tokens_in=500, tokens_out=40, cost_usd=Decimal("0.0001")),
+        )
+
+    monkeypatch.setattr(rerank, "score_one", score_one)
+
+    # The ceiling first, while nothing has been scored yet: a run that scored everything would
+    # leave nothing pending, and the second half would pass by having nothing to buy.
+    capped = profile.model_copy(update={"daily_ceiling_usd": Decimal(0)})
+    report = pipeline.MatchReport(user_id=user_id)
+    async with connect() as conn:
+        assert await pipeline._score_pending(
+            conn, get_settings(), capped, spending, report, job_ids
+        ) == []
+    assert report.stopped_on_ceiling is True, "an admin's own ceiling did not apply"
+    assert report.stopped_on_credit is False, "credit cannot stop an admin who needs none"
+
+    report = pipeline.MatchReport(user_id=user_id)
+    async with connect() as conn:
+        scored = await pipeline._score_pending(
+            conn, get_settings(), profile, spending, report, job_ids
+        )
+    assert len(scored) == len(job_ids), "an admin was stopped by a balance they do not need"
+    assert report.stopped_on_credit is False
+
+
+async def test_credit_runs_out_before_the_ceiling_does_and_says_which(
+    clean_db, gh_board, aa_listing, aa_detail, monkeypatch
+):
+    """Two limits, and the run must report the one that actually stopped it: a reader whose ceiling
+    was reached waits for tomorrow, one whose credit is gone has to ask somebody."""
+    from trouveur.config import get_settings
+    from trouveur.db.engine import connect
+    from trouveur.match import llm, pipeline, rerank
+
+    await seed_corpus(gh_board, aa_listing, aa_detail)
+    # Credit far below the ceiling, so the ceiling cannot be what bites. Enough for the first call
+    # and not the second, so the run gets past the gate and then runs out.
+    user_id, profile, spending, job_ids = await _funded_user(credit="0.05", ceiling="5")
+    monkeypatch.setattr(rerank, "BLOCK", 1)
+
+    async def score_one(settings, prof, candidate, **kwargs):
+        return (
+            rerank._Score(score=90, reason="x"),
+            llm.Usage(tokens_in=500, tokens_out=40, cost_usd=Decimal("0.03")),
+        )
+
+    monkeypatch.setattr(rerank, "score_one", score_one)
+    report = pipeline.MatchReport(user_id=user_id)
+    async with connect() as conn:
+        scored = await pipeline._score_pending(
+            conn, get_settings(), profile, spending, report, job_ids
+        )
+    assert report.stopped_on_credit is True
+    assert report.stopped_on_ceiling is False
+    # The first call was affordable; five cents did not stretch to a second at three cents each.
+    assert 0 < len(scored) < len(job_ids)
+
+
+async def test_a_ceiling_counts_today_only_and_not_what_was_spent_yesterday(
+    clean_db, gh_board, aa_listing, aa_detail, monkeypatch
+):
+    """A DAILY ceiling tested against a running total would never lift. Spend is keyed on the day,
+    so yesterday's rows cannot hold today's run back."""
+    from trouveur.config import get_settings
+    from trouveur.db.engine import connect
+    from trouveur.db.schema import user_llm_spend
+    from trouveur.match import llm, pipeline, rerank
+
+    await seed_corpus(gh_board, aa_listing, aa_detail)
+    user_id, profile, spending, job_ids = await _funded_user(credit="5", ceiling="0.10")
+
+    async with connect() as conn:
+        # Yesterday, the whole ceiling was spent.
+        await conn.execute(
+            user_llm_spend.insert().values(
+                user_id=user_id,
+                period_day=clock.today() - timedelta(days=1),
+                tokens_in=1000, tokens_out=100, cost_usd=Decimal("0.10"), calls=50,
+            )
+        )
+
+    async def score_one(settings, prof, candidate, **kwargs):
+        return (
+            rerank._Score(score=85, reason="x"),
+            llm.Usage(tokens_in=500, tokens_out=40, cost_usd=Decimal("0.0001")),
+        )
+
+    monkeypatch.setattr(rerank, "score_one", score_one)
+    report = pipeline.MatchReport(user_id=user_id)
+    async with connect() as conn:
+        scored = await pipeline._score_pending(
+            conn, get_settings(), profile, spending, report, job_ids
+        )
+    assert len(scored) == len(job_ids), "yesterday's spend was counted against today's ceiling"
+    assert report.stopped_on_ceiling is False
+
+
+async def test_a_balance_is_granted_minus_spent_and_a_grant_never_overwrites_one(clean_db):
+    """The balance is derived, so it cannot drift from what was billed, and a top-up is a row --
+    two of them add up rather than the second replacing the first."""
+    from trouveur.db.engine import connect
+    from trouveur.db.queries import users as uq
+
+    user_id, _ = await seed_user()
+    async with connect() as conn:
+        assert (await uq.credit(conn, user_id)).balance_usd == 0
+
+        await uq.grant_credit(
+            conn, user_id, amount_usd=Decimal("5.00"), granted_by=user_id, note="first"
+        )
+        await uq.grant_credit(
+            conn, user_id, amount_usd=Decimal("2.50"), granted_by=user_id, note="second"
+        )
+        await uq.add_spend(
+            conn, user_id, tokens_in=100, tokens_out=10, cost_usd=Decimal("1.25")
+        )
+
+        credit = await uq.credit(conn, user_id)
+        grants = await uq.credit_grants(conn, user_id)
+
+    assert credit.granted_usd == Decimal("7.50"), "the second grant replaced the first"
+    assert credit.spent_usd == Decimal("1.25")
+    assert credit.balance_usd == Decimal("6.25")
+    assert len(grants) == 2, "a grant must stay on the record"

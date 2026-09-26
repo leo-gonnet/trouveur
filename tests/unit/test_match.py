@@ -8,8 +8,8 @@ from trouveur.db.queries.users import SCORING_FIELDS
 from trouveur.match.expand import build_prompt as expand_prompt
 from trouveur.match.expand import combine, deterministic_queries, parse_response
 from trouveur.match.fuse import reciprocal_rank_fusion
+from trouveur.match.rerank import affordable, parse_score
 from trouveur.match.rerank import build_prompt as rerank_prompt
-from trouveur.match.rerank import parse_score, would_exceed_budget
 from trouveur.models import UserProfile
 
 
@@ -50,14 +50,18 @@ def test_fusion_of_nothing_is_empty():
     assert reciprocal_rank_fusion([[], []]) == []
 
 
-def test_budget_is_checked_before_a_call_not_after():
-    assert would_exceed_budget(Decimal("1.00"), Decimal("5.00"), Decimal("0.05")) is False
-    assert would_exceed_budget(Decimal("4.99"), Decimal("5.00"), Decimal("0.05")) is True
+def test_a_wave_is_priced_before_it_is_issued_not_after():
+    # Priced for the whole wave: its calls go out together, so checking one call's cost would
+    # authorise all of them.
+    assert affordable(Decimal("4.00"), Decimal("0.05")) is True
+    assert affordable(Decimal("0.01"), Decimal("0.05")) is False
 
 
-def test_zero_budget_blocks_every_call():
-    # A user who has not set a ceiling must not be charged by default.
-    assert would_exceed_budget(Decimal(0), Decimal(0), Decimal(0)) is True
+def test_nothing_left_affords_nothing():
+    # An empty balance or an exhausted ceiling stops a run rather than overdrawing it, and a zero
+    # estimate must not slip past a zero balance.
+    assert affordable(Decimal(0), Decimal(0)) is False
+    assert affordable(Decimal("-0.10"), Decimal("0.05")) is False
 
 
 def test_malformed_score_response_yields_nothing_never_zero():
