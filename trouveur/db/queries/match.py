@@ -21,11 +21,6 @@ from trouveur.db.schema import (
 )
 from trouveur.models import Expansion
 
-# pgvector applies WHERE after the index walk, so a filtered ANN query returns a short result
-# rather than an error. Over-fetching and raising ef_search is the remedy.
-_DENSE_OVERSAMPLE = 4
-_EF_SEARCH = 200
-
 _HARD_FILTERS = f"""
     j.closed_at IS NULL
     AND {freshness.sql("j")}
@@ -43,10 +38,13 @@ _HARD_FILTERS = f"""
     )
 """
 
-# Issued on its own: asyncpg runs parameterised queries as prepared statements, which reject
-# multiple commands, so this cannot be prepended to the SELECT below.
-_EF_SEARCH_SQL = f"SET LOCAL hnsw.ef_search = {_EF_SEARCH}"
-
+# There is deliberately NO ANN index on job_embedding, so this is an exact scan over the vectors
+# inside the freshness horizon. An HNSW index applies WHERE *after* the graph walk, which silently
+# returns fewer rows than asked for the moment a filter is selective -- looking for jobs in one
+# small city, the walk spends its whole working set on postings elsewhere and the filter discards
+# them. Measured on the production join shape at 250k vectors: 14ms when the filter qualifies 565
+# rows, 80ms unfiltered. Bring an index back only if the horizon holds several million vectors.
+#
 # The READ width, which is not always the width the embed worker is writing: a model change is
 # backfilled over days and the dense arm serves the old space meanwhile.
 _DENSE_SQL_TEMPLATE = f"""
@@ -106,16 +104,15 @@ async def dense_candidates(
     params = {
         **_filter_params(profile, fresh_since),
         "vector": "[" + ",".join(f"{value:.6f}" for value in vector) + "]",
-        "limit": limit * _DENSE_OVERSAMPLE,
+        "limit": limit,
     }
     from trouveur.config import get_settings
     from trouveur.ingest.embed.base import column_for
 
-    await conn.execute(sa.text(_EF_SEARCH_SQL))
     rows = await conn.execute(
         sa.text(_dense_sql(column_for(get_settings().embedding_read_dim))), params
     )
-    return [row.job_id for row in rows][:limit]
+    return [row.job_id for row in rows]
 
 
 async def lexical_candidates(

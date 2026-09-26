@@ -182,15 +182,14 @@ def test_empty_profile_filters_match_everything():
 def test_no_query_bundles_two_statements():
     """asyncpg runs parameterised queries as prepared statements, which reject multiple commands.
 
-    Prepending `SET LOCAL hnsw.ef_search = ...;` to the dense SELECT is the natural way to write
-    it and fails at runtime, only ever against a real database — so it is asserted here, where
-    the suite has none.
+    Bundling a `SET LOCAL ...;` ahead of a SELECT to tune one query is the natural way to write it
+    and fails at runtime, only ever against a real database — so it is asserted here, where the
+    suite has none.
     """
     from trouveur.db.queries import jobs, match
     from trouveur.ingest.embed.base import _COLUMNS, column_for
 
     statements = {
-        "ef_search": match._EF_SEARCH_SQL,
         "lexical": match._LEXICAL_SQL,
         "search": match._SEARCH_SQL,
     }
