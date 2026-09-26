@@ -1,5 +1,5 @@
 {% extends "base.html" %}{% block title %}Profile · Trouveur{% endblock %}
-{% from "_macros.html" import tags, checks %}
+{% from "_macros.html" import tags %}
 {% block content %}
 <div class="page-head">
   <h1>Profile</h1>
@@ -18,9 +18,11 @@
 
 <p class="notice">
   Everything on this page decides what a good match is, so changing any of it starts a fresh
-  matching run. Right now that would score about <strong>{{ rescore_estimate }}</strong>
-  postings again. Editions already published are kept, except today's, which is replaced &mdash;
-  you are asked first.
+  matching run over the last week, scoring <strong>at most {{ rescore_estimate }}</strong>
+  postings on your own key &mdash; fewer in practice, since only what your new search terms find
+  is judged, and scoring stops once the scores run out. Nothing already published is touched: the
+  run adds a new edition for today beside the one you have, so you can still read what you were
+  shown before the change.
 </p>
 
 <form method="post" action="/profile" class="grid">
@@ -57,33 +59,28 @@
       {{ tags('cities', profile.cities, placeholder='Add a city…',
               hint='A preference the reranker weighs, not a filter: spelled any way you like, and nearby places still count.') }}
     </div>
+    <label>Minimum salary <span class="hint">&euro;/year; a preference too &mdash; most adverts state no figure, and none of them are rejected for it</span>
+      <input name="min_salary_eur_year" value="{{ profile.min_salary_eur_year }}"></label>
   </section>
 
   <section class="section">
-    <div class="section-head"><h2>Hard filters</h2></div>
-    <p class="hint">Applied in the query, before anything is ranked. Leave a filter empty to accept
-      any value. Once set, a filter also drops postings that state nothing for it — tick
-      <em>not stated</em> to keep those.</p>
+    <div class="section-head"><h2>Where</h2></div>
+    <p class="hint">The only filter applied in the query, before anything is ranked. Everything
+      else on this page is a preference the reranker weighs. A posting that names no place is
+      always kept.</p>
     <div class="field">
       <span class="field-name">Countries</span>
-      {{ tags('countries', profile.countries, options=country_names, placeholder='Pick a country…') }}
+      {{ tags('countries', profile.countries, options=country_names, placeholder='Pick a country…',
+              hint='Leave empty to accept every country.') }}
     </div>
-    <div class="field">
-      <span class="field-name">Work mode</span>
-      {{ checks('work_modes', work_mode_options, profile.work_modes) }}
-    </div>
-    <div class="field">
-      <span class="field-name">Seniority</span>
-      {{ checks('seniorities', seniority_options, profile.seniorities) }}
-    </div>
-    <div class="field">
-      <span class="field-name">Employment type</span>
-      {{ checks('employment_types', employment_type_options, profile.employment_types) }}
-    </div>
-    <label>Minimum salary <span class="hint">&euro;/year; postings that state nothing are never rejected on this</span>
-      <input name="min_salary_eur_year" value="{{ profile.min_salary_eur_year }}"></label>
-    <p class="actions"><button class="primary" type="submit">Save profile</button></p>
+    <label class="check"><input type="checkbox" name="remote_anywhere" value="yes"
+      {% if profile.remote_anywhere %}checked{% endif %}>Also fully remote roles, wherever they are</label>
+    <p class="hint">A role with no office is in no country, so the one it was posted from says
+      nothing about whether you could take it. Whether it is remote <em>for you</em> is in the
+      advert, which the reranker reads.</p>
   </section>
+
+  <p class="actions"><button class="primary" type="submit">Save profile</button></p>
 </form>
 <script src="/static/app.js"></script>
 {% endblock %}

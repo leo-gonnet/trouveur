@@ -99,7 +99,7 @@ async def complete(
             detail = ""
         if detail:
             raise LlmError(f"The model provider refused the request: {detail.strip()[:300]}")
-        raise LlmError("OpenRouter is rate-limiting this key; the batch will be retried later.")
+        raise LlmError("OpenRouter is rate-limiting this key; the posting will be retried later.")
     if response.status_code != 200:
         raise LlmError(f"OpenRouter returned HTTP {response.status_code}.")
 

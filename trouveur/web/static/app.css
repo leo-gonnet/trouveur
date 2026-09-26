@@ -7,7 +7,7 @@
    scrolls.
 
    Components: .topbar .nav .banner .page-head .section .section-head .grid .kpis .kpi table .pill
-   .score button/.btn(.primary .danger .ghost) label/input .field .tags .checks .switch
+   .score button/.btn(.primary .danger .ghost) label/input .field .tags .switch
    .notice .empty .bar
    .results .job .job-main .states .editions .pager .searchbar .login .foot
    .doc .diagram (the How it works page only) */
@@ -97,6 +97,8 @@ main { flex: 1; width: 100%; max-width: 1440px; margin: 0 auto; padding: var(--s
 .grid { display: grid; gap: var(--space-5); align-items: start; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
 .grid > * { min-width: 0; }
 .grid .section { margin: 0; }
+/* A form's buttons belong to the whole form, not to whichever section happens to be last. */
+.grid > .actions { grid-column: 1 / -1; }
 
 /* ---------- KPIs ---------- */
 .kpis { display: grid; gap: var(--space-4); margin-bottom: var(--space-5);
@@ -205,9 +207,6 @@ form.inline { display: inline; }
 .tags-field input[aria-invalid=true] { color: var(--bad); }
 .tags-field .pill button { all: unset; cursor: pointer; line-height: 1; padding: 0 2px; color: var(--fg-muted); }
 .tags-field .pill button:hover { color: var(--bad); }
-.checks { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-4); min-height: var(--control);
-          align-items: center; }
-.checks .check { margin: 0; font-weight: 400; }
 
 .searchbar { display: flex; gap: var(--space-3); flex-wrap: wrap; align-items: center;
              margin-bottom: var(--space-5); }

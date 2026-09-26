@@ -25,6 +25,7 @@ from trouveur.eval.harness import (
     load_personas,
     plant_needles,
 )
+from trouveur.match.retrieve import FUSED_LIMIT
 
 DEPTHS = (10, 25, 50, 150, 400, 2000)
 RERANK_WINDOW = 150
@@ -48,9 +49,9 @@ async def run_persona(conn, persona: dict, needles, planted, strategy: str) -> d
     arms = await strategies.retrieve_routed(conn, profile, qs)
     elapsed = time.monotonic() - started
 
-    fused = strategies.fuse(arms, strategies.RETRIEVAL_LIMIT)
-    dense_only = strategies.fuse(strategies.Arms(dense=arms.dense), strategies.RETRIEVAL_LIMIT)
-    lex_only = strategies.fuse(strategies.Arms(lexical=arms.lexical), strategies.RETRIEVAL_LIMIT)
+    fused = strategies.fuse(arms, FUSED_LIMIT)
+    dense_only = strategies.fuse(strategies.Arms(dense=arms.dense), FUSED_LIMIT)
+    lex_only = strategies.fuse(strategies.Arms(lexical=arms.lexical), FUSED_LIMIT)
 
     positives = {
         planted[n["id"]]: n["id"]

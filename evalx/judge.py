@@ -54,21 +54,20 @@ async def judge_pool(conn, settings, profile, job_ids: list[int], key: str, mode
     rows = await match_q.scoreable_rows(conn, todo)
     by_id = {r.job_id: r for r in rows}
     ordered = [by_id[j] for j in todo if j in by_id]
-    for start in range(0, len(ordered), rerank.BATCH_SIZE):
-        batch = ordered[start : start + rerank.BATCH_SIZE]
+    for done, row in enumerate(ordered, start=1):
         try:
-            scored, usage = await rerank.score_batch(
-                settings, profile, batch, api_key=key, model=model,
+            score, usage = await rerank.score_one(
+                settings, profile, row, api_key=key, model=model,
                 provider_pin=settings.default_llm_provider,
             )
         except llm.LlmError as exc:
-            print(f"    ! batch failed: {exc}")
+            print(f"    ! {row.job_id} failed: {exc}")
             continue
         cost += usage.cost_usd
-        for s in scored:
-            cache[str(s.id)] = s.score
-        print(f"    judged {min(start + rerank.BATCH_SIZE, len(ordered))}/{len(ordered)}"
-              f"  ${cost:.4f}", flush=True)
+        if score is not None:
+            cache[str(row.job_id)] = score.score
+        if done % 10 == 0 or done == len(ordered):
+            print(f"    judged {done}/{len(ordered)}  ${cost:.4f}", flush=True)
     return cost
 
 

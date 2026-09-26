@@ -154,9 +154,10 @@ async def build_pools(
             found = artifacts[f"{persona['key']}:{variant}"]
             arms = await retrieve.retrieve_arms(
                 conn, live.variant_profile(profile, variant),
-                found.queries, found.adverts, fresh_since=EVAL_FRESH_SINCE,
+                found.queries, found.adverts,
+                fresh_since=EVAL_FRESH_SINCE, seen_since=EVAL_FRESH_SINCE,
             )
-            ranked = [job_id for job_id, _ in retrieve.fuse(arms, retrieve.RETRIEVAL_LIMIT)]
+            ranked = [job_id for job_id, _ in retrieve.fuse(arms, retrieve.FUSED_LIMIT)]
             pools[persona["key"]][variant] = ranked[:POOL_DEPTH]
             print(f"  {persona['key']}:{variant:<5} retrieved {len(ranked)}", flush=True)
     return pools

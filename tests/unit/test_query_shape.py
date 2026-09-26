@@ -12,7 +12,13 @@ import re
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
-from trouveur.db.queries.match import _LEXICAL_SQL, _SEARCH_SQL, edition, editions
+from trouveur.db.queries.match import (
+    _EDITION_SQL_TEMPLATE,
+    _LEXICAL_SQL,
+    _NOT_DISMISSED,
+    _SEARCH_SQL,
+    editions,
+)
 
 DIALECT = postgresql.asyncpg.dialect()
 
@@ -66,18 +72,38 @@ def test_search_left_joins_match_state_so_unmatched_jobs_still_appear():
     assert re.search(r"LEFT JOIN job_facet", _SEARCH_SQL)
 
 
-def test_an_edition_shows_everything_it_holds():
-    """Still narrower than Search -- scored only -- but with no cut-off inside the day.
+def test_an_edition_has_no_score_cut_only_a_page():
+    """Still narrower than Search -- scored only -- but nothing inside the edition is hidden.
 
     A threshold hid postings the user had already paid to have scored, behind a number they had
-    to guess. The day is the cut; re-adding a score one would do it again, silently.
+    to guess. The edition is the cut, and the LIMIT is a page the reader walks: every posting in
+    it stays reachable, which is the property a threshold broke.
     """
-    import inspect
+    assert ":threshold" not in _EDITION_SQL_TEMPLATE
+    assert "llm_score >=" not in _EDITION_SQL_TEMPLATE
+    assert "LIMIT :limit" in _EDITION_SQL_TEMPLATE
 
-    body = inspect.getsource(edition)
-    assert ":threshold" not in body
-    assert "llm_score >=" not in body
-    assert "LIMIT" not in body, "an edition is bounded by what was scored, not by a page size"
+
+def test_an_edition_is_paged_by_cursor_and_never_by_offset():
+    """OFFSET skips postings, silently, whenever the reader dismisses one.
+
+    The dismiss filter runs before the page is cut, so dismissing three on page one shifts three
+    postings up past the page-two boundary and none of them is ever shown again. Dismissing is an
+    htmx swap of the one widget, so the list on screen does not shrink and nothing suggests it
+    happened. A cursor is anchored to a row rather than to a count, so it survives the set
+    changing underneath it -- which needs the order to be TOTAL, hence job_id as the tiebreak.
+    """
+    from trouveur.db.queries.match import _AFTER_CURSOR, _BEFORE_CURSOR, _edition_sql
+
+    forward = _edition_sql(_BEFORE_CURSOR, "DESC")
+    backward = _edition_sql(_AFTER_CURSOR, "ASC")
+    for sql in (forward, backward):
+        assert "OFFSET" not in sql.upper(), "an edition must not page by offset"
+        # The cursor and the sort must name the same columns in the same order, or a page can
+        # repeat a row or step over one.
+        assert "(e.llm_score, e.job_id)" in sql, "the cursor is not a total order"
+    assert "ORDER BY e.llm_score DESC, e.job_id DESC" in forward
+    assert "ORDER BY e.llm_score ASC, e.job_id ASC" in backward
 
 
 def test_an_edition_is_read_from_its_own_table_not_derived_from_a_score():
@@ -89,15 +115,15 @@ def test_an_edition_is_read_from_its_own_table_not_derived_from_a_score():
     """
     import inspect
 
-    for query in (edition, editions):
-        body = inspect.getsource(query)
-        assert "user_edition_item" in body, f"{query.__name__} does not read the edition table"
-        assert "m.scored_at" not in body, f"{query.__name__} still buckets by scored_at"
+    for name, body in (("edition", _EDITION_SQL_TEMPLATE),
+                       ("editions", inspect.getsource(editions))):
+        assert "user_edition_item" in body, f"{name} does not read the edition table"
+        assert "m.scored_at" not in body, f"{name} still buckets by scored_at"
         assert "m.llm_score" not in body, (
-            f"{query.__name__} reads the current score, not the published one"
+            f"{name} reads the current score, not the published one"
         )
         assert not re.search(r"WHERE[^;]*j\.posted_at::date", body), (
-            f"{query.__name__} buckets by publication date"
+            f"{name} buckets by publication date"
         )
 
 
@@ -109,9 +135,10 @@ def test_a_published_edition_keeps_a_posting_that_has_since_closed():
     """
     import inspect
 
-    for query in (edition, editions):
-        assert "closed_at IS NULL" not in inspect.getsource(query), (
-            f"{query.__name__} drops postings that closed after the edition was published"
+    for name, body in (("edition", _EDITION_SQL_TEMPLATE),
+                       ("editions", inspect.getsource(editions))):
+        assert "closed_at IS NULL" not in body, (
+            f"{name} drops postings that closed after the edition was published"
         )
 
 
@@ -123,20 +150,18 @@ def test_an_edition_and_its_count_agree_about_dismissed_postings():
     """
     import inspect
 
-    from trouveur.db.queries.match import _NOT_DISMISSED
-
     assert "dismissed" in _NOT_DISMISSED
-    for query in (edition, editions):
-        assert "_NOT_DISMISSED" in inspect.getsource(query), (
-            f"{query.__name__} does not share the dismissed filter"
-        )
+    # The page renders the shared clause at import; the count interpolates it at call time.
+    assert _NOT_DISMISSED in _EDITION_SQL_TEMPLATE, "the page does not share the filter"
+    assert "_NOT_DISMISSED" in inspect.getsource(editions), "the count does not share the filter"
 
 
 def test_an_edition_is_ordered_by_score_descending():
-    """Within a day the page is a ranking, and the order is the whole product."""
-    import inspect
+    """Within an edition the page is a ranking, and the order is the whole product."""
+    assert re.search(r"ORDER BY\s+e\.llm_score \{direction\}", _EDITION_SQL_TEMPLATE)
+    from trouveur.db.queries.match import _edition_sql
 
-    assert re.search(r"ORDER BY\s+e\.llm_score DESC", inspect.getsource(edition))
+    assert "ORDER BY e.llm_score DESC" in _edition_sql("TRUE", "DESC")
 
 
 def test_the_digest_is_bounded_by_count_and_not_by_score():
@@ -151,46 +176,68 @@ def test_the_digest_is_bounded_by_count_and_not_by_score():
 
 
 def test_retrieval_filters_exclude_closed_postings():
-    from trouveur.db.queries.match import _HARD_FILTERS
+    from trouveur.db.queries.match import _ELIGIBLE
 
-    assert "j.closed_at IS NULL" in _HARD_FILTERS
+    assert "j.closed_at IS NULL" in _ELIGIBLE
 
 
-def test_salary_filter_never_rejects_a_posting_that_stated_nothing():
-    """A missing salary is not a low salary.
+def test_location_is_the_only_hard_filter():
+    """Nothing but location may narrow the query before ranking.
 
-    Rejecting on absence would drop most of the corpus, since the majority of adverts state no
-    figure at all.
+    Each enum filter that used to sit here dropped every posting whose facet was unstated, which
+    hid postings the reader had no way to learn existed. Preferences reach the reranker as prompt
+    text instead, so reintroducing one of these is a silent recall loss, not a stricter search.
     """
-    from trouveur.db.queries.match import _HARD_FILTERS
+    from trouveur.db.queries.match import _ELIGIBLE
 
-    assert "f.salary_max_eur_year IS NULL" in _HARD_FILTERS
+    for facet in ("work_mode", "seniority", "employment_type", "salary"):
+        assert f":{facet}" not in _ELIGIBLE
+    assert "f.seniority" not in _ELIGIBLE
+    assert "f.employment_type" not in _ELIGIBLE
+    assert "f.salary" not in _ELIGIBLE
 
 
-def test_empty_profile_filters_match_everything():
-    """cardinality(...) = 0 must short-circuit each filter.
+def test_a_posting_that_states_no_country_is_kept():
+    """A posting nobody parsed a country out of is not a posting somewhere else."""
+    from trouveur.db.queries.match import _ELIGIBLE
+
+    assert "cardinality(f.countries) = 0" in _ELIGIBLE
+
+
+def test_fully_remote_is_admitted_wherever_it_was_posted():
+    """`remote_anywhere` is part of the location filter, not a work-mode filter.
+
+    A role with no office is in no country, so the country it was posted from cannot be used to
+    reject it. The only place the real restriction is written is the description, which the
+    reranker reads.
+    """
+    from trouveur.db.queries.match import _ELIGIBLE
+
+    assert "CAST(:remote_anywhere AS boolean) AND f.work_mode = 'remote'" in _ELIGIBLE
+
+
+def test_an_empty_country_list_matches_everything():
+    """cardinality(...) = 0 must short-circuit the filter.
 
     Without it an empty country list would match nothing rather than anything, and a new user
     would see an empty product with no indication why.
     """
-    from trouveur.db.queries.match import _HARD_FILTERS
+    from trouveur.db.queries.match import _ELIGIBLE
 
-    for field in ("countries", "work_modes", "seniorities", "employment_types"):
-        assert f"cardinality(CAST(:{field} AS text[])) = 0" in _HARD_FILTERS
+    assert "cardinality(CAST(:countries AS text[])) = 0" in _ELIGIBLE
 
 
 def test_no_query_bundles_two_statements():
     """asyncpg runs parameterised queries as prepared statements, which reject multiple commands.
 
-    Prepending `SET LOCAL hnsw.ef_search = ...;` to the dense SELECT is the natural way to write
-    it and fails at runtime, only ever against a real database — so it is asserted here, where
-    the suite has none.
+    Bundling a `SET LOCAL ...;` ahead of a SELECT to tune one query is the natural way to write it
+    and fails at runtime, only ever against a real database — so it is asserted here, where the
+    suite has none.
     """
     from trouveur.db.queries import jobs, match
     from trouveur.ingest.embed.base import _COLUMNS, column_for
 
     statements = {
-        "ef_search": match._EF_SEARCH_SQL,
         "lexical": match._LEXICAL_SQL,
         "search": match._SEARCH_SQL,
     }
@@ -210,9 +257,10 @@ def test_parameters_carry_explicit_types_where_context_cannot_infer_them():
     A bare placeholder compared against a literal, or used to build an ARRAY, raises
     "could not determine data type of parameter" at runtime rather than at import.
     """
-    from trouveur.db.queries.match import _HARD_FILTERS, _SEARCH_SQL
+    from trouveur.db.queries.match import _ELIGIBLE, _SEARCH_SQL
 
-    assert "CAST(:min_salary AS numeric)" in _HARD_FILTERS
+    assert "CAST(:remote_anywhere AS boolean)" in _ELIGIBLE
+    assert "CAST(:countries AS text[])" in _ELIGIBLE
     for cast in (
         "CAST(:query AS text)",
         "CAST(:country AS text)",

@@ -54,7 +54,7 @@ CONCURRENCY = 4
 # invent a within-batch ordering they cannot merge across batches.
 _BANDED_SYSTEM = """You screen job adverts for one candidate. You are strict and concise.
 
-Put each job in exactly one band:
+Put the advert in exactly one band:
   3  excellent fit, the candidate should apply today
   2  good fit, clearly worth reading
   1  plausible but compromised on an important dimension
@@ -66,8 +66,8 @@ roles, internships and working-student roles, and roles far junior or far senior
 candidate. Preferred cities are a preference, not a requirement: a role there, nearby, or remote
 satisfies it; elsewhere is a compromise, never a rejection.
 
-Return ONLY a JSON array, one object per job, no prose:
-[{"id": <int>, "band": <int 0-3>, "reason": "<one sentence, max 25 words>"}]"""
+Return ONLY a JSON object, no prose:
+{"band": <int 0-3>, "reason": "<one sentence, max 25 words>"}"""
 
 
 class Spend:
@@ -138,44 +138,47 @@ async def _shortlist(conn, persona_key: str, variant: str, limit: int) -> list:
 
 async def score_all(
     settings, profile, rows: list, *, key: str, model: str, spend: Spend,
-    batch_size: int = rerank.BATCH_SIZE, background: str = "", banded: bool = False,
+    background: str = "", banded: bool = False,
 ) -> dict[int, int]:
-    """One configuration's verdict on a whole shortlist, as {job_id: score}."""
-    batches = [rows[start : start + batch_size] for start in range(0, len(rows), batch_size)]
+    """One configuration's verdict on a whole shortlist, as {job_id: score}.
+
+    One posting per call, as production sends them. There is no batch size to vary any more: the
+    slot and neighbour effects that made it worth varying are what killed batching, and they are
+    written up in FINDINGS-RERANKER.md rather than left runnable here.
+    """
     gate = asyncio.Semaphore(CONCURRENCY)
     scores: dict[int, int] = {}
 
-    async def one(batch):
+    async def one(row):
         async with gate:
             if banded:
                 completion = await llm.complete(
                     api_key=key, model=model, provider_pin=settings.default_llm_provider,
                     system=_BANDED_SYSTEM,
-                    user=rerank.build_prompt(profile, batch, background=background),
+                    user=rerank.build_prompt(profile, row, background=background),
                     max_tokens=rerank._MAX_TOKENS, timeout=settings.llm_timeout_seconds,
                 )
                 spend.add(completion.usage.cost_usd)
-                start, end = completion.text.find("["), completion.text.rfind("]")
+                start, end = completion.text.find("{"), completion.text.rfind("}")
                 if start == -1:
                     return
                 try:
                     payload = json.loads(completion.text[start : end + 1])
                 except json.JSONDecodeError:
                     return
-                for entry in payload if isinstance(payload, list) else []:
-                    if isinstance(entry, dict) and isinstance(entry.get("band"), int):
-                        scores[int(entry["id"])] = max(0, min(3, entry["band"]))
+                if isinstance(payload, dict) and isinstance(payload.get("band"), int):
+                    scores[row.job_id] = max(0, min(3, payload["band"]))
                 return
 
-            scored, usage = await rerank.score_batch(
-                settings, profile, batch, api_key=key, model=model,
+            score, usage = await rerank.score_one(
+                settings, profile, row, api_key=key, model=model,
                 provider_pin=settings.default_llm_provider, background=background,
             )
             spend.add(usage.cost_usd)
-            for score in scored:
-                scores[score.id] = score.score
+            if score is not None:
+                scores[row.job_id] = score.score
 
-    await asyncio.gather(*(one(batch) for batch in batches))
+    await asyncio.gather(*(one(row) for row in rows))
     return scores
 
 
@@ -209,83 +212,6 @@ async def experiment_stability(conn, settings, key, model, spend, args) -> dict:
     return out
 
 
-async def experiment_position(conn, settings, key, model, spend, args) -> dict:
-    """One batch of ten, rotated, so every posting visits every slot."""
-    out = {}
-    for persona in load_personas():
-        profile = await _ensure_persona(persona)
-        rows = (await _shortlist(conn, persona["key"], "nobg", args.limit))[: rerank.BATCH_SIZE]
-        by_slot: dict[int, list[int]] = {slot: [] for slot in range(len(rows))}
-        deltas: list[float] = []
-        per_job: dict[int, list[int]] = {row.job_id: [] for row in rows}
-        for shift in range(len(rows)):
-            rotated = rows[shift:] + rows[:shift]
-            scores = await score_all(
-                settings, profile, rotated, key=key, model=model, spend=spend,
-                batch_size=len(rows),
-            )
-            for slot, row in enumerate(rotated):
-                if row.job_id in scores:
-                    by_slot[slot].append(scores[row.job_id])
-                    per_job[row.job_id].append(scores[row.job_id])
-        for values in per_job.values():
-            if len(values) > 1:
-                deltas.append(max(values) - min(values))
-        out[persona["key"]] = {
-            "mean_by_slot": {slot: round(statistics.mean(v), 1) if v else None
-                             for slot, v in by_slot.items()},
-            "first_minus_last": round(
-                statistics.mean(by_slot[0]) - statistics.mean(by_slot[len(rows) - 1]), 1
-            ) if by_slot[0] and by_slot[len(rows) - 1] else None,
-            "median_swing_per_posting": round(statistics.median(deltas), 1) if deltas else 0,
-        }
-        print(f"  {persona['key']:<24} {out[persona['key']]}", flush=True)
-    return out
-
-
-async def experiment_contamination(conn, settings, key, model, spend, args) -> dict:
-    """A posting alone, then among the best of the shortlist, then among the worst.
-
-    The subjects are the middling postings on purpose: a posting the model is sure about will not
-    move, and the ones whose placement is actually in question are where a batch effect would
-    change what the reader sees first.
-    """
-    store = load_store()
-    out = {}
-    for persona in load_personas():
-        profile = await _ensure_persona(persona)
-        grades = {int(j): g for j, g in store["grades"][args.judge][persona["key"]].items()}
-        rows = await _shortlist(conn, persona["key"], "nobg", args.limit)
-        strong = [row for row in rows if grades.get(row.job_id, 0) >= GOOD][: rerank.BATCH_SIZE - 1]
-        weak = [row for row in rows if grades.get(row.job_id, 0) == 0][: rerank.BATCH_SIZE - 1]
-        if len(strong) < rerank.BATCH_SIZE - 1 or len(weak) < rerank.BATCH_SIZE - 1:
-            print(f"  {persona['key']}: not enough graded extremes; skipped")
-            continue
-        subjects = [row for row in rows if grades.get(row.job_id) == 1][: args.subjects]
-
-        alone, among_strong, among_weak = {}, {}, {}
-        for subject in subjects:
-            for target, company in ((alone, []), (among_strong, strong), (among_weak, weak)):
-                scores = await score_all(
-                    settings, profile, [subject, *company], key=key, model=model, spend=spend,
-                    batch_size=1 + len(company),
-                )
-                if subject.job_id in scores:
-                    target[subject.job_id] = scores[subject.job_id]
-
-        shared = sorted(set(alone) & set(among_strong) & set(among_weak))
-        out[persona["key"]] = {
-            "subjects": len(shared),
-            "mean_alone": round(statistics.mean(alone[j] for j in shared), 1) if shared else None,
-            "mean_among_strong": round(
-                statistics.mean(among_strong[j] for j in shared), 1) if shared else None,
-            "mean_among_weak": round(
-                statistics.mean(among_weak[j] for j in shared), 1) if shared else None,
-        }
-        print(f"  {persona['key']:<24} {out[persona['key']]}", flush=True)
-    return out
-
-
 async def _graded_run(conn, settings, key, model, spend, args, persona, **kwargs) -> dict:
     store = load_store()
     profile = await _ensure_persona(persona)
@@ -299,8 +225,8 @@ async def _graded_run(conn, settings, key, model, spend, args, persona, **kwargs
     judged = {job: grades[job] for job in order if job in grades}
     return {
         "scored": len(scores),
-        # What this configuration cost for one shortlist. The recommendation that comes out of
-        # the batch experiment is the expensive-sounding one, so the number has to be here.
+        # What this configuration cost for one shortlist. One posting per call is the
+        # expensive-sounding option, so the number has to be here.
         "cost_usd": f"{spend.total - before:.5f}",
         "ndcg@20": ndcg(order, judged, 20),
         "ndcg@50": ndcg(order, judged, 50),
@@ -316,20 +242,6 @@ async def _graded_run(conn, settings, key, model, spend, args, persona, **kwargs
         ),
         "order": order,
     }
-
-
-async def experiment_batch(conn, settings, key, model, spend, args) -> dict:
-    out: dict[str, dict] = {}
-    for size in args.batch_sizes:
-        out[str(size)] = {}
-        for persona in load_personas():
-            out[str(size)][persona["key"]] = await _graded_run(
-                conn, settings, key, model, spend, args, persona, batch_size=size
-            )
-            print(f"  batch={size:<3} {persona['key']:<24} "
-                  f"{ {k: v for k, v in out[str(size)][persona['key']].items() if k != 'order'} }",
-                  flush=True)
-    return out
 
 
 async def experiment_form(conn, settings, key, model, spend, args) -> dict:
@@ -419,9 +331,6 @@ def experiment_depth(args) -> dict:
 
 EXPERIMENTS = {
     "stability": experiment_stability,
-    "position": experiment_position,
-    "contamination": experiment_contamination,
-    "batch": experiment_batch,
     "form": experiment_form,
     "background": experiment_background,
 }
@@ -435,8 +344,6 @@ async def main() -> None:
     ap.add_argument("--repeats", type=int, default=5)
     ap.add_argument("--subjects", type=int, default=6)
     ap.add_argument("--max-usd", type=Decimal, default=Decimal("0.50"))
-    ap.add_argument("--batch-sizes", type=lambda v: [int(x) for x in v.split(",")],
-                    default=[1, 5, 10, 20])
     ap.add_argument("--thin", action="store_true",
                     help="cut the objectives down to the wish, so the background is the only "
                          "place capability evidence appears")

@@ -15,7 +15,6 @@ from collections.abc import Iterable
 from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Annotated
 
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -31,17 +30,13 @@ from trouveur.db.queries import admin as admin_q
 from trouveur.db.queries import freshness
 from trouveur.db.queries import match as match_q
 from trouveur.db.queries import users as users_q
-from trouveur.match import rerank
 from trouveur.match.pipeline import profile_from_row
 from trouveur.models import (
     BACKGROUND_MAX_CHARS,
     COUNTRY_NAMES,
     LANGUAGES,
-    EmploymentType,
     RunTrigger,
-    Seniority,
     UserState,
-    WorkMode,
 )
 from trouveur.sources.registry import NORMALIZERS
 from trouveur.web import auth
@@ -237,9 +232,22 @@ async def logout():
     return response
 
 
+# How much of an edition is read at once. A module constant so a test can shrink it and render the
+# pager itself: a page test whose fixture fits on one page never executes that markup at all.
+EDITION_PAGE = 50
+
+
 @app.get("/recommendations", response_class=HTMLResponse)
-async def recommendations(request: Request, edition: str = ""):
-    """One day's edition. The latest by default; older ones stay reachable and never change.
+async def recommendations(
+    request: Request, edition: str = "", v: int = 0, after: str = "", before: str = ""
+):
+    """One edition. The latest by default; every earlier one stays reachable and never changes.
+
+    An edition is a (day, profile version) pair rather than a day, so changing a profile adds one
+    beside what you were already shown instead of replacing it.
+
+    Paged by cursor rather than by page number, because dismissing a posting shrinks the edition
+    and page numbers would then skip whatever crossed the boundary. See `match_q.edition`.
 
     A day rather than one growing list, which had no time axis: a strong posting from three weeks
     ago outranked everything that arrived this morning until it was dismissed. There is nothing
@@ -247,13 +255,25 @@ async def recommendations(request: Request, edition: str = ""):
     key, so the page is a reading list rather than a console.
     """
     session = request.state.session
+    limit = EDITION_PAGE
+    forward, backward = _cursor(after), _cursor(before)
     async with connect() as conn:
         profile_row = await users_q.get_profile(conn, session["uid"])
         available = await match_q.editions(conn, session["uid"])
-        chosen = _chosen_edition(edition, available)
-        jobs = await match_q.edition(conn, session["uid"], chosen.day) if chosen else []
-    days = [row.day for row in available]
-    index = days.index(chosen.day) if chosen else -1
+        chosen = _chosen_edition(edition, v, available)
+        # One more than a page, so "is there another page" is answered by the rows themselves
+        # rather than by a second count that could disagree with them.
+        rows = (
+            await match_q.edition(
+                conn, session["uid"], chosen.day, chosen.profile_version,
+                limit=limit + 1, after=forward, before=backward,
+            )
+            if chosen
+            else []
+        )
+    spilled = len(rows) > limit
+    jobs = rows[-limit:] if backward else rows[:limit]
+    index = available.index(chosen) if chosen else -1
     return templates.TemplateResponse(
         request,
         "recommendations.html",
@@ -262,8 +282,14 @@ async def recommendations(request: Request, edition: str = ""):
             "jobs": jobs,
             "editions": available,
             "edition": chosen,
-            "older": days[index + 1] if 0 <= index < len(days) - 1 else None,
-            "newer": days[index - 1] if index > 0 else None,
+            "older": available[index + 1] if 0 <= index < len(available) - 1 else None,
+            "newer": available[index - 1] if index > 0 else None,
+            # Reading backwards, there is always a page ahead: it is the one we came from.
+            "next_cursor": _format_cursor(jobs[-1]) if jobs and (spilled or backward) else "",
+            "prev_cursor": (
+                _format_cursor(jobs[0]) if jobs and (forward or (backward and spilled)) else ""
+            ),
+            "paged": bool(forward or backward),
             "paused": profile_row is not None and not profile_row.scoring_enabled,
             "profile_version": profile_row.version if profile_row else 1,
             "username": session["u"],
@@ -272,19 +298,42 @@ async def recommendations(request: Request, edition: str = ""):
     )
 
 
-def _chosen_edition(requested: str, available: list):
-    """The requested edition, or the latest. An unknown date falls back rather than 404s."""
+def _cursor(raw: str) -> tuple[int, int] | None:
+    """A (score, job id) cursor as it travels in a URL. Anything unreadable starts from the top,
+    which is the same thing a stale link should do."""
+    score, _, job_id = raw.partition("_")
+    try:
+        return int(score), int(job_id)
+    except ValueError:
+        return None
+
+
+def _format_cursor(row) -> str:
+    return f"{row.llm_score}_{row.id}"
+
+
+def _chosen_edition(requested: str, version: int, available: list):
+    """The requested edition, or the latest. An unknown one falls back rather than 404s.
+
+    A day alone still resolves -- to that day's newest edition -- so a link written before a
+    profile change keeps working instead of breaking on the day it is most likely to be followed.
+    """
     if not available:
         return None
-    if requested:
-        try:
-            wanted = date.fromisoformat(requested)
-        except ValueError:
-            return available[0]
-        for row in available:
-            if row.day == wanted:
-                return row
-    return available[0]
+    if not requested:
+        return available[0]
+    try:
+        wanted = date.fromisoformat(requested)
+    except ValueError:
+        return available[0]
+    same_day = [row for row in available if row.day == wanted]
+    if not same_day:
+        return available[0]
+    for row in same_day:
+        if row.profile_version == version:
+            return row
+    # Ordered newest version first by the query.
+    return same_day[0]
 
 
 async def _queue_match(conn, user_id: int) -> None:
@@ -360,25 +409,17 @@ async def set_state(request: Request, job_id: int, state: str = Form(...)):
     )
 
 
-# UNKNOWN is offered on purpose: a hard filter drops every posting whose facet is unstated the
-# moment it is set, and this is how a user keeps them.
-_OPTIONS = {
-    enum: [
-        (member.value, "not stated" if member == "unknown" else member.replace("_", " "))
-        for member in enum
-    ]
-    for enum in (WorkMode, Seniority, EmploymentType)
-}
-
-
 @app.get("/profile", response_class=HTMLResponse)
 async def profile_form(request: Request):
     session = request.state.session
     async with connect() as conn:
         row = await users_q.get_profile(conn, session["uid"])
         profile = profile_from_row(row)
-        # Priced before the edit, not billed after it.
-        pending = await match_q.count_pending_rerank(conn, session["uid"], profile.version + 1)
+        # Priced before the edit, not billed after it. An upper bound: what a re-score actually
+        # covers is whatever the NEW profile's queries retrieve, which needs the queries to run.
+        pending = await match_q.count_pending_rerank(
+            conn, session["uid"], freshness.fresh_since(get_settings().retrieval_horizon_days)
+        )
     return templates.TemplateResponse(
         request,
         "profile.html",
@@ -390,9 +431,6 @@ async def profile_form(request: Request):
             "country_names": COUNTRY_NAMES,
             "language_names": LANGUAGES,
             "background_max_chars": BACKGROUND_MAX_CHARS,
-            "work_mode_options": _OPTIONS[WorkMode],
-            "seniority_options": _OPTIONS[Seniority],
-            "employment_type_options": _OPTIONS[EmploymentType],
         },
     )
 
@@ -408,10 +446,8 @@ async def profile_save(
     must_have: str = Form(""),
     keywords: str = Form(""),
     countries: str = Form(""),
+    remote_anywhere: str = Form(""),
     cities: str = Form(""),
-    work_modes: Annotated[list[str] | None, Form()] = None,
-    seniorities: Annotated[list[str] | None, Form()] = None,
-    employment_types: Annotated[list[str] | None, Form()] = None,
     min_salary_eur_year: str = Form("0"),
 ):
     session = request.state.session
@@ -425,47 +461,18 @@ async def profile_save(
             "must_have": _lines(must_have),
             "keywords": _lines(keywords),
             "countries": _choices(_lines(countries), COUNTRY_NAMES, "country"),
+            # An unticked checkbox submits nothing, so absence is False here -- unlike the
+            # scoring ceiling, where a disabled input's absence means "keep what is set".
+            "remote_anywhere": remote_anywhere == "yes",
             "cities": _lines(cities),
-            "work_modes": _choices(work_modes or [], WorkMode, "work mode"),
-            "seniorities": _choices(seniorities or [], Seniority, "seniority"),
-            "employment_types": _choices(
-                employment_types or [], EmploymentType, "employment type"
-            ),
             "min_salary_eur_year": _decimal(min_salary_eur_year, Decimal(0)),
         }
     except (UnknownChoice, FieldTooLong) as exc:
         return HTMLResponse(str(exc), status_code=400)
 
-    form = await request.form()
+    # No confirm step: a save destroys nothing. A profile change publishes a second edition for
+    # today beside the one already there, so there is nothing to ask the user's permission for.
     async with connect() as conn:
-        current = await users_q.get_profile(conn, session["uid"])
-        rescore = users_q.changes_scoring(current, values)
-        today = clock.today()
-        # Today's edition is the only one a save may replace, and only with the user's word for
-        # it. Every older edition is a published record and is never touched, so there is
-        # nothing to ask about on a day that has not been published yet.
-        replacing = await match_q.edition_size(conn, session["uid"], today) if rescore else 0
-        if replacing and form.get("confirm") != "yes":
-            pending = await match_q.count_pending_rerank(
-                conn, session["uid"], (current.version if current else 0) + 1
-            )
-            return templates.TemplateResponse(
-                request,
-                "profile_confirm.html",
-                {
-                    "active": "profile",
-                    "username": session["u"],
-                    "replacing": replacing,
-                    "rescore_estimate": pending,
-                    # Re-posted verbatim, so nothing the user typed is lost on the way through
-                    # this page and no field list has to be kept in step with the form.
-                    "fields": [
-                        (key, value)
-                        for key, value in form.multi_items()
-                        if key != "confirm" and isinstance(value, str)
-                    ],
-                },
-            )
         version, rescore = await users_q.save_profile(conn, session["uid"], values)
         if rescore:
             await _queue_match(conn, session["uid"])
@@ -491,7 +498,6 @@ async def settings_form(request: Request):
             "active": "settings",
             "model": settings.default_llm_model,
             "provider": settings.default_llm_provider or "",
-            "rerank_limit": rerank.RERANK_LIMIT,
             "monthly_budget_usd": settings.monthly_budget_usd,
             "profile": profile,
             # Never the key itself, not even to the user who set it.

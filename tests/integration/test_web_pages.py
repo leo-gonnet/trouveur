@@ -11,6 +11,7 @@ reaches the same code a browser would for a fraction of the maintenance.
 
 from __future__ import annotations
 
+import re
 from datetime import date
 from decimal import Decimal
 
@@ -302,8 +303,8 @@ async def test_saving_a_scoring_field_bumps_the_profile_version(client, seeded):
     form = {
         "title": "Head of Operations", "years_experience": "9", "objectives": "",
         "languages": "de", "must_have": "", "keywords": "lean",
-        "countries": "DE\nAT", "cities": "", "work_modes": ["remote", "hybrid"],
-        "min_salary_eur_year": "60000", "confirm": "yes",
+        "countries": "DE\nAT", "remote_anywhere": "yes", "cities": "",
+        "min_salary_eur_year": "60000",
     }
     assert (await client.post("/profile", data=form)).status_code == 303
     async with connect() as conn:
@@ -335,7 +336,7 @@ async def test_a_scoring_change_queues_a_re_score_without_erasing_anything(clien
 
     form = {
         "title": "Something else entirely", "years_experience": "9",
-        "countries": "DE\nAT", "confirm": "yes",
+        "countries": "DE\nAT",
     }
     assert (await client.post("/profile", data=form)).status_code == 303
 
@@ -344,7 +345,9 @@ async def test_a_scoring_change_queues_a_re_score_without_erasing_anything(clien
         after = (await conn.execute(
             user_job_match.select().where(user_job_match.c.user_id == seeded["user_id"])
         )).one()
-        pending = await match_q.pending_rerank(conn, seeded["user_id"], profile.version, 100)
+        pending = await match_q.pending_rerank(
+            conn, seeded["user_id"], profile.version, [seeded["job_id"]]
+        )
     assert after.llm_score == 92, "a profile edit destroyed the score it was meant to replace"
     assert after.state == "saved", "a profile edit must not touch the user's own decisions"
     assert [row.job_id for row in pending] == [seeded["job_id"]], "no re-score was queued"
@@ -360,7 +363,7 @@ async def test_retrieval_does_not_restamp_the_version_a_posting_was_scored_under
     """
     form = {
         "title": "Something else entirely", "years_experience": "9",
-        "countries": "DE\nAT", "confirm": "yes",
+        "countries": "DE\nAT",
     }
     assert (await client.post("/profile", data=form)).status_code == 303
 
@@ -375,31 +378,39 @@ async def test_retrieval_does_not_restamp_the_version_a_posting_was_scored_under
                 "dense_rank": 2, "lexical_rank": 2,
             }],
         )
-        pending = await match_q.pending_rerank(conn, seeded["user_id"], profile.version, 100)
+        pending = await match_q.pending_rerank(
+            conn, seeded["user_id"], profile.version, [seeded["job_id"]]
+        )
     assert [row.job_id for row in pending] == [seeded["job_id"]], (
         "retrieval re-stamped the score's profile version and hid the pending re-score"
     )
 
 
-async def test_replacing_todays_edition_is_asked_about_before_it_happens(client, seeded):
-    """Today's edition is the only one a save may replace, so the save has to ask first."""
+async def test_saving_a_profile_destroys_no_edition_and_asks_nothing(client, seeded):
+    """There is no confirm step, because a save no longer destroys anything.
+
+    A profile change used to replace today's edition, so the form had to ask first. Now it
+    publishes a second edition for the day beside the first, which leaves nothing to agree to --
+    and removes the one exception to "an edition is never rewritten".
+    """
+    from datetime import date as _date
+
+    user_id = seeded["user_id"]
+    today = _date(2026, 9, 24)
+    ids = await _all_match_ids(user_id)
+    await _publish(user_id, ids, today, version=1)
+
+    async with connect() as conn:
+        before = (await users_q.get_profile(conn, user_id)).version
+
     form = {"title": "Something else entirely", "years_experience": "9", "countries": "DE\nAT"}
+    saved = await client.post("/profile", data=form)
+    assert saved.status_code == 303, "a save was interrupted by a page that no longer exists"
 
     async with connect() as conn:
-        before = (await users_q.get_profile(conn, seeded["user_id"])).version
-
-    asked = await client.post("/profile", data=form)
-    assert asked.status_code == 200, "a replace went through without asking"
-    assert "Replace today&#39;s edition?" in asked.text or "Replace today" in asked.text
-    async with connect() as conn:
-        assert (await users_q.get_profile(conn, seeded["user_id"])).version == before, (
-            "the profile was saved before the user agreed"
-        )
-
-    confirmed = await client.post("/profile", data={**form, "confirm": "yes"})
-    assert confirmed.status_code == 303
-    async with connect() as conn:
-        assert (await users_q.get_profile(conn, seeded["user_id"])).version > before
+        assert (await users_q.get_profile(conn, user_id)).version > before
+        kept = await match_q.edition(conn, user_id, today, 1, limit=100)
+    assert len(kept) == len(ids), "saving a profile destroyed a published edition"
 
 
 async def test_a_profile_change_queues_one_match_run_for_this_user_only(client, seeded):
@@ -407,9 +418,9 @@ async def test_a_profile_change_queues_one_match_run_for_this_user_only(client, 
     from trouveur.db.queries import admin as admin_q
 
     form = {"title": "Something else entirely", "years_experience": "9", "countries": "DE\nAT"}
-    assert (await client.post("/profile", data={**form, "confirm": "yes"})).status_code == 303
+    assert (await client.post("/profile", data=form)).status_code == 303
     assert (
-        await client.post("/profile", data={**form, "title": "A third title", "confirm": "yes"})
+        await client.post("/profile", data={**form, "title": "A third title"})
     ).status_code == 303
 
     async with connect() as conn:
@@ -499,10 +510,11 @@ async def test_cancelling_a_queued_run_ends_it_immediately(client):
 
 
 async def test_an_off_list_filter_value_is_refused_rather_than_saved(client, seeded):
-    """`work_modes` is a list of an enum. A free-text value that reached the table validated on
-    the next read instead, so the Profile page and the match run both failed for that user
-    from then on."""
-    form = {"title": "x", "work_modes": ["Remote"]}
+    """`countries` is validated against what derivation can produce. A free-text value that
+    reached the table validated on the next read instead, so the Profile page and the match run
+    both failed for that user from then on -- `Remote` was the one that did it, which is now a
+    checkbox on the same filter rather than a country somebody could type."""
+    form = {"title": "x", "countries": "Remote"}
     assert (await client.post("/profile", data=form)).status_code == 400
     assert (await client.get("/profile")).status_code == 200
 
@@ -519,17 +531,21 @@ async def test_an_over_long_background_is_refused_rather_than_truncated(client, 
     form = {"title": "x", "background": "a" * (BACKGROUND_MAX_CHARS + 1)}
     assert (await client.post("/profile", data=form)).status_code == 400
 
-    form = {"title": "x", "background": "a" * BACKGROUND_MAX_CHARS, "confirm": "yes"}
+    form = {"title": "x", "background": "a" * BACKGROUND_MAX_CHARS}
     assert (await client.post("/profile", data=form)).status_code == 303
 
 
-async def test_the_profile_form_offers_every_filter_value_including_not_stated(client, seeded):
-    """Each hard filter drops postings whose facet is unknown once it is set; offering `unknown`
-    as a choice is how a user keeps them, so it must not be filtered out of the options."""
+async def test_the_profile_form_offers_location_and_nothing_else_to_filter_on(client, seeded):
+    """Location is the only hard filter, and fully-remote is part of it rather than a work mode.
+
+    The three enum pickers this replaced each needed a "not stated" tick box beside them, whose
+    only job was to undo the filter the user had just set. A picker reappearing here means a facet
+    has started dropping postings that state nothing for it again.
+    """
     body = (await client.get("/profile")).text
-    for name, value in (("work_modes", "unknown"), ("seniorities", "intern"),
-                        ("employment_types", "apprenticeship")):
-        assert f'name="{name}" value="{value}"' in body, (name, value)
+    assert 'name="remote_anywhere"' in body
+    for name in ("work_modes", "seniorities", "employment_types"):
+        assert f'name="{name}"' not in body, name
     assert '<option value="AT">Austria</option>' in body
     assert '<option value="de">German</option>' in body
 
@@ -608,3 +624,71 @@ async def test_the_card_states_how_old_the_advert_is(client, seeded):
         await conn.exec_driver_sql("UPDATE job SET posted_at = now() - interval '3 days'")
     body = (await client.get("/recommendations")).text
     assert "posted 3 days ago" in body
+
+
+async def test_a_long_edition_is_paged_and_the_pager_renders(client, seeded, monkeypatch):
+    """Nothing bounds an edition's length any more, so the page has to.
+
+    Rendered with a page size of one rather than a fixture of 51 postings, because a fixture that
+    fits on one page never executes the pager markup at all -- and under StrictUndefined a name
+    the route forgot to pass fails only when it is reached.
+    """
+    from trouveur.web import app as web_app
+
+    user_id = seeded["user_id"]
+    ids = await _all_match_ids(user_id)
+    day = date(2026, 9, 14)
+    await _publish(user_id, ids, day)
+    monkeypatch.setattr(web_app, "EDITION_PAGE", 1)
+
+    first = (await client.get(f"/recommendations?edition={day}&v=1")).text
+    assert "next" in first
+    assert "previous" not in first
+
+    cursor = re.search(r"after=(\d+_\d+)", first).group(1)
+    second = (await client.get(f"/recommendations?edition={day}&v=1&after={cursor}")).text
+    assert "previous" in second
+
+    past_the_end = await client.get(f"/recommendations?edition={day}&v=1&after=0_0")
+    assert past_the_end.status_code == 200
+    assert "Nothing further in this edition" in past_the_end.text
+
+
+async def test_dismissing_on_one_page_does_not_skip_the_next_page(client, seeded, monkeypatch):
+    """The reason an edition is paged by cursor and not by offset.
+
+    The dismiss filter runs before the page is cut, so with OFFSET the boundary moves under the
+    reader: they are looking at page one, they dismiss what is on it, and the "next" link they
+    already have now points one row too far. The posting that shifted across the boundary is
+    never shown on any page, and nothing says so -- dismissing is an htmx swap of the single
+    widget, so the list on screen does not shrink to hint at it either.
+
+    A cursor is anchored to the row the reader last saw, so it means the same thing before and
+    after the set changes underneath it.
+    """
+    from trouveur.web import app as web_app
+
+    user_id = seeded["user_id"]
+    ids = await _all_match_ids(user_id)
+    assert len(ids) >= 3, "the skip needs a page to fall off the end of"
+    day = date(2026, 9, 14)
+    await _publish(user_id, ids, day)
+    monkeypatch.setattr(web_app, "EDITION_PAGE", 1)
+
+    # Every posting is published at the same score, so the order is the tiebreak: job_id DESC.
+    first, second = sorted(ids, reverse=True)[:2]
+
+    page_one = (await client.get(f"/recommendations?edition={day}&v=1")).text
+    assert f'/job/{first}/state' in page_one
+    next_link = re.search(r'href="([^"]*after=[^"]*)"', page_one).group(1).replace("&amp;", "&")
+
+    # The reader dismisses what is on the page they are looking at, then follows the link that
+    # was already rendered for them.
+    assert (
+        await client.post(f"/job/{first}/state", data={"state": "dismissed"})
+    ).status_code == 200
+
+    page_two = (await client.get(next_link)).text
+    assert f'/job/{second}/state' in page_two, (
+        "the posting after the dismissed one was stepped over and is now unreachable"
+    )
