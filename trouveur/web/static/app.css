@@ -97,6 +97,8 @@ main { flex: 1; width: 100%; max-width: 1440px; margin: 0 auto; padding: var(--s
 .grid { display: grid; gap: var(--space-5); align-items: start; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
 .grid > * { min-width: 0; }
 .grid .section { margin: 0; }
+/* A form's buttons belong to the whole form, not to whichever section happens to be last. */
+.grid > .actions { grid-column: 1 / -1; }
 
 /* ---------- KPIs ---------- */
 .kpis { display: grid; gap: var(--space-4); margin-bottom: var(--space-5);
