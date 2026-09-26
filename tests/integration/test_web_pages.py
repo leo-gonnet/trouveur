@@ -613,3 +613,33 @@ async def test_the_card_states_how_old_the_advert_is(client, seeded):
         await conn.exec_driver_sql("UPDATE job SET posted_at = now() - interval '3 days'")
     body = (await client.get("/recommendations")).text
     assert "posted 3 days ago" in body
+
+
+async def test_a_long_edition_is_paged_and_the_pager_renders(client, seeded, monkeypatch):
+    """Nothing bounds an edition's length any more, so the page has to.
+
+    The scoring cap of 150 used to decide this as a side effect; the day a profile changes an
+    edition can hold thousands. Rendered with a page size of one rather than a fixture of 51
+    postings, because a fixture that fits on one page never executes the pager markup at all --
+    and under StrictUndefined a name the route forgot to pass fails only when it is reached.
+    """
+    from trouveur.web import app as web_app
+
+    user_id = seeded["user_id"]
+    ids = await _all_match_ids(user_id)
+    day = date(2026, 9, 14)
+    await _publish(user_id, ids, day)
+    monkeypatch.setattr(web_app, "EDITION_PAGE", 1)
+
+    first = (await client.get(f"/recommendations?edition={day}&page=1")).text
+    assert "page 1" in first
+    assert "next" in first
+    assert "previous" not in first
+
+    second = (await client.get(f"/recommendations?edition={day}&page=2")).text
+    assert "page 2" in second
+    assert "previous" in second
+
+    past_the_end = await client.get(f"/recommendations?edition={day}&page=99")
+    assert past_the_end.status_code == 200
+    assert "Nothing on page 99" in past_the_end.text

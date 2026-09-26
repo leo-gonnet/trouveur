@@ -149,7 +149,7 @@ def _arguments(ctx: dict) -> dict[str, dict]:
             "fresh_since": _cutoff(),
         },
         "match.editions": {"user_id": user_id},
-        "match.edition": {"user_id": user_id, "day": _today()},
+        "match.edition": {"user_id": user_id, "day": _today(), "limit": 50, "offset": 0},
         "match.edition_size": {"user_id": user_id, "day": _today()},
         "match.clear_stale_edition": {
             "user_id": user_id, "day": _today(), "profile_version": 1,

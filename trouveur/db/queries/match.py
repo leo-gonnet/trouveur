@@ -327,11 +327,18 @@ async def editions(conn: AsyncConnection, user_id: int) -> list[sa.Row]:
     )
 
 
-async def edition(conn: AsyncConnection, user_id: int, day: date) -> list[sa.Row]:
-    """One day's edition, best first. No score cut: the day is the cut.
+async def edition(
+    conn: AsyncConnection, user_id: int, day: date, *, limit: int, offset: int = 0
+) -> list[sa.Row]:
+    """One page of one day's edition, best first. No score cut: the day is the cut.
 
     The score, reason and red flags are the EDITION's, not user_job_match's -- that row holds the
     current verdict, and reading it here would let a later re-score rewrite what this day said.
+
+    Paged because nothing bounds an edition's length any more. The old scoring cap of 150 was
+    doing that job as a side effect, and the day a profile changes an edition can hold thousands.
+    The dropdown's count is still the whole day, from `editions()`: a page is how much is being
+    read at once, not how much the day held.
     """
     return list(
         await conn.execute(
@@ -351,9 +358,10 @@ async def edition(conn: AsyncConnection, user_id: int, day: date) -> list[sa.Row
                   AND e.day = CAST(:day AS date)
                   AND {_NOT_DISMISSED}
                 ORDER BY e.llm_score DESC, j.posted_at DESC NULLS LAST
+                LIMIT :limit OFFSET :offset
                 """
             ),
-            {"user_id": user_id, "day": day},
+            {"user_id": user_id, "day": day, "limit": limit, "offset": offset},
         )
     )
 

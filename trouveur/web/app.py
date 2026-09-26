@@ -232,8 +232,13 @@ async def logout():
     return response
 
 
+# How much of an edition is read at once. A module constant so a test can shrink it and render the
+# pager itself: a page test whose fixture fits on one page never executes that markup at all.
+EDITION_PAGE = 50
+
+
 @app.get("/recommendations", response_class=HTMLResponse)
-async def recommendations(request: Request, edition: str = ""):
+async def recommendations(request: Request, edition: str = "", page: int = 1):
     """One day's edition. The latest by default; older ones stay reachable and never change.
 
     A day rather than one growing list, which had no time axis: a strong posting from three weeks
@@ -242,11 +247,19 @@ async def recommendations(request: Request, edition: str = ""):
     key, so the page is a reading list rather than a console.
     """
     session = request.state.session
+    page = max(page, 1)
+    limit = EDITION_PAGE
     async with connect() as conn:
         profile_row = await users_q.get_profile(conn, session["uid"])
         available = await match_q.editions(conn, session["uid"])
         chosen = _chosen_edition(edition, available)
-        jobs = await match_q.edition(conn, session["uid"], chosen.day) if chosen else []
+        jobs = (
+            await match_q.edition(
+                conn, session["uid"], chosen.day, limit=limit, offset=(page - 1) * limit
+            )
+            if chosen
+            else []
+        )
     days = [row.day for row in available]
     index = days.index(chosen.day) if chosen else -1
     return templates.TemplateResponse(
@@ -259,6 +272,8 @@ async def recommendations(request: Request, edition: str = ""):
             "edition": chosen,
             "older": days[index + 1] if 0 <= index < len(days) - 1 else None,
             "newer": days[index - 1] if index > 0 else None,
+            "page": page,
+            "has_more": len(jobs) == limit,
             "paused": profile_row is not None and not profile_row.scoring_enabled,
             "profile_version": profile_row.version if profile_row else 1,
             "username": session["u"],

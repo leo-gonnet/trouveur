@@ -66,18 +66,20 @@ def test_search_left_joins_match_state_so_unmatched_jobs_still_appear():
     assert re.search(r"LEFT JOIN job_facet", _SEARCH_SQL)
 
 
-def test_an_edition_shows_everything_it_holds():
-    """Still narrower than Search -- scored only -- but with no cut-off inside the day.
+def test_an_edition_has_no_score_cut_only_a_page():
+    """Still narrower than Search -- scored only -- but nothing inside the day is hidden.
 
-    A threshold hid postings the user had already paid to have scored, behind a number they had
-    to guess. The day is the cut; re-adding a score one would do it again, silently.
+    A threshold hid postings the user had already paid to have scored, behind a number they had to
+    guess. The day is the cut. The LIMIT here is a page the reader walks with OFFSET, not a
+    ceiling: every posting in the day is reachable, which is the property a threshold broke.
     """
     import inspect
 
     body = inspect.getsource(edition)
     assert ":threshold" not in body
     assert "llm_score >=" not in body
-    assert "LIMIT" not in body, "an edition is bounded by what was scored, not by a page size"
+    assert "LIMIT :limit OFFSET :offset" in body, "a page must be walkable, not a fixed cut"
+    assert "ORDER BY e.llm_score DESC" in body
 
 
 def test_an_edition_is_read_from_its_own_table_not_derived_from_a_score():

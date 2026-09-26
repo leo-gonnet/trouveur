@@ -77,8 +77,8 @@ async def test_postings_published_on_different_days_land_in_different_editions(s
     async with connect() as conn:
         days = await mq.editions(conn, user_id)
         assert [row.day for row in days] == [tuesday, monday], "editions are not newest first"
-        assert len(await mq.edition(conn, user_id, monday)) == 1
-        assert len(await mq.edition(conn, user_id, tuesday)) == len(ids) - 1
+        assert len(await mq.edition(conn, user_id, monday, limit=100)) == 1
+        assert len(await mq.edition(conn, user_id, tuesday, limit=100)) == len(ids) - 1
 
 
 async def test_an_edition_records_the_profile_version_that_produced_it(seeded):
@@ -113,7 +113,7 @@ async def test_changing_the_profile_leaves_every_published_edition_standing(seed
         )
         assert rescore, "changing the title must count as a scoring change"
         assert version > 1
-        rows = await mq.edition(conn, user_id, monday)
+        rows = await mq.edition(conn, user_id, monday, limit=100)
         assert len(rows) == len(ids), "a profile change erased a published edition"
 
 
@@ -126,8 +126,9 @@ async def test_re_scoring_a_posting_does_not_move_it_out_of_its_edition(seeded):
     await _publish(user_id, ids[:1], friday, version=2)
 
     async with connect() as conn:
-        assert len(await mq.edition(conn, user_id, monday)) == 1, "monday lost its posting"
-        assert len(await mq.edition(conn, user_id, friday)) == 1
+        monday_rows = await mq.edition(conn, user_id, monday, limit=100)
+        assert len(monday_rows) == 1, "monday lost its posting"
+        assert len(await mq.edition(conn, user_id, friday, limit=100)) == 1
 
 
 async def test_a_posting_cannot_be_recommended_twice_under_one_profile_version(seeded):
@@ -162,7 +163,7 @@ async def test_a_day_with_no_scoring_simply_has_no_edition(seeded):
     async with connect() as conn:
         days = [row.day for row in await mq.editions(conn, user_id)]
         assert days == [wednesday, monday]
-        assert await mq.edition(conn, user_id, monday + timedelta(days=1)) == []
+        assert await mq.edition(conn, user_id, monday + timedelta(days=1), limit=100) == []
 
 
 async def test_an_edition_survives_its_postings_ageing_past_the_horizon(seeded):
@@ -180,7 +181,7 @@ async def test_an_edition_survives_its_postings_ageing_past_the_horizon(seeded):
             "UPDATE job SET posted_at = now() - interval '300 days', "
             "first_seen_at = now() - interval '300 days'"
         )
-        rows = await mq.edition(conn, user_id, long_ago)
+        rows = await mq.edition(conn, user_id, long_ago, limit=100)
     assert len(rows) == len(ids)
 
 
@@ -196,7 +197,7 @@ async def test_a_posting_that_closes_stays_in_the_edition_it_was_published_in(se
 
     async with connect() as conn:
         await conn.exec_driver_sql("UPDATE job SET closed_at = now()")
-        rows = await mq.edition(conn, user_id, monday)
+        rows = await mq.edition(conn, user_id, monday, limit=100)
         counted = {row.day: row.postings for row in await mq.editions(conn, user_id)}
     assert len(rows) == len(ids), "closing a posting emptied a published edition"
     assert counted[monday] == len(rows), "the dropdown count and the list disagree"
@@ -212,6 +213,6 @@ async def test_clearing_a_day_only_touches_rows_from_another_profile(seeded):
 
     async with connect() as conn:
         removed = await mq.clear_stale_edition(conn, user_id, today, profile_version=2)
-        remaining = await mq.edition(conn, user_id, today)
+        remaining = await mq.edition(conn, user_id, today, limit=100)
     assert removed == 1, "the old-profile row was not replaced"
     assert len(remaining) == len(ids) - 1, "rows at the current version were destroyed too"

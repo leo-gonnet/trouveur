@@ -170,7 +170,7 @@ async def test_scores_are_cached_and_spend_accumulates(
         )
         days = await mq.editions(conn, user_id)
         assert len(days) == 1
-        assert len(await mq.edition(conn, user_id, days[0].day)) == len(to_score)
+        assert len(await mq.edition(conn, user_id, days[0].day, limit=100)) == len(to_score)
 
 
 async def test_bumping_a_version_refills_the_queue(clean_db, gh_board, aa_listing, aa_detail):

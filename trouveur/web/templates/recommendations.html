@@ -28,6 +28,22 @@
   <div class="results">
     {% for job in jobs %}{{ m.job_card(job) }}{% endfor %}
   </div>
+  {% if has_more or page > 1 %}
+  <div class="pager">
+    {% if page > 1 %}
+      <a class="pill" href="/recommendations?edition={{ edition.day }}&page={{ page - 1 }}">← previous</a>
+    {% endif %}
+    <span class="hint">page {{ page }}</span>
+    {% if has_more %}
+      <a class="pill" href="/recommendations?edition={{ edition.day }}&page={{ page + 1 }}">next →</a>
+    {% endif %}
+  </div>
+  {% endif %}
+{% elif editions and page > 1 %}
+<p class="empty">
+  Nothing on page {{ page }}. <a href="/recommendations?edition={{ edition.day }}">Back to the
+  start of this edition.</a>
+</p>
 {% elif editions %}
 <p class="empty">
   Every posting in this edition was dismissed. Nothing is lost — pick another day above, or
