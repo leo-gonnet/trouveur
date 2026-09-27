@@ -15,7 +15,6 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from trouveur.config import get_settings
-from trouveur.db.queries import freshness
 from trouveur.db.schema import job, job_embedding, job_facet, work_item
 
 log = logging.getLogger(__name__)
@@ -121,6 +120,63 @@ async def fail(conn: AsyncConnection, item_ids: list[int], error: str) -> None:
     )
 
 
+async def pause_source(
+    conn: AsyncConnection,
+    kind: WorkKind,
+    source: str,
+    pause: timedelta,
+    reason: str,
+    claimed_ids: list[int],
+) -> int:
+    """Hold back every live item of one source for `pause`, spending no attempt.
+
+    For a source failing wholesale -- 1,500 Workday detail fetches got a 403 in one burst, each
+    burned all its attempts, and they parked while most of the postings closed. The fault was the
+    source, not the posting, so the posting should not pay for it. Parked items are left alone,
+    and so are items another worker holds; this worker's own claims in `claimed_ids` are released.
+    """
+    result = await conn.execute(
+        work_item.update()
+        .where(
+            work_item.c.kind == kind.value,
+            work_item.c.attempts < MAX_ATTEMPTS,
+            work_item.c.job_id.in_(sa.select(job.c.id).where(job.c.source == source)),
+            sa.or_(work_item.c.claimed_at.is_(None), work_item.c.id.in_(claimed_ids)),
+        )
+        .values(
+            not_before=sa.func.greatest(work_item.c.not_before, sa.func.now() + pause),
+            claimed_at=None,
+            claimed_by=None,
+            last_error=reason[:2000],
+        )
+    )
+    return result.rowcount or 0
+
+
+# The kinds closing a posting deletes (db/queries/ingest._DROP_CLOSED), so a requeue does not
+# revive what a close would have dropped.
+_DROPPED_ON_CLOSE = (WorkKind.DETAIL, WorkKind.EMBED)
+
+
+async def requeue_parked(conn: AsyncConnection, kind: WorkKind) -> tuple[int, int]:
+    """Give every parked item of `kind` a fresh set of attempts. Returns (requeued, dropped):
+    an item whose posting has closed since it parked is deleted rather than retried."""
+    parked = sa.and_(work_item.c.kind == kind.value, work_item.c.attempts >= MAX_ATTEMPTS)
+    dropped = 0
+    if kind in _DROPPED_ON_CLOSE:
+        closed = sa.select(job.c.id).where(job.c.closed_at.isnot(None))
+        result = await conn.execute(
+            work_item.delete().where(parked, work_item.c.job_id.in_(closed))
+        )
+        dropped = result.rowcount or 0
+    result = await conn.execute(
+        work_item.update()
+        .where(parked)
+        .values(attempts=0, last_error=None, not_before=sa.func.now())
+    )
+    return result.rowcount or 0, dropped
+
+
 async def release_stale(conn: AsyncConnection, older_than: timedelta = STALE_CLAIM_AFTER) -> int:
     cutoff = datetime.now(UTC) - older_than
     result = await conn.execute(
@@ -136,6 +192,10 @@ def _stale_query(
 ):
     """Rows whose derived output is below `target_version`, in KEYSET order -- never OFFSET,
     which would re-scan everything it had already skipped on each chunk."""
+    # Imported here: trouveur.db.queries reaches trouveur.ingest, which imports this module, so a
+    # top-level import fails whenever trouveur.work is the first of them to load.
+    from trouveur.db.queries import freshness
+
     if kind is WorkKind.DETAIL:
         # Only the source knows whether it has a detail phase, so refilling here would encode a
         # per-source fact in the queue -- exactly the leak the registry prevents.
@@ -190,6 +250,8 @@ async def refill(
 
     Chunked and resumable, so stopping halfway and re-running are both free.
     """
+    from trouveur.db.queries import freshness
+
     fresh_since = freshness.fresh_since(get_settings().retrieval_horizon_days)
     rows = list(
         await conn.execute(

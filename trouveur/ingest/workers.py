@@ -7,6 +7,7 @@ same function that ran on today's postings, so there is no separate migration sc
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -27,11 +28,16 @@ from trouveur.models import (
 )
 from trouveur.sources.errors import SourceError
 from trouveur.sources.http import PoliteClient
-from trouveur.work import WorkKind, claim, complete, fail
+from trouveur.work import WorkKind, claim, complete, fail, pause_source
 
 log = logging.getLogger(__name__)
 
 WORKER = "runner"
+
+# Consecutive failures from one source in one batch that read as the source failing rather than
+# its postings, and how long it is then left alone.
+SOURCE_BURST = 5
+SOURCE_PAUSE = timedelta(hours=1)
 
 
 def _to_canonical(row: sa.Row) -> CanonicalJob:
@@ -168,7 +174,11 @@ async def drain_detail(
     fetched: dict[str, list[str]] = {}
     done: list[int] = []
     retired: list[int] = []
+    failed_in_a_row: dict[str, int] = {}
+    paused: set[str] = set()
     for row in targets:
+        if row.source in paused:
+            continue
         source = sources.get(row.source)
         if source is None:
             await fail(conn, [by_job[row.id]], f"no source registered for {row.source!r}")
@@ -177,7 +187,19 @@ async def drain_detail(
             document = await source.fetch_detail(client, row.external_id)
         except SourceError as exc:
             await fail(conn, [by_job[row.id]], str(exc))
+            failed_in_a_row[row.source] = failed_in_a_row.get(row.source, 0) + 1
+            if failed_in_a_row[row.source] >= SOURCE_BURST:
+                paused.add(row.source)
+                reason = (
+                    f"{row.source} paused for {SOURCE_PAUSE} after {SOURCE_BURST} detail "
+                    f"failures in a row; the last was: {exc}"
+                )
+                held = await pause_source(
+                    conn, WorkKind.DETAIL, row.source, SOURCE_PAUSE, reason, list(by_job.values())
+                )
+                log.warning("%s (%d item(s) held back)", reason, held)
             continue
+        failed_in_a_row[row.source] = 0
         if document is None:
             # A 404 is the posting telling us it is gone -- evidence, not the age heuristic.
             retired.append(row.id)

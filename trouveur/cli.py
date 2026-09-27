@@ -125,6 +125,30 @@ def refill(kind: str, chunk: int) -> None:
 
 @main.command()
 @click.option(
+    "--kind",
+    type=click.Choice(["detail", "derive", "embed", "dedup"]),
+    required=True,
+    help="Which queue's parked items to retry.",
+)
+def requeue(kind: str) -> None:
+    """Retry items that exhausted their attempts, with a fresh set of them.
+
+    For after the cause is fixed: a parked item otherwise waits thirty days. An item whose
+    posting has closed in the meantime is dropped instead of retried.
+    """
+    from trouveur.db.engine import connect
+    from trouveur.work import WorkKind, requeue_parked
+
+    async def _run() -> tuple[int, int]:
+        async with connect() as conn:
+            return await requeue_parked(conn, WorkKind(kind))
+
+    requeued, dropped = asyncio.run(_run())
+    click.echo(f"requeued {requeued} parked {kind} item(s); dropped {dropped} for closed postings")
+
+
+@main.command()
+@click.option(
     "--to",
     "target",
     default=None,
