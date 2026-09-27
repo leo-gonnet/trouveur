@@ -38,6 +38,12 @@ Bumping a version in `trouveur/versions.py` refills the work queue with every ro
 ordinary worker drains it. **Upgrade and backfill are therefore the same code path**, which is the
 only arrangement in which the repair path stays tested — it runs every day.
 
+**The runner does that refill itself when it starts** (`runner.refill_below_current`), for derive
+and dedup. It used to wait for somebody to run `trouveur refill` by hand, and #27 shipped a
+`DERIVE_VERSION` bump without it: the city filter matched nothing for days. Embed is deliberately
+not refilled at start -- it would queue postings still waiting for their description, and a model
+change is hours of CPU that an operator starts on purpose.
+
 Three rules follow, and none of them are negotiable:
 
 - **Normalisation produces structure; derivation produces interpretation.** A location arrives as

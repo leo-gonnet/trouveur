@@ -188,6 +188,39 @@ async def test_bumping_a_version_refills_the_queue(clean_db, gh_board, aa_listin
     assert queued == 3
 
 
+async def test_the_runner_refills_rows_below_the_shipped_version_once(
+    clean_db, gh_board, aa_listing, aa_detail
+):
+    """A bump shipped without a manual refill left the city filter matching nothing for days.
+    The runner does it at start, and a restart neither duplicates nor revives a parked item."""
+    from trouveur import versions
+    from trouveur.db.engine import connect
+    from trouveur.runner.service import refill_below_current
+    from trouveur.work import MAX_ATTEMPTS
+
+    await seed_corpus(gh_board, aa_listing, aa_detail)
+    async with connect() as conn:
+        await conn.exec_driver_sql(
+            f"UPDATE job_facet SET derive_version = {versions.DERIVE_VERSION - 1}"
+        )
+
+    assert await refill_below_current() == {"derive": 3, "dedup": 0}
+
+    async with connect() as conn:
+        await conn.exec_driver_sql(
+            f"UPDATE work_item SET attempts = {MAX_ATTEMPTS} "
+            "WHERE id = (SELECT min(id) FROM work_item)"
+        )
+    assert await refill_below_current() == {"derive": 0, "dedup": 0}
+    async with connect() as conn:
+        parked = (
+            await conn.exec_driver_sql(
+                f"SELECT count(*) FROM work_item WHERE attempts = {MAX_ATTEMPTS}"
+            )
+        ).scalar_one()
+    assert parked == 1
+
+
 async def _funded_user(*, credit="5", ceiling="5", admin=False):
     """A user with matches waiting to be scored and the means to pay for scoring them.
 
