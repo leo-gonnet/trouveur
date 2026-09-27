@@ -60,4 +60,8 @@ jobs:
             docker compose pull
             docker compose run --rm migrate
             docker compose up -d --remove-orphans
-            docker image prune -f
+            # `-f` alone removes only dangling layers, and every deploy tags its image with the
+            # commit sha, so nothing was ever untagged and each ~3.5GB build stayed on the disk
+            # for ever. `-a` is what actually reclaims them; the age filter keeps the last few
+            # days on the host so a rollback needs no pull, and anything older is still in GHCR.
+            docker image prune -af --filter "until=72h"
