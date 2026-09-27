@@ -1,4 +1,4 @@
-"""Cities join the location filter: resolved towns on facets, picked towns plus a radius on profiles.
+"""Cities join the location filter: resolved towns on facets, picked towns and a radius on profiles.
 
 A city could not be filtered while it was stored as the source spelled it: `Wien`, `Vienna` and
 `Wien 10., Favoriten` were three different values, and a filter on one silently dropped the other
