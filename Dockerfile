@@ -28,16 +28,11 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # cached intfloat/multilingual-e5-small, so the download this layer exists to prevent happened on
 # the first scan anyway -- silently, until a fastembed release dropped the stale name and turned
 # a wrong-but-quiet image into a failed build.
-#
-# Both local providers are baked, not just the configured one. Switching the embedding model is a
-# setting, so the image cannot know which one it will be asked for -- and an image that carries
-# only today's choice turns the switch into a runtime download on a container that may have no
-# egress, mid-backfill. Carrying both also keeps the rollback free.
 ENV FASTEMBED_CACHE_PATH=/app/.fastembed
 RUN uv run --no-dev python -c \
     "from fastembed import TextEmbedding; \
-     from trouveur.ingest.embed.local import LocalOnnxMpnetProvider, LocalOnnxProvider; \
-     [TextEmbedding(model_name=p.model) for p in (LocalOnnxProvider, LocalOnnxMpnetProvider)]"
+     from trouveur.ingest.embed.local import LocalOnnxProvider; \
+     TextEmbedding(model_name=LocalOnnxProvider.model)"
 
 
 FROM python:3.12-slim-bookworm

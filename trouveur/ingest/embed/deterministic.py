@@ -1,6 +1,6 @@
 """A reproducible stand-in provider, for tests and for exercising the pipeline without a model.
 
-Its vectors carry no semantics. Rows it writes carry embedding_version "deterministic:sha256:384",
+Its vectors carry no semantics. Rows it writes carry embedding_version "deterministic:sha256:768",
 so a database running on it is obvious from the data rather than from a config file.
 """
 

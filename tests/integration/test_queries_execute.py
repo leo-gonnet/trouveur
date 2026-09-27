@@ -133,7 +133,7 @@ def _arguments(ctx: dict) -> dict[str, dict]:
         "jobs.load_for_derive": {"job_ids": [job_id]},
         "jobs.write_facets": {"rows": [ctx["facet_row"]]},
         "jobs.load_for_embedding": {"job_ids": [job_id]},
-        "jobs.write_embeddings": {"rows": [(job_id, "probe:probe:384", [0.01] * 384)]},
+        "jobs.write_embeddings": {"rows": [(job_id, "probe:probe:768", [0.01] * 768)]},
         "jobs.load_for_dedup": {"job_ids": [job_id]},
         "jobs.write_dedup_markers": {"rows": [(job_id, b"probe-group")], "dedup_version": 1},
         "jobs.detail_targets": {"job_ids": [job_id]},
@@ -141,7 +141,7 @@ def _arguments(ctx: dict) -> dict[str, dict]:
         "jobs.prune_stale_embeddings": {"fresh_since": _cutoff()},
         # match
         "match.dense_candidates": {
-            "profile": ctx["profile"], "vector": [0.01] * 384, "limit": 5,
+            "profile": ctx["profile"], "vector": [0.01] * 768, "limit": 5,
             "fresh_since": _cutoff(), "seen_since": _cutoff(),
         },
         "match.lexical_candidates": {
