@@ -1,4 +1,4 @@
-"""Per-user search profile and credentials.
+"""Per-user search profile.
 
 Profiles are per user and carry their own version. Editing one deliberately invalidates that
 user's cached LLM scores and nobody else's -- which is why version lives here rather than in a
@@ -78,7 +78,16 @@ class UserProfile(BaseModel):
     # A preference, not a filter. It reaches the reranker as prompt text.
     min_salary_eur_year: Decimal = Decimal(0)
 
-    # The user's pause on spending. Off, no paid call runs for them at all; retrieval is free
-    # and keeps going, so Search still works. Never a SCORING_FIELD: it decides whether we spend,
-    # not what a good match is, so toggling it must not invalidate a cached score.
+    # The user's two cost controls, and neither is a SCORING_FIELD: they decide whether and how
+    # fast we spend, not what a good match is, so touching either must not invalidate a cached
+    # score. Off, no paid call runs for them at all; retrieval is free and keeps going, so Search
+    # still works.
     scoring_enabled: bool = True
+    # Twenty-five cents buys roughly a thousand postings at the measured per-posting cost, which
+    # is more than a day's arrivals ever survive fusion. Deliberately not a setting: an
+    # installation-wide default would be a second place this number lives, and the only value
+    # that matters is the one on the user's own row.
+    daily_ceiling_usd: Decimal = Decimal("0.25")
+    # Whether the day's edition is also mailed. Not a cost control and not a SCORING_FIELD: it
+    # decides where a reader meets what was already scored.
+    digest_enabled: bool = True

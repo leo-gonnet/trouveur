@@ -11,15 +11,15 @@ On the profile, `cities` was free text read only by the reranker. It becomes `ci
 from the same list, with one `radius_km` around them. The old free-text values cannot be turned
 into ids without guessing, so they are dropped, not converted.
 
-Revision ID: 0016_city_filter
+Revision ID: 0018_city_filter
 """
 
 import sqlalchemy as sa
 
 from alembic import op
 
-revision = "0016_city_filter"
-down_revision = "0015_versioned_editions"
+revision = "0018_city_filter"
+down_revision = "0017_email_logins"
 branch_labels = None
 depends_on = None
 

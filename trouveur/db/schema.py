@@ -202,9 +202,17 @@ app_user = sa.Table(
     "app_user",
     metadata,
     sa.Column("id", sa.BigInteger, primary_key=True),
-    sa.Column("username", sa.Text, nullable=False, unique=True),
-    sa.Column("email", sa.Text),
+    # The login. Stored folded to lower case, and the unique index is on `lower(email)` (in the
+    # migration), so `Leo@x.com` cannot sit beside `leo@x.com` however it is written here -- the
+    # second account would be invisible until somebody could not log in.
+    sa.Column("email", sa.Text, nullable=False),
+    # What the UI shows, because an address is long and would otherwise be in every screenshot.
+    # Never an identifier: it is not unique and nothing looks an account up by it.
+    sa.Column("display_name", sa.Text, nullable=False, server_default=""),
     sa.Column("password_hash", sa.Text, nullable=False),
+    # Creates accounts and grants credit, and needs no credit of its own. Its own daily ceiling
+    # still applies: an admin is a reader with an unlimited balance, not an unmetered one.
+    sa.Column("is_admin", sa.Boolean, nullable=False, server_default="false"),
     sa.Column("is_active", sa.Boolean, nullable=False, server_default="true"),
     sa.Column("failed_attempts", sa.Integer, nullable=False, server_default="0"),
     sa.Column("locked_until", sa.DateTime(timezone=True)),
@@ -238,34 +246,42 @@ user_profile = sa.Table(
     # keeps working, so Search is unaffected. Not a SCORING_FIELD: it changes whether we
     # spend, never what a good match is, so flipping it must not invalidate a cached score.
     sa.Column("scoring_enabled", sa.Boolean, nullable=False, server_default="true"),
+    # The other half of that control, and the reason it lives here rather than on a credential:
+    # both are the user's cost settings, neither is a SCORING_FIELD, and a column with a default
+    # answers "nothing was posted" without the form having to distinguish it from "reset me".
+    sa.Column("daily_ceiling_usd", sa.Numeric, nullable=False, server_default="0.25"),
+    # The third switch that is the user's own and not a SCORING_FIELD. It exists because every
+    # account now has an address: a missing one used to be the only way not to get the mail, and
+    # losing that silently is worse than not having had it.
+    sa.Column("digest_enabled", sa.Boolean, nullable=False, server_default="true"),
     sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False,
               server_default=sa.func.now()),
 )
 
-# The ciphertext never leaves this table: decrypted immediately before a call, never logged, and
-# never rendered back to the browser -- the UI shows only a fingerprint.
-user_llm_credential = sa.Table(
-    "user_llm_credential",
+# Append-only: an admin's top-up, never a balance. A balance is SUM(grants) - SUM(spend), so it
+# cannot drift from what was actually billed, and every top-up keeps its own row saying who gave
+# it. `granted_by` survives the granting admin's deletion (SET NULL, not CASCADE): the grant is
+# the user's, the authorship is only a label on it.
+user_credit_grant = sa.Table(
+    "user_credit_grant",
     metadata,
-    sa.Column("user_id", sa.BigInteger, primary_key=True),
-    sa.Column("api_key_encrypted", BYTEA, nullable=False),
-    sa.Column("api_key_fingerprint", sa.Text, nullable=False),
-    sa.Column("model", sa.Text, nullable=False),
-    # Unpinned, OpenRouter spreads one model across backends at a wide price spread and differing
-    # quantisation, so neither cost nor scores are reproducible.
-    sa.Column("provider_pin", sa.Text),
-    sa.Column("monthly_budget_usd", sa.Numeric, nullable=False, server_default="5"),
-    sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False,
+    sa.Column("id", sa.BigInteger, primary_key=True),
+    sa.Column("user_id", sa.BigInteger, nullable=False),
+    sa.Column("granted_by", sa.BigInteger),
+    sa.Column("amount_usd", sa.Numeric, nullable=False),
+    sa.Column("note", sa.Text, nullable=False, server_default=""),
+    sa.Column("created_at", sa.DateTime(timezone=True), nullable=False,
               server_default=sa.func.now()),
 )
 
-# Checked BEFORE each batch, not reported after: a retry loop on someone else's card is not
-# something to discover from the user. Metered in USD, the currency OpenRouter bills in.
+# Metered per DAY, because the ceiling is a day: tested against a monthly total it would not be a
+# daily ceiling at all. Checked BEFORE each wave, not reported after -- a retry loop that empties
+# someone's credit is not something to discover from them. In USD, the currency OpenRouter bills in.
 user_llm_spend = sa.Table(
     "user_llm_spend",
     metadata,
     sa.Column("user_id", sa.BigInteger, primary_key=True),
-    sa.Column("period_month", sa.Date, primary_key=True),
+    sa.Column("period_day", sa.Date, primary_key=True),
     sa.Column("tokens_in", sa.BigInteger, nullable=False, server_default="0"),
     sa.Column("tokens_out", sa.BigInteger, nullable=False, server_default="0"),
     sa.Column("cost_usd", sa.Numeric, nullable=False, server_default="0"),

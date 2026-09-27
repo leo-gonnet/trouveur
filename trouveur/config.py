@@ -6,8 +6,6 @@ read a secret from a file inside the repo (see AGENTS.md).
 
 from __future__ import annotations
 
-from decimal import Decimal
-
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 USER_AGENT = "trouveur/0.2 (+self-hosted job search; contact via repository owner)"
@@ -29,7 +27,12 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql+asyncpg://trouveur@127.0.0.1:5432/trouveur"
     session_secret: str = "dev-only-insecure-secret"
-    encryption_key: str = "dev-only-insecure-encryption-key"
+
+    # The one LLM credential this installation has. Users are given CREDIT, not a key: asking
+    # someone to open and fund an OpenRouter account before they can be shown a single
+    # recommendation was the whole of onboarding. Unset, no paid stage runs for anybody and the
+    # free ones still do, which is the same behaviour a user with no key used to get.
+    openrouter_api_key: str = ""
 
     # Installation settings, shown read-only on Settings. Never per user: a user-chosen model
     # makes scores incomparable across users and lets the provider pin be cleared.
@@ -37,16 +40,6 @@ class Settings(BaseSettings):
     # Unpinned, OpenRouter spreads one model across backends at a wide price spread and differing
     # quantisation, so neither cost nor scores are reproducible.
     default_llm_provider: str | None = "deepinfra/fp8"
-    # The ceiling a FIRST key starts on, in USD -- the currency OpenRouter bills in, because an EUR
-    # setting would put a stale exchange rate between the meter and the cap. It is copied onto the
-    # credential when that key is saved and belongs to the user from then on: replacing a key keeps
-    # the ceiling set on it, and this value is never a reset.
-    #
-    # Twenty rather than five because nothing caps the number of postings a run scores any more. A
-    # profile change re-scores whatever survived fusion, which is thousands of calls, and a ceiling
-    # sized for 150 a run stops that part way through -- not as an error, just as an edition that is
-    # quietly short.
-    monthly_budget_usd: Decimal = Decimal(20)
     # Backends vary widely in latency, so http_timeout_seconds is far too short here.
     llm_timeout_seconds: float = 300.0
 

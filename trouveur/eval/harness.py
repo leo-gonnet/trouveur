@@ -175,11 +175,14 @@ async def _ensure_persona(persona: dict) -> UserProfile:
 
     key = persona["key"]
     async with connect() as conn:
-        existing = await users_q.get_user_by_username(conn, key)
+        # `.invalid` is reserved and can never resolve, which is what a fictional persona's
+        # address should be: these accounts are not logins and must never be mailed.
+        login = f"{key}@persona.invalid"
+        existing = await users_q.get_user_by_email(conn, login)
         user_id = (
             existing.id
             if existing
-            else await users_q.create_user(conn, key, "argon2$eval-not-a-login")
+            else await users_q.create_user(conn, login, "argon2$eval-not-a-login", key)
         )
         await users_q.save_profile(conn, user_id, dict(persona["profile"]))
         return profile_from_row(await users_q.get_profile(conn, user_id))

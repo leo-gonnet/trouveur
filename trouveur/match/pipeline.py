@@ -1,6 +1,6 @@
 """Per-user matching: retrieve, then rerank. Orchestration only.
 
-Runs per user in ISOLATION: one user's expired key or exhausted budget must never affect
+Runs per user in ISOLATION: one user's exhausted credit or daily ceiling must never affect
 another's results. Retrieval is free and re-runnable; only the last stage costs money.
 """
 
@@ -17,7 +17,6 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from trouveur import clock
 from trouveur.config import Settings, get_settings
-from trouveur.crypto import CredentialError, decrypt
 from trouveur.db.engine import connect
 from trouveur.db.queries import freshness
 from trouveur.db.queries import match as match_q
@@ -38,7 +37,11 @@ class MatchReport:
     from_cache: int = 0
     published: int = 0
     cost_usd: Decimal = Decimal(0)
-    stopped_on_budget: bool = False
+    # Two ways to run out of money, and they need different answers: the ceiling is the user's own
+    # pacing and resets tomorrow, while empty credit needs an admin to top it up. Reported apart
+    # so the page can say which one happened.
+    stopped_on_ceiling: bool = False
+    stopped_on_credit: bool = False
     stopped_on_scores: bool = False
     errors: list[str] = field(default_factory=list)
 
@@ -48,9 +51,57 @@ class MatchReport:
             f"scored={self.scored} cached={self.from_cache} "
             f"published={self.published} "
             f"cost=${self.cost_usd:.4f}"
-            + (" [budget reached]" if self.stopped_on_budget else "")
+            + (" [daily ceiling reached]" if self.stopped_on_ceiling else "")
+            + (" [out of credit]" if self.stopped_on_credit else "")
             + (" [scores ran out]" if self.stopped_on_scores else "")
         )
+
+
+@dataclass(frozen=True)
+class Spending:
+    """Permission to make paid calls for one user, on this run.
+
+    Its existence is the gate: every paid path in this module runs only when it is not None, so
+    one check covers scoring AND the billed query expansion. It replaced a per-user API key, and
+    keeps that property -- a user who may not spend simply has no Spending, exactly as a user with
+    no key had no credential.
+    """
+
+    api_key: str
+    # An admin grants credit and needs none of their own. Their daily ceiling still applies,
+    # because an unlimited balance is not a reason to be unmetered.
+    unlimited_credit: bool = False
+
+
+async def _allowance(
+    conn: AsyncConnection, settings: Settings, user, profile: UserProfile
+) -> Spending | None:
+    """Whether anything may be spent for this user, and on what key.
+
+    Four reasons it may be nothing, and all of them leave the free stages running so Search keeps
+    working: the installation has no key, the user paused scoring, their credit is gone, or today's
+    ceiling is already reached. Only the third needs somebody else to act, which is why the report
+    and the banner distinguish it.
+    """
+    if not settings.openrouter_api_key.strip() or not profile.scoring_enabled:
+        return None
+    unlimited = bool(user is not None and user.is_admin)
+    ceiling_left, credit_left = await _headroom(conn, profile, unlimited=unlimited)
+    if ceiling_left <= 0 or (credit_left is not None and credit_left <= 0):
+        return None
+    return Spending(api_key=settings.openrouter_api_key.strip(), unlimited_credit=unlimited)
+
+
+async def _headroom(
+    conn: AsyncConnection, profile: UserProfile, *, unlimited: bool
+) -> tuple[Decimal, Decimal | None]:
+    """What is left of today's ceiling, and of granted credit. `None` credit means unlimited."""
+    spend_row = await users_q.today_spend(conn, profile.user_id)
+    today = Decimal(spend_row.cost_usd) if spend_row else Decimal(0)
+    ceiling_left = Decimal(profile.daily_ceiling_usd) - today
+    if unlimited:
+        return ceiling_left, None
+    return ceiling_left, Decimal((await users_q.credit(conn, profile.user_id)).balance_usd)
 
 
 def profile_from_row(row) -> UserProfile:
@@ -96,13 +147,9 @@ async def run_for_user(
             report.errors.append("This user has no profile row.")
             return report
         profile = profile_from_row(profile_row)
-        credential = await users_q.get_credential(conn, user_id)
-        if not profile.scoring_enabled:
-            # The user's pause. Every paid path in this module is already gated on a credential,
-            # so dropping it here stops scoring AND the billed query expansion in one place.
-            # Retrieval is free and still runs, which is what keeps Search working while paused.
-            credential = None
-        expansion = await _queries(conn, settings, profile, credential, report)
+        user = await users_q.get_user(conn, user_id)
+        spending = await _allowance(conn, settings, user, profile)
+        expansion = await _queries(conn, settings, profile, spending, report)
 
     queries, adverts = expansion.queries, expansion.adverts
     if not queries:
@@ -125,10 +172,10 @@ async def run_for_user(
             fresh_since=fresh_since, seen_since=seen_since,
         )
 
-    if credential is not None and retrieved:
+    if spending is not None and retrieved:
         async with connect() as conn:
             await _rerank(
-                conn, settings, profile, credential, report, retrieved,
+                conn, settings, profile, spending, report, retrieved,
                 background=expansion.background_summary or expand.truncated_background(profile),
             )
     log.info("match complete: %s", report.summary())
@@ -136,7 +183,11 @@ async def run_for_user(
 
 
 async def _queries(
-    conn: AsyncConnection, settings: Settings, profile: UserProfile, credential, report
+    conn: AsyncConnection,
+    settings: Settings,
+    profile: UserProfile,
+    spending: Spending | None,
+    report,
 ) -> Expansion:
     """The expansion for this profile version, computed at most once per version."""
     cached = await match_q.get_query_expansion(
@@ -149,12 +200,12 @@ async def _queries(
     generated: list[str] = []
     adverts: list[str] = []
     summary = ""
-    if credential is not None and deterministic:
+    if spending is not None and deterministic:
         try:
             generated, usage = await expand.expand_with_model(
                 settings,
                 profile,
-                api_key=decrypt(credential.api_key_encrypted),
+                api_key=spending.api_key,
                 model=settings.default_llm_model,
                 provider_pin=settings.default_llm_provider,
             )
@@ -163,7 +214,7 @@ async def _queries(
                 tokens_out=usage.tokens_out, cost_usd=usage.cost_usd,
             )
             report.cost_usd += usage.cost_usd
-        except (llm.LlmError, CredentialError) as exc:
+        except llm.LlmError as exc:
             # An enhancement, never a prerequisite: retrieval must work with no key at all.
             log.info("query expansion unavailable for user %s: %s", profile.user_id, exc)
             report.errors.append(f"Query expansion skipped: {exc}")
@@ -173,7 +224,7 @@ async def _queries(
             adverts, advert_usage = await expand.expand_adverts(
                 settings,
                 profile,
-                api_key=decrypt(credential.api_key_encrypted),
+                api_key=spending.api_key,
                 model=settings.default_llm_model,
                 provider_pin=settings.default_llm_provider,
             )
@@ -182,7 +233,7 @@ async def _queries(
                 tokens_out=advert_usage.tokens_out, cost_usd=advert_usage.cost_usd,
             )
             report.cost_usd += advert_usage.cost_usd
-        except (llm.LlmError, CredentialError) as exc:
+        except llm.LlmError as exc:
             log.info("advert expansion unavailable for user %s: %s", profile.user_id, exc)
             report.errors.append(f"Advert expansion skipped: {exc}")
 
@@ -193,7 +244,7 @@ async def _queries(
                 summary, summary_usage = await expand.summarise_background(
                     settings,
                     profile,
-                    api_key=decrypt(credential.api_key_encrypted),
+                    api_key=spending.api_key,
                     model=settings.default_llm_model,
                     provider_pin=settings.default_llm_provider,
                 )
@@ -202,7 +253,7 @@ async def _queries(
                     tokens_out=summary_usage.tokens_out, cost_usd=summary_usage.cost_usd,
                 )
                 report.cost_usd += summary_usage.cost_usd
-            except (llm.LlmError, CredentialError) as exc:
+            except llm.LlmError as exc:
                 log.info("background summary unavailable for user %s: %s", profile.user_id, exc)
                 report.errors.append(f"Background summary skipped: {exc}")
 
@@ -211,7 +262,7 @@ async def _queries(
     # Only a full expansion is worth keeping. Caching the deterministic floor -- which is what a
     # run with no key, or with scoring paused, produces -- would pin this profile version to it
     # for ever, so adding a key later would silently buy nothing.
-    if combined and credential is not None:
+    if combined and spending is not None:
         await match_q.put_query_expansion(
             conn, profile.user_id, profile.version, QUERY_EXPANSION_VERSION, expansion
         )
@@ -257,7 +308,7 @@ async def _rerank(
     conn: AsyncConnection,
     settings: Settings,
     profile: UserProfile,
-    credential,
+    spending: Spending,
     report,
     retrieved: list[int],
     *,
@@ -265,7 +316,7 @@ async def _rerank(
 ) -> None:
     """Score what is pending, then publish the day's edition from whatever was scored."""
     scored = await _score_pending(
-        conn, settings, profile, credential, report, retrieved, background=background
+        conn, settings, profile, spending, report, retrieved, background=background
     )
     if not scored:
         return
@@ -306,7 +357,7 @@ async def _score_pending(
     conn: AsyncConnection,
     settings: Settings,
     profile: UserProfile,
-    credential,
+    spending: Spending,
     report,
     retrieved: list[int],
     *,
@@ -346,15 +397,6 @@ async def _score_pending(
     if not uncached:
         return scored
 
-    try:
-        api_key = decrypt(credential.api_key_encrypted)
-    except CredentialError as exc:
-        report.errors.append(str(exc))
-        return scored
-
-    spend_row = await users_q.month_spend(conn, profile.user_id)
-    spent = Decimal(spend_row.cost_usd) if spend_row else Decimal(0)
-    budget = Decimal(credential.monthly_budget_usd)
     # Pessimistic, not zero: a zero estimate would always pass the ceiling test.
     estimate = Decimal("0.002")
     failures: list[str] = []
@@ -372,7 +414,7 @@ async def _score_pending(
             try:
                 return await rerank.score_one(
                     settings, profile, row,
-                    api_key=api_key, model=settings.default_llm_model,
+                    api_key=spending.api_key, model=settings.default_llm_model,
                     provider_pin=settings.default_llm_provider,
                     background=background,
                 )
@@ -381,14 +423,35 @@ async def _score_pending(
 
     for start in range(0, len(uncached), rerank.BLOCK):
         block = uncached[start : start + rerank.BLOCK]
+        # Re-read per block rather than decremented from a snapshot taken once. What is left has to
+        # come from the database, because this process is not the only thing that can have spent:
+        # the expansion stage already did, and a second runner draining a match-only run for the
+        # same user is claimed with SKIP LOCKED precisely so it CAN proceed in parallel. Against a
+        # process-local belief, two runs would each authorise a full day's ceiling. Two indexed
+        # reads per 25 postings, against 25 model calls -- the cost is not measurable.
+        ceiling_left, credit_left = await _headroom(
+            conn, profile, unlimited=spending.unlimited_credit
+        )
         # Before the block goes out, and priced for the whole block: its calls are issued
-        # together, so the ceiling has to be tested against what all of them can cost. Never
-        # after -- a retry loop on someone else's card is not something to discover from the user.
-        if rerank.would_exceed_budget(spent, budget, estimate * len(block)):
-            report.stopped_on_budget = True
+        # together, so a check against one call's cost would authorise all of them. Never after --
+        # a retry loop that empties someone's credit is not something to discover from them.
+        #
+        # Two limits, reported apart because they need different answers from the reader: the
+        # ceiling is their own pacing and lifts at midnight, empty credit needs an admin.
+        need = estimate * len(block)
+        if not rerank.affordable(ceiling_left, need):
+            report.stopped_on_ceiling = True
             log.info(
-                "user %s reached the monthly ceiling ($%.2f of $%.2f); %d jobs left unscored",
-                profile.user_id, spent, budget, len(uncached) - start,
+                "user %s reached today's ceiling ($%.2f of $%.2f left); %d jobs left unscored",
+                profile.user_id, ceiling_left, profile.daily_ceiling_usd,
+                len(uncached) - start,
+            )
+            break
+        if credit_left is not None and not rerank.affordable(credit_left, need):
+            report.stopped_on_credit = True
+            log.info(
+                "user %s is out of credit ($%.4f left); %d jobs left unscored",
+                profile.user_id, credit_left, len(uncached) - start,
             )
             break
 
@@ -426,7 +489,7 @@ async def _score_pending(
             )
 
         if tokens_in or tokens_out or cost:
-            spent = await users_q.add_spend(
+            await users_q.add_spend(
                 conn, profile.user_id,
                 tokens_in=tokens_in, tokens_out=tokens_out, cost_usd=cost,
             )

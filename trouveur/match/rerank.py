@@ -1,4 +1,4 @@
-"""The paid stage: scoring a shortlist against one user's profile, on that user's own key.
+"""The paid stage: scoring a shortlist against one user's profile, out of that user's credit.
 
 ALL scoring prompt text lives here; a prompt assembled from three files cannot be reviewed.
 """
@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass, field
 from decimal import Decimal
 
 from pydantic import BaseModel, Field, ValidationError
@@ -44,7 +43,8 @@ WEAK_BLOCKS_BEFORE_STOPPING = 2
 
 # How many of those calls are in flight at once. Wall clock, not money, is what a run of a few
 # thousand postings is bounded by -- sequentially, at roughly two seconds a call, it would take
-# over an hour. Kept modest because these go to one user's own OpenRouter key.
+# over an hour. Kept modest because every user's run goes through the one installation key, so
+# these waves share a rate limit with whoever else is being matched.
 CONCURRENCY = 8
 
 # Enough of an advert to hold the requirements. 1,500 characters is roughly 375 tokens, which on a
@@ -82,17 +82,6 @@ class _Score(BaseModel):
     score: int = Field(ge=0, le=100)
     reason: str = ""
     red_flags: list[str] = Field(default_factory=list)
-
-
-@dataclass
-class RerankReport:
-    scored: int = 0
-    from_cache: int = 0
-    cost_usd: Decimal = Decimal(0)
-    tokens_in: int = 0
-    tokens_out: int = 0
-    stopped_on_budget: bool = False
-    errors: list[str] = field(default_factory=list)
 
 
 def city_names(profile: UserProfile) -> list[str]:
@@ -159,14 +148,14 @@ def parse_score(text: str) -> _Score | None:
         return None
 
 
-def would_exceed_budget(
-    spent: Decimal, budget: Decimal, estimate: Decimal
-) -> bool:
-    """Whether sending one more batch would cross the ceiling, checked before the money is
-    spent rather than reported after."""
-    if budget <= 0:
-        return True
-    return spent + estimate > budget
+def affordable(remaining: Decimal, need: Decimal) -> bool:
+    """Whether one more wave fits in what is left -- of today's ceiling, or of granted credit.
+
+    Asked BEFORE the wave is issued and priced for all of it: its calls go out together, so a
+    check against one call's cost would authorise eight. Nothing left means nothing is affordable,
+    which is what makes an empty balance stop a run rather than overdraw it.
+    """
+    return remaining > 0 and need <= remaining
 
 
 async def score_one(

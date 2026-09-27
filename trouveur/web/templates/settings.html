@@ -2,33 +2,41 @@
 {% block content %}
 <div class="page-head">
   <h1>Settings</h1>
-  <p class="hint">Reranking runs on your own OpenRouter key, so what it costs is yours to see and yours to cap.</p>
+  <p class="hint">Scoring is paid for out of credit an administrator grants you. What it costs is
+    yours to see, and how fast it is spent is yours to set.</p>
 </div>
 
 {% if request.query_params.get('saved') %}<p class="notice good">Saved.</p>{% endif %}
-{% if request.query_params.get('deleted') %}<p class="notice">Key deleted. Retrieval still works; nothing will be scored.</p>{% endif %}
+{% set pw = request.query_params.get('password') %}
+{% if pw == 'changed' %}<p class="notice good">Password changed.</p>
+{% elif pw == 'wrong' %}<p class="notice bad">That is not your current password.</p>
+{% elif pw == 'short' %}<p class="notice bad">Use at least {{ min_password_chars }} characters.</p>
+{% elif pw == 'mismatch' %}<p class="notice bad">The two new passwords do not match.</p>{% endif %}
 
 <div class="grid">
   <section class="section">
-    <div class="section-head"><h2>Model access</h2></div>
-    <form method="post" action="/settings">
-      <label>OpenRouter API key
-        <input name="api_key" type="password" autocomplete="off"
-               placeholder="{% if credential %}stored — leave blank to keep it{% else %}sk-or-v1-…{% endif %}">
-      </label>
-      {% if credential %}
-        <p class="hint">Stored key fingerprint <code>{{ credential.api_key_fingerprint }}</code>.
-          The key itself is encrypted and is never shown again, including here.</p>
-      {% endif %}
-      <p class="hint">Scored with <code>{{ model }}</code>{% if provider %} on <code>{{ provider }}</code>{% endif %}.
-        The model is chosen by evaluation, not per user, so every score here is comparable.</p>
-      <p class="actions">
-        <button class="primary" type="submit">Save</button>
-        {% if credential %}
-          <button class="danger" type="submit" formaction="/settings/delete-key" formnovalidate>Delete stored key</button>
-        {% endif %}
-      </p>
-    </form>
+    <div class="section-head"><h2>Credit</h2></div>
+    <div class="kpis">
+      {{ m.kpi('${:.2f}'.format(credit.balance_usd), 'remaining') }}
+      {{ m.kpi('${:.2f}'.format(credit.granted_usd), 'granted') }}
+      {{ m.kpi('${:.4f}'.format(credit.spent_usd), 'spent, all time') }}
+    </div>
+    {% if credit.granted_usd > 0 %}
+      {% set used = (credit.spent_usd / credit.granted_usd * 100) %}
+      <div class="bar"><span style="width: {{ [used, 100] | min }}%"></span></div>
+    {% endif %}
+    <p class="hint">Credit is granted by an administrator; there is no key of your own to add.
+      When it runs out, scoring stops and everything free keeps working.</p>
+    {% if grants %}
+      <table>
+        <tr><th>Granted</th><th class="num">Amount</th><th>By</th><th>Note</th></tr>
+        {% for row in grants %}
+          <tr><td>{{ row.created_at | localtime('%Y-%m-%d') }}</td>
+              <td class="num">${{ '%.2f' % row.amount_usd }}</td>
+              <td>{{ row.granted_by or '—' }}</td><td>{{ row.note or '' }}</td></tr>
+        {% endfor %}
+      </table>
+    {% endif %}
   </section>
 
   <section class="section">
@@ -41,41 +49,74 @@
         Score new postings for me
       </label>
       <span class="hint">Off, nothing is scored and nothing is spent. Search keeps working.</span>
-      <label>Monthly ceiling
-        <span class="hint">US dollars. Checked before every batch, not after.</span>
-        <input name="monthly_budget_usd" inputmode="decimal"
-               value="{{ '%.2f' % credential.monthly_budget_usd if credential else monthly_budget_usd }}"
+      <label>Daily ceiling
+        <span class="hint">US dollars, checked before every wave of calls rather than after.</span>
+        <input name="daily_ceiling_usd" inputmode="decimal"
+               value="{{ '%.2f' % profile.daily_ceiling_usd }}"
                {% if not profile.scoring_enabled %}disabled{% endif %}></label>
+      {# The worst case, not a second ceiling: there is one limit and it is the day's. A monthly
+         cap on top would be two numbers for one decision, and the month is the one a reader
+         actually worries about -- so it is stated, never set. #}
+      <p class="hint">At most <strong>${{ '%.2f' % (profile.daily_ceiling_usd * 30) }}</strong>
+        over thirty days, if every day spends the whole ceiling. Most days spend far less: a day's
+        new arrivals cost a few cents to score.</p>
       {% if profile.scoring_enabled %}
         <p class="actions"><button class="primary" type="submit">Save ceiling</button></p>
       {% endif %}
     </form>
+    <p class="hint">Scored with <code>{{ model }}</code>{% if provider %} on <code>{{ provider }}</code>{% endif %}.
+      The model is chosen by evaluation, not per user, so every score here is comparable.</p>
   </section>
 
   <section class="section">
-    <div class="section-head"><h2>Spend</h2></div>
-    {% if spend %}
-      <div class="kpis">
-        {{ m.kpi('${:.4f}'.format(spend.cost_usd), 'spend this month (USD)') }}
-        {{ m.kpi(spend.calls, 'calls') }}
-        {{ m.kpi('{:,}'.format(spend.tokens_in), 'tokens in') }}
-      </div>
-      {% if credential %}
-        {% set used = (spend.cost_usd / credential.monthly_budget_usd * 100) if credential.monthly_budget_usd > 0 else 100 %}
-        <div class="bar"><span style="width: {{ [used, 100] | min }}%"></span></div>
-        <p class="hint">{{ '%.0f' % used }}% of your ${{ credential.monthly_budget_usd }} ceiling.</p>
-      {% endif %}
-    {% else %}
-      <p class="empty">Nothing spent this month.</p>
-    {% endif %}
+    <div class="section-head"><h2>Usage</h2></div>
+    <div class="kpis">
+      {{ m.kpi('${:.4f}'.format(today.cost_usd if today else 0), 'spent today') }}
+      {{ m.kpi(today.calls if today else 0, 'calls today') }}
+      {{ m.kpi('${:.4f}'.format(month_to_date), 'this month') }}
+    </div>
     {% if history %}
       <table>
-        <tr><th>Month</th><th class="num">Cost</th><th class="num">Calls</th></tr>
+        <tr><th>Day</th><th class="num">Cost</th><th class="num">Calls</th><th class="num">Tokens in</th></tr>
         {% for row in history %}
-          <tr><td>{{ row.period_month }}</td><td class="num">${{ '%.4f' % row.cost_usd }}</td><td class="num">{{ row.calls }}</td></tr>
+          <tr><td>{{ row.period_day }}</td><td class="num">${{ '%.4f' % row.cost_usd }}</td>
+              <td class="num">{{ row.calls }}</td>
+              <td class="num">{{ '{:,}'.format(row.tokens_in) }}</td></tr>
         {% endfor %}
       </table>
+    {% else %}
+      <p class="empty">Nothing spent yet.</p>
     {% endif %}
+  </section>
+
+  <section class="section">
+    <div class="section-head"><h2>Account</h2></div>
+    <form method="post" action="/settings/account">
+      <label>Signed in as<input value="{{ email }}" disabled></label>
+      <span class="hint">Your email is your login. An administrator changes it, because a typo in
+        this one field would lock you out of your own account.</span>
+      <label>Display name <span class="hint">what the nav shows; empty falls back to the part
+        before the @</span>
+        <input name="display_name" value="{{ display_name }}" autocomplete="off"></label>
+      <label class="check">
+        <input type="checkbox" name="digest_enabled" value="on"
+               {% if profile.digest_enabled %}checked{% endif %}>
+        email me the day's edition
+      </label>
+      <p class="actions"><button class="primary" type="submit">Save</button></p>
+    </form>
+  </section>
+
+  <section class="section">
+    <div class="section-head"><h2>Password</h2></div>
+    <form method="post" action="/settings/password">
+      <label>Current password<input name="current_password" type="password" autocomplete="current-password"></label>
+      <label>New password
+        <span class="hint">At least {{ min_password_chars }} characters. This login faces the internet.</span>
+        <input name="new_password" type="password" autocomplete="new-password"></label>
+      <label>Repeat<input name="repeat_password" type="password" autocomplete="new-password"></label>
+      <p class="actions"><button class="primary" type="submit">Change password</button></p>
+    </form>
   </section>
 </div>
 {% endblock %}

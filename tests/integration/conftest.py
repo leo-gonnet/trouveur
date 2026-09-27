@@ -22,7 +22,9 @@ if TEST_DB:
     # over nothing at all -- which is how a corpus that embeds no rows looks like a corpus that
     # embeds every row. The horizon is tested on its own terms in test_freshness_horizon.py.
     os.environ.setdefault("RETRIEVAL_HORIZON_DAYS", "36500")
-    os.environ.setdefault("ENCRYPTION_KEY", "integration-test-encryption-key")
+    # The paid stages are gated on this being set at all, so without it every scoring test would
+    # pass over a run that spent nothing. The transport is stubbed; no request leaves the process.
+    os.environ.setdefault("OPENROUTER_API_KEY", "sk-or-v1-integration-test")
     # The session cookie is Secure in production, and an HTTP client will not send a Secure cookie
     # back over plain http. Opting out here rather than weakening the default, which is the
     # setting that matters.

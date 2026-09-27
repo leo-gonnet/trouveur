@@ -1,6 +1,7 @@
 """OpenRouter transport and cost metering. All prompt text for scoring lives in rerank.py.
 
-Every call uses a user's own key: there is no installation-wide credential.
+Every call uses the installation's key. What is per user is the CREDIT it is spent out of, metered
+from the charge OpenRouter reports on each response -- so a shared key still bills to one account.
 """
 
 from __future__ import annotations
@@ -22,7 +23,7 @@ class LlmError(Exception):
 
 
 class BudgetExceeded(LlmError):
-    """The user's monthly ceiling would be passed by this call, so it was not made."""
+    """A spending cap would be passed by this call, so it was not made."""
 
 
 @dataclass
@@ -84,10 +85,14 @@ async def complete(
         except httpx.HTTPError as exc:
             raise LlmError(f"The model request could not be completed: {exc}") from exc
 
+    # Both of these are now the operator's to fix, not the reader's: the key and the account
+    # behind it belong to the installation, and a user cannot reach either.
     if response.status_code == 401:
-        raise LlmError("OpenRouter rejected the API key. Check it in Settings.")
+        raise LlmError("OpenRouter rejected OPENROUTER_API_KEY; scoring cannot run.")
     if response.status_code == 402:
-        raise LlmError("The OpenRouter account has insufficient credit for this request.")
+        raise LlmError(
+            "The installation's OpenRouter account is out of credit; scoring cannot run."
+        )
     if response.status_code == 429:
         # Either the key is throttled or every eligible provider is overloaded. Telling the user
         # to check their key when the upstream is down sends them to fix nothing.
@@ -99,7 +104,7 @@ async def complete(
             detail = ""
         if detail:
             raise LlmError(f"The model provider refused the request: {detail.strip()[:300]}")
-        raise LlmError("OpenRouter is rate-limiting this key; the posting will be retried later.")
+        raise LlmError("OpenRouter is rate-limiting us; the posting will be retried later.")
     if response.status_code != 200:
         raise LlmError(f"OpenRouter returned HTTP {response.status_code}.")
 
