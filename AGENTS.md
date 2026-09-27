@@ -492,6 +492,14 @@ nothing that credit does not: one user's empty balance still cannot touch anothe
   wave can cost (`rerank.affordable`). A retry loop that empties somebody's credit is not something
   to discover from them. Spend is metered in **USD**, the currency OpenRouter bills in — an EUR
   column would put a stale exchange rate between the meter and the cap.
+- **A run that scored nothing and recorded an error is FAILED, and the error is on the run**
+  (`runner._match_verdict`, used by the scheduled path and the match-only path alike). The
+  scheduled path finished every run SUCCESS and left `MatchReport.errors` out of the report, so a
+  rejected `OPENROUTER_API_KEY` read as a healthy nightly scan that happened to score zero --
+  which is what a quiet night looks like too. The verdict is keyed on `scored` and never on
+  `retrieved`: retrieval is free, runs with no key at all, and returns hundreds of postings while
+  every paid call is being refused. One run carries every user's errors, so each message names its
+  user.
 - **There are two limits and a run must report WHICH one stopped it** (`stopped_on_ceiling`,
   `stopped_on_credit`). They need different answers from the reader: a ceiling lifts at midnight,
   an empty balance needs an admin. Collapsed into one flag, the page can only say "no more today",
@@ -911,6 +919,9 @@ still holds the old readings and no re-derive has been scheduled.
     three expansion calls per profile version to somebody who was granted nothing.
   - **An admin needs no credit and is still held to their own daily ceiling**, and the run reports
     which of the two limits stopped it.
+  - **A scheduled run whose key is rejected is FAILED with the reason on the run**, not SUCCESS
+    with `scored: 0`. Asserted over `_execute`, because the hole was in the runner and the
+    match pipeline had recorded the error correctly all along.
   - **A daily ceiling counts today only** — yesterday's spend cannot hold today's run back, or the
     ceiling would never lift.
   - **A balance is grants minus spend, and a second grant adds to the first** rather than replacing
