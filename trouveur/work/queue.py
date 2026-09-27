@@ -17,7 +17,6 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from trouveur.config import get_settings
 from trouveur.db.engine import connect
-from trouveur.db.queries import freshness
 from trouveur.db.schema import job, job_embedding, job_facet, work_item
 
 log = logging.getLogger(__name__)
