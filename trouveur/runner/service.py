@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Sequence
 from dataclasses import asdict
 from datetime import UTC, datetime
 
@@ -135,6 +136,49 @@ def _progress_control(run_id: int) -> ingest.RunControl:
     return ingest.RunControl(starting=starting, source_done=source_done, cancelled=cancelled)
 
 
+def _match_payload(matches: Sequence[matching.MatchReport]) -> list[dict]:
+    """What each user's match did, `errors` included.
+
+    A run that left a user unscored has to say why in the report and not only in a log line: the
+    log lives on the host and the report is what the Scans page reads.
+    """
+    return [
+        {
+            "user_id": match.user_id,
+            "retrieved": match.retrieved,
+            "scored": match.scored,
+            "cost_usd": str(match.cost_usd),
+            "stopped_on_ceiling": match.stopped_on_ceiling,
+            "stopped_on_credit": match.stopped_on_credit,
+            "stopped_on_scores": match.stopped_on_scores,
+            "errors": match.errors,
+        }
+        for match in matches
+    ]
+
+
+def _match_verdict(matches: Sequence[matching.MatchReport]) -> tuple[RunStatus, str | None]:
+    """The run's status and error from its matching half, decided the same way for both paths.
+
+    A user whose match recorded errors and scored NOTHING got nothing out of this run, whatever
+    the sweep did. The scheduled path used to finish every run SUCCESS with the errors dropped on
+    the floor, so a rejected OPENROUTER_API_KEY read as a healthy nightly scan that happened to
+    score zero -- indistinguishable from a quiet night.
+
+    Keyed on `scored` rather than on `retrieved`, which is what the match-only path tested and is
+    the same hole seen from the other side: retrieval is free and succeeds with no key at all, so
+    a run whose every paid call was rejected still retrieved hundreds of postings and still
+    reported itself green.
+
+    Each message carries the user it belongs to, because one scheduled run carries every user's.
+    """
+    errors = [
+        f"user {match.user_id}: {message}" for match in matches for message in match.errors
+    ]
+    failed = any(match.errors and not match.scored for match in matches)
+    return (RunStatus.FAILED if failed else RunStatus.SUCCESS), "; ".join(errors) or None
+
+
 async def _execute(settings: Settings, run) -> None:
     if run.match_user_id is not None:
         await _execute_match_only(settings, run)
@@ -164,25 +208,15 @@ async def _execute(settings: Settings, run) -> None:
     if settings.smtp_host:
         notified = await send_digests(settings)
 
+    status, error = _match_verdict(matches)
     payload = {
         "summary": report.summary(),
         "sources": {name: asdict(item) for name, item in report.per_source.items()},
-        "matches": [
-            {
-                "user_id": match.user_id,
-                "retrieved": match.retrieved,
-                "scored": match.scored,
-                "cost_usd": str(match.cost_usd),
-                "stopped_on_ceiling": match.stopped_on_ceiling,
-                "stopped_on_credit": match.stopped_on_credit,
-                "stopped_on_scores": match.stopped_on_scores,
-            }
-            for match in matches
-        ],
+        "matches": _match_payload(matches),
         "digests_sent": notified,
     }
     async with connect() as conn:
-        await admin_q.finish_run(conn, run.id, status=RunStatus.SUCCESS, report=payload)
+        await admin_q.finish_run(conn, run.id, status=status, report=payload, error=error)
 
 
 async def _execute_match_only(settings: Settings, run) -> None:
@@ -196,25 +230,10 @@ async def _execute_match_only(settings: Settings, run) -> None:
     after a sweep looks at that sweep's additions instead.
     """
     match = await matching.run_for_user(run.match_user_id, settings, whole_horizon=True)
-    payload = {
-        "summary": match.summary(),
-        "matches": [
-            {
-                "user_id": match.user_id,
-                "retrieved": match.retrieved,
-                "scored": match.scored,
-                "cost_usd": str(match.cost_usd),
-                "stopped_on_ceiling": match.stopped_on_ceiling,
-                "stopped_on_credit": match.stopped_on_credit,
-                "stopped_on_scores": match.stopped_on_scores,
-            }
-        ],
-    }
-    status = RunStatus.FAILED if match.errors and not match.retrieved else RunStatus.SUCCESS
+    status, error = _match_verdict([match])
+    payload = {"summary": match.summary(), "matches": _match_payload([match])}
     async with connect() as conn:
-        await admin_q.finish_run(
-            conn, run.id, status=status, report=payload, error="; ".join(match.errors) or None
-        )
+        await admin_q.finish_run(conn, run.id, status=status, report=payload, error=error)
 
 
 async def _tick(settings: Settings) -> None:

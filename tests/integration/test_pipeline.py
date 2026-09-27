@@ -650,3 +650,69 @@ async def test_a_board_that_keeps_failing_sorts_above_the_healthy_ones(clean_db)
     assert [row.scope for row in rows] == ["zzz-dead", "aaa-healthy"]
     assert rows[0].consecutive_failures == 3
     assert [row.scope for row in failing] == ["zzz-dead"]
+
+
+async def test_a_scheduled_run_fails_and_records_why_when_the_key_is_rejected(
+    clean_db, gh_board, aa_listing, aa_detail, monkeypatch
+):
+    """A rejected OPENROUTER_API_KEY must not read as a healthy scan that happened to score none.
+
+    The scheduled path finished every run SUCCESS and left `MatchReport.errors` out of the report
+    altogether, so the only trace of a dead key was `scored: 0` -- which is exactly what a quiet
+    night looks like. It cannot be judged on `retrieved` either: retrieval is free, needs no key
+    and still returns hundreds of postings, which is how the match-only path's own check missed
+    this too.
+    """
+    import httpx
+
+    from trouveur.config import get_settings
+    from trouveur.db.engine import connect
+    from trouveur.db.queries import admin as admin_q
+    from trouveur.ingest.pipeline import IngestReport
+    from trouveur.match import llm
+    from trouveur.models import RunStatus, RunTrigger
+    from trouveur.runner import service
+
+    await seed_corpus(gh_board, aa_listing, aa_detail)
+    user_id, _profile, _spending, _job_ids = await _funded_user()
+
+    class RejectingClient:
+        """OpenRouter answering 401, so `llm.complete` maps it exactly as production would."""
+
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def post(self, url, **kwargs):
+            return httpx.Response(
+                401,
+                json={"error": {"message": "User not found."}},
+                request=httpx.Request("POST", url),
+            )
+
+    async def no_sweep(**kwargs):
+        return IngestReport()
+
+    monkeypatch.setattr(llm.httpx, "AsyncClient", RejectingClient)
+    monkeypatch.setattr(service.ingest, "run", no_sweep)
+
+    async with connect() as conn:
+        await admin_q.enqueue_run(conn, trigger=RunTrigger.SCHEDULED)
+        run = await admin_q.claim_next_run(conn)
+    await service._execute(get_settings(), run)
+    async with connect() as conn:
+        finished = (await admin_q.recent_runs(conn, limit=1))[0]
+
+    assert finished.status == RunStatus.FAILED.value
+    assert f"user {user_id}" in finished.error
+    assert "OPENROUTER_API_KEY" in finished.error
+    entry = finished.report["matches"][0]
+    assert entry["errors"], "the report must carry what went wrong, not only the run's status"
+    assert entry["scored"] == 0
+    # The trap: free retrieval still succeeded, so a verdict keyed on it reads green.
+    assert entry["retrieved"] > 0
