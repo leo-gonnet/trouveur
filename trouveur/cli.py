@@ -97,10 +97,8 @@ def refill(kind: str, chunk: int) -> None:
     trouveur/versions.py, this refills the queue and the ordinary worker does the rest. It is
     chunked and resumable, so interrupting it costs nothing and re-running it is free.
     """
-    from trouveur.db.engine import connect
     from trouveur.ingest.embed import embedding_version
-    from trouveur.work import WorkKind
-    from trouveur.work import refill as refill_queue
+    from trouveur.work import WorkKind, refill_all
 
     target = {
         "derive": str(versions.DERIVE_VERSION),
@@ -108,19 +106,13 @@ def refill(kind: str, chunk: int) -> None:
         "embed": embedding_version(),
     }[kind]
 
-    async def _run() -> int:
-        cursor, total = 0, 0
-        while True:
-            async with connect() as conn:
-                queued, cursor = await refill_queue(
-                    conn, WorkKind(kind), target, chunk_size=chunk, after_job_id=cursor
-                )
-            total += queued
-            if cursor is None:
-                return total
-            click.echo(f"  queued {total} so far (cursor {cursor})", err=True)
+    def _progress(total: int, cursor: int) -> None:
+        click.echo(f"  queued {total} so far (cursor {cursor})", err=True)
 
-    click.echo(f"queued {asyncio.run(_run())} item(s) for {kind} at version {target}")
+    queued = asyncio.run(
+        refill_all(WorkKind(kind), target, chunk_size=chunk, on_chunk=_progress)
+    )
+    click.echo(f"queued {queued} item(s) for {kind} at version {target}")
 
 
 @main.command()

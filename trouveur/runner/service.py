@@ -12,7 +12,7 @@ from collections.abc import Sequence
 from dataclasses import asdict
 from datetime import UTC, datetime
 
-from trouveur import clock
+from trouveur import clock, versions
 from trouveur.config import Settings, get_settings
 from trouveur.db.engine import connect
 from trouveur.db.queries import admin as admin_q
@@ -23,12 +23,20 @@ from trouveur.models import RunStatus, RunTrigger
 from trouveur.notify import send_digests
 from trouveur.sources import build_sources
 from trouveur.sources.http import PoliteClient
-from trouveur.work import release_stale
+from trouveur.work import WorkKind, refill_all, release_stale
 
 log = logging.getLogger(__name__)
 
 TICK_SECONDS = 20
 _DETAIL_PER_TICK = 40
+
+# Embed is left out: its stale query would queue postings still waiting for a description, which
+# persist deliberately holds back, and a model change re-embeds the corpus for hours -- a decision
+# for an operator (`trouveur refill --kind embed`), not a side effect of a restart.
+_REFILLED_AT_START = {
+    WorkKind.DERIVE: str(versions.DERIVE_VERSION),
+    WorkKind.DEDUP: str(versions.DEDUP_VERSION),
+}
 
 
 def slot_today(schedule, now: datetime) -> datetime:
@@ -265,10 +273,29 @@ async def _tick(settings: Settings) -> None:
             )
 
 
+async def refill_below_current() -> dict[str, int]:
+    """Queue every row below the version this build ships, so a bump takes effect on deploy
+    rather than when somebody remembers to run `trouveur refill`. Safe on every start: a row
+    already queued at the current version is left alone, parked ones included."""
+    queued = {}
+    for kind, target in _REFILLED_AT_START.items():
+        queued[kind.value] = await refill_all(kind, target)
+        if queued[kind.value]:
+            log.info("queued %d %s item(s) at version %s", queued[kind.value], kind, target)
+    return queued
+
+
 async def main() -> None:
     settings = get_settings()
     log.info("runner started; tick=%ss", TICK_SECONDS)
+    refilled = False
     while True:
+        if not refilled:
+            try:
+                await refill_below_current()
+                refilled = True
+            except Exception:  # noqa: BLE001 - retried next tick; the queues must still drain
+                log.exception("startup refill failed; retrying next tick")
         try:
             await _tick(settings)
         except Exception:  # noqa: BLE001 - the loop must survive anything a tick can raise
