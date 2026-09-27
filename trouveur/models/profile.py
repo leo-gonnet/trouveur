@@ -35,6 +35,13 @@ LANGUAGES: dict[str, str] = {
 }
 
 
+# Around each picked town. Below the minimum, a posting in "Berlin-Mitte" -- a place of its own in
+# GeoNames -- would not count as Berlin.
+DEFAULT_RADIUS_KM = 30
+MIN_RADIUS_KM = 5
+MAX_RADIUS_KM = 200
+
+
 # How much background text the form accepts. Roughly a dense page -- enough for a career in
 # summary, short of a pasted CV. Measured against the prompts that read it: the expansion prompt
 # sees it whole once per profile version, and the reranker sees a distillation of it.
@@ -57,15 +64,18 @@ class UserProfile(BaseModel):
     must_have: list[str] = Field(default_factory=list)
     keywords: list[str] = Field(default_factory=list)
 
-    # Location is the only hard filter. `remote_anywhere` belongs to it rather than to a work-mode
-    # list: a role with no office is not in a third place, it is in none, so it is the one case
-    # where "where" cannot be answered with a country. Onsite and hybrid are not distinguished
-    # anywhere, deliberately -- both mean "you go there", which the country already says.
+    # Location is the only hard filter: whole countries, or towns with one radius around them, a
+    # posting passing if it is in either. `remote_anywhere` belongs to it rather than to a
+    # work-mode list: a role with no office is not in a third place, it is in none, so it is the
+    # one case where "where" cannot be answered with a place. Onsite and hybrid are not
+    # distinguished anywhere, deliberately -- both mean "you go there", which the place says.
     countries: list[str] = Field(default_factory=lambda: ["AT", "DE", "CH"])
+    # GeoNames ids from ingest/places.py, the same list derivation resolves postings against.
+    city_ids: list[int] = Field(default_factory=list)
+    radius_km: int = DEFAULT_RADIUS_KM
     remote_anywhere: bool = True
 
-    # Preferences, not filters. Both reach the reranker as prompt text; neither narrows the query.
-    cities: list[str] = Field(default_factory=list)
+    # A preference, not a filter. It reaches the reranker as prompt text.
     min_salary_eur_year: Decimal = Decimal(0)
 
     # The user's two cost controls, and neither is a SCORING_FIELD: they decide whether and how

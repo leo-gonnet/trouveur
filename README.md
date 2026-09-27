@@ -122,3 +122,7 @@ responsibility, not the author's.
 [PolyForm Noncommercial License 1.0.0](./LICENSE). The source is available for personal and other
 non-commercial use. All commercial rights are reserved by the author — contact the author if you
 need a commercial license.
+
+The city list in `trouveur/ingest/data/places.tsv.gz` is derived from
+[GeoNames](https://www.geonames.org), licensed under
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).

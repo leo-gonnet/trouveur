@@ -1,5 +1,5 @@
 {
-  "derive_version": 3,
+  "derive_version": 4,
   "facets": {
     "cities": [],
     "countries": [
@@ -9,6 +9,7 @@
     "employment_type": "unknown",
     "is_agency": null,
     "language": "en",
+    "place_ids": [],
     "regions": [],
     "salary_annualised": false,
     "salary_max_eur_year": null,
@@ -17,6 +18,10 @@
     "skills": [
       "kubernetes",
       "lean management"
+    ],
+    "unplaced_countries": [
+      "DE",
+      "AT"
     ],
     "work_mode": "remote"
   },

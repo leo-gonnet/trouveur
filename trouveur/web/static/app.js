@@ -76,6 +76,22 @@
       }
     });
     input.addEventListener("input", () => input.removeAttribute("aria-invalid"));
+    if (textarea.dataset.suggest && labels) {
+      const list = document.getElementById(textarea.getAttribute("list"));
+      let timer = null;
+      input.addEventListener("input", () => {
+        clearTimeout(timer);
+        const query = input.value.trim();
+        // A picked suggestion puts its id in the box; that is not something to search for.
+        if (query.length < 2 || /^\d+$/.test(query)) return;
+        timer = setTimeout(async () => {
+          const response = await fetch(textarea.dataset.suggest + "?q=" + encodeURIComponent(query));
+          if (!response.ok) return;
+          list.innerHTML = await response.text();
+          for (const option of list.options) labels.set(option.value, option.textContent);
+        }, 150);
+      });
+    }
     // A datalist pick fires `change` without a keystroke.
     input.addEventListener("change", () => { if (labels) add(input.value); });
     input.addEventListener("paste", (event) => {

@@ -216,15 +216,30 @@ def test_fully_remote_is_admitted_wherever_it_was_posted():
     assert "CAST(:remote_anywhere AS boolean) AND f.work_mode = 'remote'" in _ELIGIBLE
 
 
-def test_an_empty_country_list_matches_everything():
-    """cardinality(...) = 0 must short-circuit the filter.
+def test_nothing_picked_matches_everywhere_but_cities_alone_do_not():
+    """An empty profile must accept every posting, or a new user sees an empty product with no
+    indication why. Cities alone must not: "no countries" used to mean "everywhere", and read that
+    way a user who picked only Vienna would get the whole world."""
+    from trouveur.db.queries.match import _location_params
+    from trouveur.ingest import places
+    from trouveur.models import UserProfile
 
-    Without it an empty country list would match nothing rather than anything, and a new user
-    would see an empty product with no indication why.
-    """
-    from trouveur.db.queries.match import _ELIGIBLE
+    vienna = places.resolve("Wien", "AT").id
+    assert _location_params(UserProfile(user_id=1, countries=[]))["anywhere"] is True
+    only_cities = UserProfile(user_id=1, countries=[], city_ids=[vienna])
+    assert _location_params(only_cities)["anywhere"] is False
 
-    assert "cardinality(CAST(:countries AS text[])) = 0" in _ELIGIBLE
+
+def test_a_circle_across_a_border_admits_both_countries_postings_with_no_town():
+    """"Germany" alone might be Lörrach, inside a circle drawn around Basel."""
+    from trouveur.db.queries.match import _location_params
+    from trouveur.ingest import places
+    from trouveur.models import UserProfile
+
+    basel = places.resolve("Basel", "CH").id
+    params = _location_params(UserProfile(user_id=1, countries=[], city_ids=[basel]))
+    assert {"CH", "DE", "FR"} <= set(params["area_countries"])
+    assert places.resolve("Lörrach", "DE").id in params["area_ids"]
 
 
 def test_no_query_bundles_two_statements():

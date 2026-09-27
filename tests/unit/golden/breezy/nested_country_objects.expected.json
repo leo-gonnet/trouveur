@@ -1,5 +1,5 @@
 {
-  "derive_version": 3,
+  "derive_version": 4,
   "facets": {
     "cities": [
       "Vienna"
@@ -10,12 +10,16 @@
     "employment_type": "internship",
     "is_agency": null,
     "language": null,
+    "place_ids": [
+      2761369
+    ],
     "regions": [],
     "salary_annualised": false,
     "salary_max_eur_year": null,
     "salary_min_eur_year": null,
     "seniority": "intern",
     "skills": [],
+    "unplaced_countries": [],
     "work_mode": "onsite"
   },
   "job": {

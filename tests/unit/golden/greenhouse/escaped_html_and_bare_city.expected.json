@@ -1,5 +1,5 @@
 {
-  "derive_version": 3,
+  "derive_version": 4,
   "facets": {
     "cities": [
       "Graz"
@@ -8,6 +8,7 @@
     "employment_type": "unknown",
     "is_agency": null,
     "language": "de",
+    "place_ids": [],
     "regions": [],
     "salary_annualised": false,
     "salary_max_eur_year": null,
@@ -17,6 +18,7 @@
       "sap",
       "six sigma"
     ],
+    "unplaced_countries": [],
     "work_mode": "unknown"
   },
   "job": {

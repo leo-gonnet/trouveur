@@ -53,6 +53,40 @@ def test_every_named_country_survives_a_multi_location_posting(gh_board):
     assert facets.work_mode is WorkMode.REMOTE
 
 
+@pytest.mark.parametrize(
+    "spelling", ["Wien", "Vienna", "Vienne", "Wien 10., Favoriten", "1100 Wien"]
+)
+def test_every_spelling_of_a_town_resolves_to_one_place(spelling):
+    """A city filter compares ids, never names: `Wien` and `Vienna` stored as written were two
+    different values, and a filter on one silently dropped the other."""
+    facets = derive(_job(title="Engineer", locations=[Location(raw=spelling, city=spelling,
+                                                               country="Österreich")]))
+    assert facets.place_ids == [2761369]
+    assert facets.unplaced_countries == []
+
+
+def test_a_transliterated_town_resolves_like_its_umlauted_form():
+    facets = derive(_job(title="Engineer", locations=[Location(raw="Muenchen, Deutschland")]))
+    assert facets.place_ids == derive(
+        _job(title="Engineer", locations=[Location(raw="München, Deutschland")])
+    ).place_ids != []
+
+
+def test_an_ambiguous_town_falls_back_to_its_country_rather_than_a_guess():
+    """A dozen German towns are called Neustadt. Guessing one would put the posting in the
+    wrong circle; its country still lets the filter keep it for anyone looking in Germany."""
+    facets = derive(_job(title="Engineer", locations=[Location(raw="Neustadt, Germany")]))
+    assert facets.place_ids == []
+    assert facets.unplaced_countries == ["DE"]
+
+
+def test_a_town_with_no_country_is_not_resolved():
+    """"Vienna" alone might be Vienna, Virginia. It stays unplaced, which the filter keeps."""
+    facets = derive(_job(title="Engineer", locations=[Location(raw="Vienna")]))
+    assert facets.place_ids == []
+    assert facets.countries == []
+
+
 def test_unknown_country_derives_to_nothing_rather_than_a_guess():
     facets = derive(_job(title="Engineer", locations=[Location(raw="Atlantis")]))
     assert facets.countries == []

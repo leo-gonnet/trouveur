@@ -1,5 +1,5 @@
 {
-  "derive_version": 3,
+  "derive_version": 4,
   "facets": {
     "cities": [
       "Vienna"
@@ -10,6 +10,9 @@
     "employment_type": "unknown",
     "is_agency": null,
     "language": "en",
+    "place_ids": [
+      2761369
+    ],
     "regions": [],
     "salary_annualised": false,
     "salary_max_eur_year": null,
@@ -18,6 +21,9 @@
     "skills": [
       "azure",
       "golang"
+    ],
+    "unplaced_countries": [
+      "AT"
     ],
     "work_mode": "remote"
   },

@@ -7,7 +7,7 @@ seen: fixing a parser is a bump, renaming a variable is not.
 
 from __future__ import annotations
 
-DERIVE_VERSION = 3
+DERIVE_VERSION = 4
 
 # Markers only; never merges or deletes rows.
 DEDUP_VERSION = 1

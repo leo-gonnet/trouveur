@@ -54,11 +54,6 @@
       {{ tags('must_have', profile.must_have, placeholder='Add a requirement…',
               hint='Searched for, and shown to the reranker.') }}
     </div>
-    <div class="field">
-      <span class="field-name">Preferred cities</span>
-      {{ tags('cities', profile.cities, placeholder='Add a city…',
-              hint='A preference the reranker weighs, not a filter: spelled any way you like, and nearby places still count.') }}
-    </div>
     <label>Minimum salary <span class="hint">&euro;/year; a preference too &mdash; most adverts state no figure, and none of them are rejected for it</span>
       <input name="min_salary_eur_year" value="{{ profile.min_salary_eur_year }}"></label>
   </section>
@@ -66,13 +61,22 @@
   <section class="section">
     <div class="section-head"><h2>Where</h2></div>
     <p class="hint">The only filter applied in the query, before anything is ranked. Everything
-      else on this page is a preference the reranker weighs. A posting that names no place is
-      always kept.</p>
+      else on this page is a preference the reranker weighs. A posting is kept if it is in one
+      of your countries <em>or</em> near one of your cities. A posting that names no place is
+      always kept, and so is one that names only a country your cities are in.</p>
     <div class="field">
       <span class="field-name">Countries</span>
       {{ tags('countries', profile.countries, options=country_names, placeholder='Pick a country…',
-              hint='Leave empty to accept every country.') }}
+              hint='The whole country. Leave countries and cities empty to accept everywhere.') }}
     </div>
+    <div class="field">
+      <span class="field-name">Cities</span>
+      {{ tags('city_ids', profile.city_ids, options=city_names, placeholder='Type a city, then pick it…',
+              suggest='/places', hint='Any spelling finds it: Wien, Vienna, Vienne.') }}
+    </div>
+    <label>Distance around each city <span class="hint">km</span>
+      <input name="radius_km" type="number" min="{{ radius_bounds[0] }}" max="{{ radius_bounds[1] }}"
+             value="{{ profile.radius_km }}"></label>
     <label class="check"><input type="checkbox" name="remote_anywhere" value="yes"
       {% if profile.remote_anywhere %}checked{% endif %}>Also fully remote roles, wherever they are</label>
     <p class="hint">A role with no office is in no country, so the one it was posted from says
