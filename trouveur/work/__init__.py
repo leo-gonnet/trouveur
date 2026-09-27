@@ -1,4 +1,5 @@
 from trouveur.work.queue import (
+    MAX_ATTEMPTS,
     WorkKind,
     backlog,
     claim,
@@ -7,11 +8,13 @@ from trouveur.work.queue import (
     fail,
     pause_source,
     refill,
+    refill_all,
     release_stale,
     requeue_parked,
 )
 
 __all__ = [
+    "MAX_ATTEMPTS",
     "WorkKind",
     "backlog",
     "claim",
@@ -20,6 +23,7 @@ __all__ = [
     "fail",
     "pause_source",
     "refill",
+    "refill_all",
     "release_stale",
     "requeue_parked",
 ]

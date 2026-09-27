@@ -7,6 +7,7 @@ every row below it and the ordinary worker drains it, so the repair path stays t
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 
@@ -15,6 +16,8 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from trouveur.config import get_settings
+from trouveur.db.engine import connect
+from trouveur.db.queries import freshness
 from trouveur.db.schema import job, job_embedding, job_facet, work_item
 
 log = logging.getLogger(__name__)
@@ -263,6 +266,28 @@ async def refill(
     job_ids = [row.job_id for row in rows]
     enqueued = await enqueue(conn, kind, job_ids, target_version)
     return enqueued, job_ids[-1]
+
+
+async def refill_all(
+    kind: WorkKind,
+    target_version: str,
+    *,
+    chunk_size: int = 5000,
+    on_chunk: Callable[[int, int], None] | None = None,
+) -> int:
+    """Refill to the end of the table, one transaction per chunk so a long refill never holds
+    one open. Idempotent: a row already queued at this version is left as it is."""
+    cursor, total = 0, 0
+    while True:
+        async with connect() as conn:
+            queued, cursor = await refill(
+                conn, kind, target_version, chunk_size=chunk_size, after_job_id=cursor
+            )
+        total += queued
+        if cursor is None:
+            return total
+        if on_chunk is not None:
+            on_chunk(total, cursor)
 
 
 async def backlog(conn: AsyncConnection) -> dict[str, dict[str, int]]:

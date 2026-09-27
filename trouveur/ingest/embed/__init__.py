@@ -8,19 +8,18 @@ from functools import cache
 from trouveur.config import get_settings
 from trouveur.ingest.embed.base import EMBEDDING_DIM, EmbeddingProvider, version_of
 from trouveur.ingest.embed.deterministic import DeterministicProvider
-from trouveur.ingest.embed.local import LocalOnnxMpnetProvider, LocalOnnxProvider
+from trouveur.ingest.embed.local import LocalOnnxProvider
 
 log = logging.getLogger(__name__)
 
 _PROVIDERS = {
-    "local-onnx": LocalOnnxProvider,
-    "local-onnx-mpnet": LocalOnnxMpnetProvider,
+    "local-onnx-mpnet": LocalOnnxProvider,
     "deterministic": DeterministicProvider,
 }
 
 
 @cache
-def _build(name: str, expected_dim: int, setting: str) -> EmbeddingProvider:
+def _build(name: str) -> EmbeddingProvider:
     try:
         factory = _PROVIDERS[name]
     except KeyError:
@@ -29,19 +28,17 @@ def _build(name: str, expected_dim: int, setting: str) -> EmbeddingProvider:
             f"Unknown embedding provider {name!r}; known providers are: {known}."
         ) from None
     provider = factory()
-    if provider.dim != expected_dim:
+    if provider.dim != EMBEDDING_DIM:
         raise RuntimeError(
-            f"Provider {name!r} produces {provider.dim} dimensions but {setting} is "
-            f"{expected_dim}; changing width is a migration paired with that setting, not a "
-            "setting edit on its own."
+            f"Provider {name!r} produces {provider.dim} dimensions but the embedding column is "
+            f"halfvec({EMBEDDING_DIM}); changing width is a migration, not a setting."
         )
     return provider
 
 
 def get_provider() -> EmbeddingProvider:
     """The provider the embed worker WRITES with."""
-    settings = get_settings()
-    return _build(settings.embedding_provider, settings.embedding_dim, "EMBEDDING_DIM")
+    return _build(get_settings().embedding_provider)
 
 
 def get_query_provider() -> EmbeddingProvider:
@@ -52,7 +49,7 @@ def get_query_provider() -> EmbeddingProvider:
     """
     settings = get_settings()
     name = settings.embedding_read_provider or settings.embedding_provider
-    return _build(name, settings.embedding_read_dim, "EMBEDDING_READ_DIM")
+    return _build(name)
 
 
 def embedding_version() -> str:
@@ -62,7 +59,6 @@ def embedding_version() -> str:
 __all__ = [
     "EMBEDDING_DIM",
     "DeterministicProvider",
-    "LocalOnnxMpnetProvider",
     "EmbeddingProvider",
     "LocalOnnxProvider",
     "embedding_version",

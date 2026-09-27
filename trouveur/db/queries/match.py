@@ -65,24 +65,16 @@ _ELIGIBLE = f"""
 # small city, the walk spends its whole working set on postings elsewhere and the filter discards
 # them. Measured on the production join shape at 250k vectors: 14ms when the filter qualifies 565
 # rows, 80ms unfiltered. Bring an index back only if the horizon holds several million vectors.
-#
-# The READ width, which is not always the width the embed worker is writing: a model change is
-# backfilled over days and the dense arm serves the old space meanwhile.
-_DENSE_SQL_TEMPLATE = f"""
+_DENSE_SQL = f"""
 SELECT j.id AS job_id
 FROM job_embedding e
 JOIN job j ON j.id = e.job_id
 JOIN job_facet f ON f.job_id = j.id
 WHERE {_ELIGIBLE}
-  AND e.{{column}} IS NOT NULL
-ORDER BY e.{{column}} <=> CAST(:vector AS halfvec)
+  AND e.embedding_768 IS NOT NULL
+ORDER BY e.embedding_768 <=> CAST(:vector AS halfvec)
 LIMIT :limit
 """
-
-
-@lru_cache(maxsize=4)
-def _dense_sql(column: str) -> str:
-    return _DENSE_SQL_TEMPLATE.format(column=column)
 
 # Two lexical paths, because neither is sufficient on German: the tsvector stems and ranks but
 # cannot see 'Ingenieur' inside 'Wirtschaftsingenieur'; the trigram column can but cannot rank.
@@ -137,12 +129,7 @@ async def dense_candidates(
         "vector": "[" + ",".join(f"{value:.6f}" for value in vector) + "]",
         "limit": limit,
     }
-    from trouveur.config import get_settings
-    from trouveur.ingest.embed.base import column_for
-
-    rows = await conn.execute(
-        sa.text(_dense_sql(column_for(get_settings().embedding_read_dim))), params
-    )
+    rows = await conn.execute(sa.text(_DENSE_SQL), params)
     return [row.job_id for row in rows]
 
 

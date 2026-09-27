@@ -1,5 +1,8 @@
 # 01 — Finish the encoder swap
 
+**Done.** The 384-wide column was dropped in alembic `0019`, and with it the two width
+settings and the MiniLM provider.
+
 ## The problem
 
 The dense arm embeds with `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`: 384

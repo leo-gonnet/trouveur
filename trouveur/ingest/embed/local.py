@@ -15,14 +15,15 @@ from trouveur.ingest.embed.base import EMBEDDING_DIM
 
 log = logging.getLogger(__name__)
 
-MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+MODEL = "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
 DOCUMENT_PREFIX = ""
 QUERY_PREFIX = ""
 _BATCH = 64
 
 
 class LocalOnnxProvider:
-    name = "local-onnx"
+    # The name is part of embedding_version: renaming it re-embeds the whole corpus.
+    name = "local-onnx-mpnet"
     model = MODEL
     dim = EMBEDDING_DIM
 
@@ -86,15 +87,3 @@ class LocalOnnxProvider:
                     f"halfvec({self.dim}); changing model width is a migration."
                 )
         return vectors
-
-
-class LocalOnnxMpnetProvider(LocalOnnxProvider):
-    """The same local path with a stronger multilingual model, at 768 dimensions.
-
-    Roughly 2.5x the compute per document, so switching is a backfill measured in days, and it
-    needs the 768-wide column.
-    """
-
-    name = "local-onnx-mpnet"
-    model = "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
-    dim = 768

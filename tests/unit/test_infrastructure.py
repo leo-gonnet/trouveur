@@ -48,27 +48,8 @@ def test_embedding_version_names_the_vector_space():
     string carries provider, model and width.
     """
     version = version_of(DeterministicProvider())
-    assert version == "deterministic:sha256:384"
+    assert version == "deterministic:sha256:768"
     assert str(EMBEDDING_DIM) in version
-
-
-def test_a_query_is_embedded_by_the_model_that_wrote_the_space_it_reads(monkeypatch):
-    """A width cannot say which model produced a space, and a query is compared against one.
-
-    Mid-backfill the worker writes 768 while the dense arm still reads 384. Embedding the query
-    with the writing model there is not a subtle loss of recall: pgvector refuses it outright --
-    "different halfvec dimensions 768 and 384" -- so every recommendation fails for as long as the
-    backfill runs, which is the exact window the two width settings exist to make safe.
-    """
-    from trouveur.ingest.embed import get_provider, get_query_provider
-
-    monkeypatch.setenv("EMBEDDING_PROVIDER", "local-onnx-mpnet")
-    monkeypatch.setenv("EMBEDDING_DIM", "768")
-    monkeypatch.setenv("EMBEDDING_READ_DIM", "384")
-    monkeypatch.setenv("EMBEDDING_READ_PROVIDER", "local-onnx")
-
-    assert get_provider().dim == 768, "the worker must write the new space"
-    assert get_query_provider().dim == 384, "retrieval must ask the old model for its query"
 
 
 def test_reads_follow_writes_when_no_read_provider_is_named(monkeypatch):
@@ -81,16 +62,15 @@ def test_reads_follow_writes_when_no_read_provider_is_named(monkeypatch):
     assert get_query_provider().name == get_provider().name
 
 
-def test_a_read_provider_that_does_not_fit_the_read_width_is_refused(monkeypatch):
+def test_a_provider_that_does_not_fit_the_column_is_refused(monkeypatch):
     """Rejected loudly, because the alternative is confident nonsense from the wrong space."""
-    from trouveur.ingest.embed import get_query_provider
+    from trouveur.ingest.embed import _build
 
-    monkeypatch.setenv("EMBEDDING_PROVIDER", "local-onnx")
-    monkeypatch.setenv("EMBEDDING_READ_DIM", "384")
-    monkeypatch.setenv("EMBEDDING_READ_PROVIDER", "local-onnx-mpnet")
+    monkeypatch.setattr(DeterministicProvider, "dim", 384)
+    _build.cache_clear()
 
-    with pytest.raises(RuntimeError, match="768"):
-        get_query_provider()
+    with pytest.raises(RuntimeError, match=r"halfvec\(768\)"):
+        _build("deterministic")
 
 
 def test_retrieval_asks_for_the_read_side_provider_not_the_writing_one():
@@ -208,7 +188,7 @@ def test_the_image_prewarms_the_model_the_code_actually_loads():
     """
     from pathlib import Path
 
-    from trouveur.ingest.embed.local import LocalOnnxMpnetProvider, LocalOnnxProvider
+    from trouveur.ingest.embed.local import LocalOnnxProvider
 
     dockerfile = (Path(__file__).resolve().parents[2] / "Dockerfile").read_text("utf-8")
     # Comments may name the old model to explain the trap; only the instructions must not.
@@ -217,12 +197,9 @@ def test_the_image_prewarms_the_model_the_code_actually_loads():
     )
     prewarm = instructions.split("FASTEMBED_CACHE_PATH", 1)[1]
     assert "from trouveur.ingest.embed.local import" in prewarm
-    assert "model_name=p.model" in prewarm
-    # Every local provider, not only the configured one: the model is chosen by a setting, so an
-    # image carrying just today's choice turns a model switch into a runtime download.
-    for provider in (LocalOnnxProvider, LocalOnnxMpnetProvider):
-        assert provider.__name__ in prewarm
-        assert provider.model not in instructions
+    assert "model_name=LocalOnnxProvider.model" in prewarm
+    assert LocalOnnxProvider.__name__ in prewarm
+    assert LocalOnnxProvider.model not in instructions
     assert "intfloat/" not in instructions
 
 
