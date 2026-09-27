@@ -320,6 +320,25 @@ window, and therefore **closes nothing**. Only a backfill that pages to the end 
   no `jobs` key and no cursor — an empty result indistinguishable from the end of the corpus. Send
   no page-size parameter at all. Unknown query parameters are silently ignored, so a filter that
   looks like it applied may not have.
+- **Workable's page cursor is READ as `nextPageToken` and SENT as `pageToken`.** The two names are
+  not the same and nothing says so. Sending the response's own name back is an unknown parameter,
+  and per the rule above it is ignored without a word — so every request returns page one, the
+  delta never exhausts its window, and the walk runs to `feed.MAX_PAGES`. That is 20 000 requests
+  at one provider; the sweep then fails on an HTTP 429 and the rate limit is the only symptom
+  anyone ever sees. Re-probed 2026-09-27.
+- **Workable is NOT newest-first**, although the other three feeds are. It leads with boosted
+  postings ordered by when the boost expires (an advert from four weeks ago in front of everything
+  published today), and only the unboosted tail is date-descending. Breaking on the first
+  out-of-window row — which is what `sweep_feed` does for every other feed — stops it after about
+  thirty postings.
+- **`day_range=N` is a real server-side date filter** and is how Workable's window is narrowed
+  instead (`sweep_feed(server_side_window=True)`). Unlike Arbeitsagentur's `veroeffentlichtseit`
+  it validates: a non-number and a negative are both HTTP 400. **`day_range=0` means no filter at
+  all** — the whole ~170 000-posting corpus — so it must never be reached by rounding a small
+  window down. Measured 2026-09-27: `1` → 1 247 postings, `7` → 19 958, `30` → 53 901.
+- **A page whose rows we already hold means the cursor is stuck**, whatever the cursor says, and
+  `sweep_feed` abandons the walk there. It is not an end of corpus and never makes a scope
+  closable — a stalled cursor that reads as "complete" would retire everything the feed holds.
 - **Workable states the location already structured** (`{city, subregion, countryName}`); do not
   re-parse the rendered string.
 - **Himalayas has no `id` field** — `guid` is the identity. Its `locationRestrictions` say where a
@@ -836,7 +855,11 @@ still holds the old readings and no re-derive has been scheduled.
   - **Workday never requests more than 20 a page**, terminates on an empty page rather than on
     `total`, never parses the relative `postedOn`, and never treats `locationsText` as a place.
   - **Workable is never sent a page-size parameter**, since an unsupported one returns an empty
-    body that reads as the end of the corpus.
+    body that reads as the end of the corpus; it pages with `pageToken` and never with the
+    `nextPageToken` the response names; it narrows its window with `day_range` and reads past a
+    boosted out-of-window posting rather than stopping on it.
+  - **A feed whose cursor stops advancing is abandoned, not paged to `MAX_PAGES`**, and the stall
+    leaves the scope unclosable.
   - **A delta sweep reports no closable scope**, and a capped single-page feed reports none even on
     a backfill.
   - **A bare top-level array board is read as the list itself** (Lever, Breezy, Rippling), and an

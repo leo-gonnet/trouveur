@@ -37,14 +37,21 @@ async def sweep_feed(
     delta_window: timedelta,
     expected_for: Callable[[Any], int | None] | None = None,
     complete_on_backfill: bool = True,
+    server_side_window: bool = False,
 ) -> SweepOutcome:
     """Page a global feed, newest first, stopping at the delta window unless backfilling.
 
     A source serving a capped window rather than the whole corpus must pass
     `complete_on_backfill=False`: the end of its one page is not the end of the corpus.
+
+    `server_side_window` says the source narrowed the window in the REQUEST, so the walk runs to
+    the end of what the server returned and the client-side cutoff is not applied. It is for a
+    feed that is not strictly newest-first -- Workable leads with boosted postings ordered by when
+    their boost expires -- where the first out-of-window row says nothing about the rows after it
+    and breaking on it drops most of the day.
     """
     outcome = SweepOutcome(partitions_total=1)
-    cutoff = None if backfill else datetime.now(UTC) - delta_window
+    cutoff = None if backfill or server_side_window else datetime.now(UTC) - delta_window
     cursor: object | None = None
     pending: list[RawDocument] = []
     seen_ids: set[str] = set()
@@ -60,6 +67,7 @@ async def sweep_feed(
             break
 
         exhausted = False
+        added = 0
         for row in rows:
             job_id = identify(row)
             if not job_id:
@@ -67,6 +75,7 @@ async def sweep_feed(
             external_id = str(job_id)
             if external_id in seen_ids:
                 continue
+            added += 1
             posted = published_at(row)
             if cutoff is not None and posted is not None and posted < cutoff:
                 exhausted = True
@@ -89,6 +98,18 @@ async def sweep_feed(
 
         if exhausted:
             reached_end = True
+            break
+        # A full page of rows we already hold means the cursor is not advancing, whatever it
+        # says. Workable's did exactly that -- it ignores an unknown page parameter and serves
+        # page one for ever -- and with every row deduplicated and none of them old enough to
+        # exhaust the window, the walk ran to MAX_PAGES: 20,000 requests at one provider, which
+        # is how the sweep came to fail on an HTTP 429 rather than on the paging bug itself.
+        # NOT an end of corpus: `reached_end` stays false, so a backfill cannot close on it.
+        if not added:
+            log.warning(
+                "%s: page %d added nothing new; the cursor is not advancing, stopping",
+                source, _page + 1,
+            )
             break
         cursor = next_cursor(payload)
         if cursor is None:

@@ -361,29 +361,111 @@ def test_a_delta_sweep_reports_no_closable_scope():
 
 
 def test_a_delta_sweep_stops_once_postings_fall_outside_the_window():
-    """The feed is newest-first, so the first old posting means everything after it is older."""
-    from trouveur.sources.workable import WorkableSource
+    """Arbeitnow IS newest-first, so the first old posting means everything after it is older.
 
-    old = (datetime.now(UTC) - timedelta(days=90)).isoformat().replace("+00:00", "Z")
-    new = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+    Workable is deliberately not this test's subject: its feed leads with boosted postings and
+    the same assumption cost it a day's intake. See the two guards below.
+    """
+    from trouveur.sources.arbeitnow import ArbeitnowSource
+
+    old = int((datetime.now(UTC) - timedelta(days=90)).timestamp())
+    new = int(datetime.now(UTC).timestamp())
     client = StubClient(
         default=(
             200,
             {
-                "jobs": [
-                    {"id": "new", "created": new, "title": "A"},
-                    {"id": "old", "created": old, "title": "B"},
+                "data": [
+                    {"slug": "new", "created_at": new, "title": "A"},
+                    {"slug": "old", "created_at": old, "title": "B"},
                 ],
-                "nextPageToken": "more",
-                "totalSize": 2,
+                "links": {"next": "https://www.arbeitnow.com/api/job-board-api?page=2"},
             },
         )
     )
-    _outcome, seen = asyncio.run(collect(WorkableSource(delta_window=timedelta(days=7)), client))
+    _outcome, seen = asyncio.run(collect(ArbeitnowSource(delta_window=timedelta(days=7)), client))
 
     assert [document.external_id for document in seen] == ["new"]
     # It must stop rather than follow the cursor for ever.
     assert len(client.requested) == 1
+
+
+def test_workable_pages_with_pagetoken_not_with_the_name_the_response_uses():
+    """The response says `nextPageToken`; the request parameter is `pageToken`.
+
+    Sending the response's own name back is an unknown parameter, and this API ignores unknown
+    parameters in silence: every request returns page one. Deduplication then hides it, the
+    window is never exhausted, and the walk runs to `feed.MAX_PAGES` -- 20,000 requests at one
+    provider, which is the HTTP 429 the sweep reported for nine runs out of ten.
+    """
+    from trouveur.sources.workable import WorkableSource
+
+    fresh = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+    pages = {
+        None: {"jobs": [{"id": "1", "created": fresh, "title": "A"}], "nextPageToken": "p2"},
+        "p2": {"jobs": [{"id": "2", "created": fresh, "title": "B"}]},
+    }
+    client = StubClient(default=lambda params, _json: (200, pages[params.get("pageToken")]))
+    _outcome, seen = asyncio.run(collect(WorkableSource(), client))
+
+    assert [document.external_id for document in seen] == ["1", "2"]
+    for _method, _url, params, _body in client.requested:
+        assert "nextPageToken" not in (params or {})
+
+
+def test_workable_narrows_its_window_in_the_request_and_reads_past_a_boosted_posting():
+    """Workable is NOT newest-first: boosted postings lead, ordered by when the boost expires.
+
+    So an advert from four weeks ago sits in front of everything published today, and breaking
+    on the first out-of-window row -- which is right for every other feed -- stopped the sweep
+    after one page. The window is narrowed server-side with `day_range` instead, and the walk
+    runs to the end of what that returns.
+    """
+    from trouveur.sources.workable import WorkableSource
+
+    stale = (datetime.now(UTC) - timedelta(days=28)).isoformat().replace("+00:00", "Z")
+    fresh = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+    pages = {
+        None: {
+            "jobs": [
+                {"id": "boosted", "created": stale, "title": "A"},
+                {"id": "today", "created": fresh, "title": "B"},
+            ],
+            "nextPageToken": "p2",
+        },
+        "p2": {"jobs": [{"id": "also-today", "created": fresh, "title": "C"}]},
+    }
+    client = StubClient(default=lambda params, _json: (200, pages[params.get("pageToken")]))
+    outcome, seen = asyncio.run(
+        collect(WorkableSource(delta_window=timedelta(days=7)), client)
+    )
+
+    assert [document.external_id for document in seen] == ["boosted", "today", "also-today"]
+    assert client.requested[0][2]["day_range"] == "7"
+    # Still a delta: a window the server cut is not the corpus.
+    assert outcome.closable_scopes == []
+
+
+def test_a_feed_whose_cursor_stops_advancing_is_abandoned_not_hammered():
+    """A page of rows we already hold means the cursor is stuck, whatever the cursor says.
+
+    Without this the walk runs to `feed.MAX_PAGES`, and the first symptom anyone sees is the
+    provider's rate limiter rather than the paging bug underneath it.
+    """
+    from trouveur.sources.workable import WorkableSource
+
+    fresh = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+    client = StubClient(
+        default=(
+            200,
+            {"jobs": [{"id": "1", "created": fresh, "title": "A"}], "nextPageToken": "same"},
+        )
+    )
+    outcome, seen = asyncio.run(collect(WorkableSource(), client))
+
+    assert [document.external_id for document in seen] == ["1"]
+    assert len(client.requested) == 2
+    # A stall is not an end of corpus, so nothing may ever be closed on the strength of it.
+    assert outcome.closable_scopes == []
 
 
 def test_a_capped_feed_is_never_closable_even_on_a_backfill():
