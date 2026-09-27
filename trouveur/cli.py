@@ -243,18 +243,19 @@ def tenants() -> None:
 
 @tenants.command("list")
 @click.option("--source", default=None, help="Only this source.")
-def tenants_list(source: str | None) -> None:
-    """Show every tenant with its health, including candidates awaiting review."""
+@click.option("--failing", is_flag=True, help="Only tenants whose last sweep failed.")
+def tenants_list(source: str | None, failing: bool) -> None:
+    """Show every tenant with its health, worst first, candidates awaiting review included."""
     from trouveur.db.engine import connect
     from trouveur.db.queries import admin
 
     async def _run() -> list:
         async with connect() as conn:
-            return await admin.list_tenants(conn, source)
+            return await admin.list_tenants(conn, source, failing_only=failing)
 
     rows = asyncio.run(_run())
     if not rows:
-        click.echo("No tenants registered.")
+        click.echo("No failing tenants." if failing else "No tenants registered.")
         return
     click.echo(f"{'source':<14}{'scope':<24}{'on':<4}{'origin':<11}{'docs':>7}  {'fails':>5}")
     for row in rows:

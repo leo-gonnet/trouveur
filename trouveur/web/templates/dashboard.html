@@ -115,8 +115,10 @@
   <div class="section-head"><h2>Tenant health</h2></div>
   <p class="hint">
     Read-only. The crawl set is shared by every user, so changing it is an operator action on the
-    server — <code>trouveur tenants add|enable|disable|remove</code>. A tenant failing for several
-    days is one to remove; a disabled one marked <em>discovered</em> is a candidate awaiting review.
+    server — <code>trouveur tenants add|enable|disable|remove</code>. Worst first: a board is never
+    dropped automatically, because a run of failures is as likely to be a provider outage as a dead
+    board, so a streak that keeps growing is one to remove by hand. A disabled one marked
+    <em>discovered</em> is a candidate awaiting review.
   </p>
   {% if scopes %}
   <table>
