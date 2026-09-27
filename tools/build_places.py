@@ -19,7 +19,13 @@ import json
 from importlib.resources import files
 from pathlib import Path
 
-from trouveur.ingest.places import COVERED_COUNTRIES
+# Every town of 1 000 or more here, where users pick their circles; elsewhere only towns of 15 000
+# or more. The rest of the world is listed so a bare "London" or "Vienna" can be told apart from
+# its namesakes, not so a user can draw a circle there, and every town costs a few hundred bytes.
+DENSE_COUNTRIES = frozenset(
+    {"AT", "DE", "CH", "FR", "IT", "NL", "BE", "LU", "PL", "CZ", "SK", "HU", "SI", "HR", "DK"}
+)
+MIN_POPULATION_ELSEWHERE = 15_000
 
 OUTPUT = Path(__file__).resolve().parents[1] / "trouveur" / "ingest" / "data" / "places.tsv.gz"
 
@@ -40,7 +46,8 @@ def main() -> None:
     )
     lines = []
     for city in sorted(raw.values(), key=lambda c: int(c["geonameid"])):
-        if city["countrycode"] not in COVERED_COUNTRIES:
+        dense = city["countrycode"] in DENSE_COUNTRIES
+        if not dense and int(city["population"] or 0) < MIN_POPULATION_ELSEWHERE:
             continue
         names = sorted({n for n in [city["name"], *city["alternatenames"]] if _keep_name(n)})
         lines.append(

@@ -1,14 +1,18 @@
 {
-  "derive_version": 4,
+  "derive_version": 5,
   "facets": {
     "cities": [
       "Wien"
     ],
-    "countries": [],
+    "countries": [
+      "AT"
+    ],
     "employment_type": "unknown",
     "is_agency": null,
     "language": null,
-    "place_ids": [],
+    "place_ids": [
+      2761369
+    ],
     "regions": [],
     "salary_annualised": false,
     "salary_max_eur_year": null,

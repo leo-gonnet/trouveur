@@ -80,15 +80,44 @@ def test_an_ambiguous_town_falls_back_to_its_country_rather_than_a_guess():
     assert facets.unplaced_countries == ["DE"]
 
 
-def test_a_town_with_no_country_is_not_resolved():
-    """"Vienna" alone might be Vienna, Virginia. It stays unplaced, which the filter keeps."""
-    facets = derive(_job(title="Engineer", locations=[Location(raw="Vienna")]))
+@pytest.mark.parametrize(
+    ("raw", "country", "place_id"),
+    [("London", "GB", 2643743), ("Bielefeld", "DE", 2949186), ("Wien", "AT", 2761369),
+     ("Vienna", "AT", 2761369)],
+)
+def test_a_bare_town_resolves_worldwide_when_one_place_dominates(raw, country, place_id):
+    """A posting that names only a town used to derive to no country, and a posting with no
+    country passes every location filter: a user who picked Vienna was shown London."""
+    facets = derive(_job(title="Engineer", locations=[Location(raw=raw)]))
+    assert facets.countries == [country]
+    assert facets.place_ids == [place_id]
+
+
+@pytest.mark.parametrize("raw", ["Vienna, VA", "Cambridge", "Neustadt"])
+def test_a_bare_town_is_not_guessed_when_it_cannot_be_told(raw):
+    """"Vienna, VA" is Virginia: the part we cannot read is what says which Vienna. Cambridge is
+    two cities of similar size. Neither may land in somebody's circle."""
+    facets = derive(_job(title="Engineer", locations=[Location(raw=raw)]))
     assert facets.place_ids == []
     assert facets.countries == []
 
 
+def test_a_country_name_is_a_country_never_a_town():
+    facets = derive(_job(title="Engineer", locations=[Location(raw="China")]))
+    assert facets.countries == ["CN"]
+    assert facets.cities == []
+    assert facets.unplaced_countries == ["CN"]
+
+
+def test_a_us_state_named_like_a_country_is_not_read_as_that_country():
+    """"Georgia" is left out of the vocabulary on purpose; read as GE, every Atlanta posting
+    would move to the Caucasus."""
+    facets = derive(_job(title="Engineer", locations=[Location(raw="Atlanta, Georgia")]))
+    assert "GE" not in facets.countries
+
+
 def test_unknown_country_derives_to_nothing_rather_than_a_guess():
-    facets = derive(_job(title="Engineer", locations=[Location(raw="Atlantis")]))
+    facets = derive(_job(title="Engineer", locations=[Location(raw="Mordor")]))
     assert facets.countries == []
 
 
