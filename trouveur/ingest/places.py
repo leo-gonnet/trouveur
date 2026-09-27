@@ -21,12 +21,6 @@ from importlib.resources import files
 
 from trouveur.models import fold
 
-# Where a city can be resolved. A town outside these is still kept at country level, so a
-# posting there is judged by its country rather than dropped.
-COVERED_COUNTRIES = frozenset(
-    {"AT", "DE", "CH", "FR", "IT", "NL", "BE", "LU", "PL", "CZ", "SK", "HU", "SI", "HR", "DK"}
-)
-
 # A name shared by several towns of one country resolves to the largest only when it is this many
 # times bigger than the next: "Frankfurt" is Frankfurt am Main, but "Neustadt" is nobody in
 # particular. Unresolved is safe -- the posting falls back to its country and still passes.
@@ -58,6 +52,7 @@ class Place:
 class _Index:
     by_id: dict[int, Place]
     by_name: dict[tuple[str, str], tuple[Place, ...]]
+    by_bare_name: dict[str, tuple[Place, ...]]
     # (folded name, -population, id), sorted, for prefix search in the form.
     names: list[tuple[str, int, int]]
 
@@ -66,6 +61,7 @@ class _Index:
 def _index() -> _Index:
     by_id: dict[int, Place] = {}
     by_name: dict[tuple[str, str], list[Place]] = {}
+    by_bare_name: dict[str, list[Place]] = {}
     names: list[tuple[str, int, int]] = []
     data = files("trouveur.ingest").joinpath("data/places.tsv.gz").read_bytes()
     for line in gzip.decompress(data).decode("utf-8").splitlines():
@@ -74,9 +70,15 @@ def _index() -> _Index:
         by_id[place.id] = place
         for folded in {fold(n) for n in alternates.split("|") if n} | {fold(name)}:
             by_name.setdefault((country, folded), []).append(place)
+            by_bare_name.setdefault(folded, []).append(place)
             names.append((folded, -place.population, place.id))
     names.sort()
-    return _Index(by_id, {key: tuple(value) for key, value in by_name.items()}, names)
+    return _Index(
+        by_id,
+        {key: tuple(value) for key, value in by_name.items()},
+        {key: tuple(value) for key, value in by_bare_name.items()},
+        names,
+    )
 
 
 def get(place_id: int) -> Place | None:
@@ -90,11 +92,25 @@ def resolve(city: str, country: str) -> Place | None:
     are tried only when a longer one matched NOTHING; an ambiguous name stays ambiguous, because
     cutting it down can only make it more so.
     """
-    if country not in COVERED_COUNTRIES:
-        return None
     by_name = _index().by_name
     for variant in _variants(city):
         candidates = by_name.get((country, fold(variant)))
+        if candidates:
+            return _dominant(candidates)
+    return None
+
+
+def resolve_anywhere(city: str) -> Place | None:
+    """The one place `city` names anywhere in the world, or None when it cannot be told.
+
+    For a posting that names a town and nothing else. The same dominance rule decides: "Vienna"
+    is Wien, ten times bigger than any namesake, while "Cambridge" is two cities and stays
+    unresolved. Only sound because the list is worldwide -- against Europe alone, every "Vienna"
+    would be Wien because Vienna, Virginia would not be there to compete.
+    """
+    by_bare_name = _index().by_bare_name
+    for variant in _variants(city):
+        candidates = by_bare_name.get(fold(variant))
         if candidates:
             return _dominant(candidates)
     return None

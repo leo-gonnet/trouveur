@@ -653,9 +653,18 @@ nothing that credit does not: one user's empty balance still cannot touch anothe
 - **Countries and cities add up; they never narrow each other.** A posting passes if it is in one
   of the user's countries OR inside one of their circles. Nothing picked at all means everywhere
   -- but cities alone must not read as "no countries, so everywhere".
-- **A town that cannot be resolved falls back to its country, and is never guessed.** Resolving
-  needs the posting's country ("Vienna" alone may be Vienna, Virginia), and a name several towns
-  share resolves only when one is ten times bigger than the rest (`Frankfurt` yes, `Neustadt` no).
+- **A town that cannot be resolved falls back to its country, and is never guessed.** A name
+  several towns share resolves only when one is ten times bigger than the rest (`Frankfurt` yes,
+  `Neustadt` no). With the posting's country that is decided within the country; a posting that
+  names a bare town and nothing else (`London`, `Bielefeld`) is decided against the whole world,
+  which is why the city list is worldwide -- against Europe alone every "Vienna" would be Wien,
+  because Vienna, Virginia would not be there to compete. A location with a part we cannot read
+  (`Vienna, VA`) is never looked up worldwide: that part is what says which Vienna it is.
+- **A posting with no country passes every location filter, so the vocabulary names every
+  country.** A bare `China` derived to nothing, and a user who picked only Vienna was shown jobs
+  in China and London. The rule stays -- 43% of open postings had no country, mostly from a
+  derivation gap, and dropping them would cost that much recall -- so the gap is closed at
+  derivation instead. `Georgia` is deliberately absent: it is a US state far more often.
   An unresolved town's country goes to `unplaced_countries`, and the filter keeps that posting
   whenever the country is one the user's circles reach into -- "Germany" alone might be Lörrach,
   inside a circle around Basel. A wrong id would put a posting in the wrong circle and hide it;
@@ -919,7 +928,9 @@ still holds the old readings and no re-derive has been scheduled.
   - **Location is the only hard filter**, a posting that states no location passes, and a fully
     remote posting is admitted wherever it was posted.
   - **Every spelling of a town resolves to one id** (`Wien`, `Vienna`, `Wien 10., Favoriten`), an
-    ambiguous or country-less town is left unresolved rather than guessed, and a posting whose
+    ambiguous town is left unresolved rather than guessed, a bare town (`London`) resolves
+    worldwide only when one place dominates and never when part of the location is unread
+    (`Vienna, VA`), a country name (`China`) is a country and never a town, and a posting whose
     town is unresolved passes when its country is one the user's circles reach into.
   - **The rerank prompt carries exactly one advert**, with the profile block before it — batching
     moved scores by slot position, and profile-first is what a prompt-prefix cache reuses.

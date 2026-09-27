@@ -89,11 +89,17 @@ def _places(
             if not location.city:
                 city = parsed_city
 
+        place = None
+        if city and country:
+            place = places.resolve(city, country)
+        elif city and _names_only_a_town(location):
+            place = places.resolve_anywhere(city)
+            country = place.country if place else None
+
         if country:
             countries.append(country)
         if city:
             cities.append(city)
-        place = places.resolve(city, country) if city and country else None
         if place:
             place_ids.append(place.id)
         elif country:
@@ -104,6 +110,12 @@ def _places(
         _unique(countries), _unique(regions), _unique(cities),
         _unique(place_ids), _unique(unplaced), says_remote,
     )
+
+
+def _names_only_a_town(location: Location) -> bool:
+    """A bare "London" may be looked up worldwide; "Vienna, VA" may not, because the part we
+    cannot read is exactly what says which Vienna it is."""
+    return not location.region and "," not in location.raw
 
 
 def _parse_free_text(raw: str) -> tuple[str | None, str | None, bool]:
