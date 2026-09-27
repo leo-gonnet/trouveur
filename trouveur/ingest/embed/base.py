@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Protocol, runtime_checkable
 
 # Fixed by the column type. Changing it is a migration, not a config edit.
-EMBEDDING_DIM = 384
+EMBEDDING_DIM = 768
 
 
 @runtime_checkable
@@ -29,18 +29,3 @@ class EmbeddingProvider(Protocol):
 
 def version_of(provider: EmbeddingProvider) -> str:
     return f"{provider.name}:{provider.model}:{provider.dim}"
-
-
-# Width -> the column holding that space. Named once: the writer and the reader disagreeing is a
-# silent wrong-neighbours bug, not an error.
-_COLUMNS = {384: "embedding", 768: "embedding_768"}
-
-
-def column_for(dim: int) -> str:
-    try:
-        return _COLUMNS[dim]
-    except KeyError:
-        raise RuntimeError(
-            f"No embedding column is {dim} wide; known widths are "
-            f"{', '.join(str(d) for d in sorted(_COLUMNS))}. Adding one is a migration."
-        ) from None

@@ -292,13 +292,7 @@ async def derived_coverage(conn: AsyncConnection, fresh_since: datetime) -> sa.R
                     (SELECT count(*) FROM job j JOIN job_facet f ON f.job_id = j.id
                      WHERE j.closed_at IS NULL AND f.derive_version > 0) AS derived,
                     (SELECT count(*) FROM job_embedding) AS embedded,
-                    (SELECT count(DISTINCT embedding_version) FROM job_embedding) AS vector_spaces,
-                    -- Per vector space: a model change is backfilled over days, and the total
-                    -- hides that the two spaces are covered to different depths.
-                    (SELECT count(*) FROM job_embedding e JOIN job j ON j.id = e.job_id
-                     WHERE j.closed_at IS NULL AND e.embedding IS NOT NULL) AS embedded_384,
-                    (SELECT count(*) FROM job_embedding e JOIN job j ON j.id = e.job_id
-                     WHERE j.closed_at IS NULL AND e.embedding_768 IS NOT NULL) AS embedded_768
+                    (SELECT count(DISTINCT embedding_version) FROM job_embedding) AS vector_spaces
                 """
             ),
             {"fresh_since": fresh_since},

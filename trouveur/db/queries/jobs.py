@@ -59,12 +59,12 @@ async def load_for_embedding(conn: AsyncConnection, job_ids: Sequence[int]) -> l
 
 # halfvec has no SQLAlchemy type here, so vectors go over as text and are cast in the statement.
 _WRITE_EMBEDDINGS = """
-INSERT INTO job_embedding (job_id, embedding_version, {column})
+INSERT INTO job_embedding (job_id, embedding_version, embedding_768)
 SELECT id, version, vector::halfvec
 FROM unnest(CAST(:ids AS bigint[]), CAST(:versions AS text[]), CAST(:vectors AS text[]))
      AS t(id, version, vector)
 ON CONFLICT (job_id) DO UPDATE
-SET {column} = EXCLUDED.{column},
+SET embedding_768 = EXCLUDED.embedding_768,
     embedding_version = EXCLUDED.embedding_version,
     embedded_at = now()
 """
@@ -73,15 +73,10 @@ SET {column} = EXCLUDED.{column},
 async def write_embeddings(
     conn: AsyncConnection, rows: Sequence[tuple[int, str, list[float]]]
 ) -> None:
-    """Store one batch of vectors in the column matching the configured write width."""
     if not rows:
         return
-    from trouveur.config import get_settings
-    from trouveur.ingest.embed.base import column_for
-
-    column = column_for(get_settings().embedding_dim)
     await conn.execute(
-        sa.text(_WRITE_EMBEDDINGS.format(column=column)),
+        sa.text(_WRITE_EMBEDDINGS),
         {
             "ids": [job_id for job_id, _, _ in rows],
             "versions": [version for _, version, _ in rows],

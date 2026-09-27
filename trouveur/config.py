@@ -55,15 +55,9 @@ class Settings(BaseSettings):
     max_login_attempts: int = 5
     lockout_minutes: int = 15
 
-    # "local-onnx" needs `uv sync --extra embeddings`.
-    embedding_provider: str = "local-onnx"
-    # The width the embed worker WRITES; a migration owns the column, this lets the provider
-    # guard reject a mismatch loudly rather than storing a meaningless vector.
-    embedding_dim: int = 384
-    # The width, and then the model, retrieval READS. Both differ from the write side only for
-    # the length of a model backfill, while the worker fills the new space and the dense arm
-    # serves the old one. A width alone cannot say which model produced a space.
-    embedding_read_dim: int = 384
+    # "local-onnx-mpnet" needs `uv sync --extra embeddings`.
+    embedding_provider: str = "local-onnx-mpnet"
+    # The model retrieval embeds its queries with, when it must differ from the writing one.
     embedding_read_provider: str = ""
     embed_batch_size: int = 128
 
