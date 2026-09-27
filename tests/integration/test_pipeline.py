@@ -620,3 +620,33 @@ async def test_spend_from_elsewhere_is_seen_between_blocks_not_only_at_the_start
 
     assert len(calls) == 1, "the ceiling was tested against a stale in-process snapshot"
     assert report.stopped_on_ceiling is True
+
+
+async def test_a_board_that_keeps_failing_sorts_above_the_healthy_ones(clean_db):
+    """The failure streak is the only signal a dead board gives, and it has to be findable.
+
+    Nothing disables a board automatically -- a run of failures is as likely to be a provider
+    outage as a 404 -- so the streak IS the alert. Ordered alphabetically it was not one: a
+    Greenhouse slug that had 404ed for weeks sat in the middle of 211 identical-looking rows.
+    """
+    from trouveur.db.engine import connect
+    from trouveur.db.queries import admin as admin_q
+    from trouveur.sources.base import ScopeResult
+
+    async with connect() as conn:
+        await admin_q.add_tenants(conn, "greenhouse", ["aaa-healthy", "zzz-dead"])
+        for _sweep in range(3):
+            await admin_q.record_scope_health(
+                conn,
+                "greenhouse",
+                [
+                    ScopeResult(scope="aaa-healthy", ok=True, documents=12),
+                    ScopeResult(scope="zzz-dead", ok=False, error="returned HTTP 404."),
+                ],
+            )
+        rows = await admin_q.list_tenants(conn)
+        failing = await admin_q.list_tenants(conn, failing_only=True)
+
+    assert [row.scope for row in rows] == ["zzz-dead", "aaa-healthy"]
+    assert rows[0].consecutive_failures == 3
+    assert [row.scope for row in failing] == ["zzz-dead"]

@@ -36,8 +36,17 @@ async def enabled_tenants(conn: AsyncConnection) -> dict[str, list[str]]:
     return grouped
 
 
-async def list_tenants(conn: AsyncConnection, source: str | None = None) -> list[sa.Row]:
-    """Every tenant with its health, including candidates a discovery pass has proposed."""
+async def list_tenants(
+    conn: AsyncConnection, source: str | None = None, *, failing_only: bool = False
+) -> list[sa.Row]:
+    """Every tenant with its health, including candidates a discovery pass has proposed.
+
+    Ordered by failure streak first. A board is never dropped from the crawl set automatically --
+    three failed sweeps are as likely to be a provider outage as a dead board, and a crawl set
+    that shrinks on its own shrinks silently -- so the streak is the whole of the signal, and
+    alphabetical order buried it: a Greenhouse slug that had 404ed for weeks sat at row 180 of
+    211 on the dashboard and read exactly like the 210 healthy ones.
+    """
     stmt = (
         sa.select(
             source_tenant.c.source,
@@ -60,10 +69,16 @@ async def list_tenants(conn: AsyncConnection, source: str | None = None) -> list
                 ),
             )
         )
-        .order_by(source_tenant.c.source, source_tenant.c.scope)
+        .order_by(
+            sa.func.coalesce(source_scope_health.c.consecutive_failures, 0).desc(),
+            source_tenant.c.source,
+            source_tenant.c.scope,
+        )
     )
     if source:
         stmt = stmt.where(source_tenant.c.source == source)
+    if failing_only:
+        stmt = stmt.where(source_scope_health.c.consecutive_failures > 0)
     return list(await conn.execute(stmt))
 
 
