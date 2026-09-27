@@ -360,6 +360,10 @@ window, and therefore **closes nothing**. Only a backfill that pages to the end 
 
 - **Failure isolation.** One dead source must never abort a run. `ingest/pipeline.py` wraps each
   source and records the error in `source_sweep`.
+- **A source failing wholesale is paused, not its postings.** Detail work stops for a source after
+  `workers.SOURCE_BURST` failures in a row and every waiting item of that source is held back for
+  `SOURCE_PAUSE`, spending no attempt. On 2026-09-22 a 403 burst from Workday cost 1,500 postings
+  all five attempts each; they parked for good while most of them closed.
 - **Completeness is not success.** `SweepOutcome.closable_scopes` names the scopes whose *entire*
   live set the sweep observed. A delta sweep returns none: seeing only what was published yesterday
   says nothing about whether an older posting is still live, and closing on it would retire the
@@ -877,7 +881,8 @@ still holds the old readings and no re-derive has been scheduled.
   - `search_jobs` carries no score filter.
   - German search finds `Wirtschaftsingenieur` when the user types `ingenieur`, and finds
     `München` when the user types `munchen` (both need the integration test).
-  - Closing a posting deletes its embedding.
+  - Closing a posting deletes its embedding, and its detail and embed work items.
+  - **A source failing in a burst is paused**, and the postings it failed for keep their attempts.
   - **Transliterated German country names resolve** (`OESTERREICH`, not only `Österreich`). The
     API transliterates umlauts; a vocabulary keyed only on the umlauted form silently gave every
     Austrian posting no country at all.
@@ -1112,6 +1117,7 @@ uv run alembic revision -m "add X"        # new migration
 uv run trouveur sweep                     # fetch sources into the corpus
 uv run trouveur sweep --source greenhouse # one source
 uv run trouveur drain                     # work the deferred queues once
+uv run trouveur requeue --kind detail     # retry parked items once the cause is fixed
 uv run trouveur refill --kind derive      # re-queue everything below the current version
 uv run --with geonamescache==3.0.2 python tools/build_places.py   # rebuild the city list
 uv run trouveur match --user 1            # retrieve, cut, rerank for one user

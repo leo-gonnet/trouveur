@@ -168,7 +168,19 @@ async def touch_seen(conn: AsyncConnection, job_ids: Sequence[int]) -> None:
     )
 
 
-# Closing a job drops its embedding in the SAME statement, so the two can never disagree.
+# Closing a job drops its embedding in the SAME statement, so the two can never disagree. Its
+# detail and embed work goes with it: left queued, a closed posting's detail fetch fails against a
+# board that no longer lists it until it parks, and its vector would be deleted on arrival. Derive
+# and dedup stay, because Search still shows a closed posting with its facets.
+_DROP_CLOSED = """
+), dropped AS (
+    DELETE FROM job_embedding WHERE job_id IN (SELECT id FROM closed)
+), unqueued AS (
+    DELETE FROM work_item
+    WHERE job_id IN (SELECT id FROM closed) AND kind IN ('detail', 'embed')
+)
+"""
+
 _CLOSE_SQL = """
 WITH closed AS (
     UPDATE job SET closed_at = now()
@@ -177,9 +189,7 @@ WITH closed AS (
       AND last_seen_at < {cutoff}
       {scope_clause}
     RETURNING id
-), dropped AS (
-    DELETE FROM job_embedding WHERE job_id IN (SELECT id FROM closed)
-)
+""" + _DROP_CLOSED + """
 SELECT count(*) AS closed FROM closed
 """
 
@@ -225,11 +235,9 @@ async def close_retired(conn: AsyncConnection, job_ids: Sequence[int]) -> int:
                 UPDATE job SET closed_at = now()
                 WHERE id = ANY(CAST(:ids AS bigint[])) AND closed_at IS NULL
                 RETURNING id
-            ), dropped AS (
-                DELETE FROM job_embedding WHERE job_id IN (SELECT id FROM closed)
-            )
-            SELECT count(*) FROM closed
             """
+            + _DROP_CLOSED
+            + "SELECT count(*) FROM closed"
         ),
         {"ids": list(job_ids)},
     )

@@ -6,9 +6,11 @@ from trouveur.work.queue import (
     complete,
     enqueue,
     fail,
+    pause_source,
     refill,
     refill_all,
     release_stale,
+    requeue_parked,
 )
 
 __all__ = [
@@ -19,7 +21,9 @@ __all__ = [
     "complete",
     "enqueue",
     "fail",
+    "pause_source",
     "refill",
     "refill_all",
     "release_stale",
+    "requeue_parked",
 ]
