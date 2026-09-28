@@ -1,63 +1,65 @@
-# Task briefs
+# Tasks: collect every job
 
-One file per piece of work worth doing, written to be handed to someone -- or some agent -- with
-no prior exposure to this codebase. Each brief states the problem with its evidence, what to do
-at the level of intent rather than instruction, where to look to find the rest out, and what
-"done" means.
+Trouveur shows each user the jobs that fit their profile, so they don't have to check ten sites
+and can't miss a job. These tasks are about **collecting**: more sources, more boards, and
+knowing what we still miss.
 
-They are ordered by expected impact on the only outcome that matters: postings the user actually
-wants to apply to. They are not dependencies on each other unless a brief says so.
+## How it fits together
 
-## Orientation, common to all of them
+```
+aggregator searches (LinkedIn, ...) ─┐
+links in our own archive            ├─> leads ─> resolver ─> boards ─> nightly sweep ─> corpus
+"found it elsewhere" box            ─┘               │
+                                                     └─> unknown platforms ─> agent ─> adapter PR
 
-Trouveur is a self-hosted job radar for the DACH market. It sweeps ~10 job sources into a raw
-archive, normalises each posting into a canonical row with derived facets, embeds it, retrieves
-per user with a hybrid dense + lexical search, and ranks the shortlist with an LLM on the
-installation's key, metered against credit an admin grants each user. Roughly 229,000 live postings, deployed as Docker Compose on a single
-four-core VPS that also hosts the development database.
+coverage report ─> tells humans and agents what to build next
+```
 
-Read `AGENTS.md` first -- it is the architectural contract, and several briefs below deliberately
-stop where it draws a line. `CLAUDE.md` covers working conventions. The shape of the system:
+A **lead** is one job seen somewhere, with its company and its link. The **resolver** turns the
+link into a board we can sweep. One lead can bring a whole board, so one Java job can bring the
+company's other forty jobs too.
 
-    trouveur/sources/     one adapter per job board; archive raw payloads, never parse in place
-    trouveur/ingest/      normalise -> derive facets -> embed, each a versioned pure function
-    trouveur/match/       expand queries -> retrieve -> fuse -> rerank; the per-user path
-    trouveur/db/queries/  all SQL, grouped by the page or stage that issues it
-    trouveur/eval/        planted-needle retrieval evaluation
-    evalx/                A/B experiment layer from the 2026-09 retrieval study (see FINDINGS.md)
+## Rules for every task
 
-Two invariants worth knowing before changing anything:
+- **Cities come from user profiles, never from this repo.** No task names a city. The coverage
+  report (01) says where the users are and what is missing there.
+- **Recall comes first.** robots.txt and terms of service don't rule out a source (see 00).
+- **Go slow enough not to get blocked.** A block loses the whole source for days.
+- **Never use a personal account** on any site.
+- **Agents propose, humans merge.** An agent opens a PR or writes a disabled row. It never
+  changes production directly.
+- One task, one PR. Read `AGENTS.md` first. Probe a live site before writing code for it, and
+  write what you learn into `AGENTS.md`.
 
-- Everything downstream of the raw archive is a pure function of it, and each stage carries a
-  version in `trouveur/versions.py`. Bumping a version refills that stage's work queue, so a
-  backfill and an upgrade are the same code path. `trouveur refill --kind <stage>` is the entry.
-- The system has no LLM spend of its own. Every model call is made with a user's own key, so
-  cost control is structural: retrieval is free and unbounded, reranking is bounded by
-  `rerank_limit` and cached per (content hash, user, profile version).
+## Order
 
-## Ground rules
+| # | Task | Done by | Needs |
+|---|---|---|---|
+| 00 | [Update the access rules in AGENTS.md](00-access-rules.md) | PR | – |
+| 01 | [Coverage report](01-coverage-report.md) | code | – |
+| 02 | [Leads and resolver](02-leads-and-resolver.md) | code | – |
+| 03 | ["Found it elsewhere" box](03-found-elsewhere.md) | code | 02 |
+| 04 | [Try new boards, turn on the good ones](04-board-trial.md) | code | 02 |
+| 05 | [Detect blocks, set speed per source](05-blocks.md) | code | – |
+| 06 | [LinkedIn as a lead source](06-linkedin-leads.md) | code | 00, 02, 05 |
+| 07 | [More aggregators as lead sources](07-more-aggregators.md) | code, one site per PR | 06 |
+| 08 | [New job platforms (ATS)](08-new-platforms.md) | agent drafts, PR | 01, 02 |
+| 09 | [Company sites with JSON-LD](09-json-ld.md) | code | 02 |
+| 10 | [Public job services](10-public-services.md) | agent research, PR | 00 |
+| 11 | [Big job boards as full sources](11-full-boards.md) | PR, one site each | 06 numbers |
+| 12 | [Public lists and name guessing](12-public-lists.md) | code | 04 |
+| 13 | [Browser fetcher](13-browser.md) | code | a source that needs it |
+| 14 | [LLM reading of careers pages](14-llm-pages.md) | code + LLM | 09 |
+| 15 | [Agent routines](15-agent-routines.md) | routines | 01, 02, 08 |
 
-- Production runs on this same host under the `trouveur` compose project. Never point a
-  development or evaluation process at it. `scripts/devdb.sh` (untracked, local to the host)
-  starts throwaway databases; a copy of the production corpus can be taken with `pg_dump` and
-  restored into one.
-- A live sweep from a development process doubles the request rate at every provider, because the
-  politeness budget is per process, not per machine.
-- The evaluation reports, it never gates a merge. Do not turn it into a test.
+## Not now
 
-## The briefs
+- Paid APIs (Google Jobs through SerpAPI) and proxies. Only if blocks make a key source useless.
+- Employer lists from Wikidata, OpenStreetMap or company registers.
+- Communities: Hacker News "Who is hiring", Reddit, Discord.
+- An estimate of the whole market size from source overlap.
 
-| # | Brief | Why it is where it is |
-|---|---|---|
-| 01 | [Finish the encoder swap](01-encoder-swap.md) | Measured win, already built, waiting on a backfill |
-| 02 | [Measure and improve the reranker](02-reranker.md) | Decides the final order; currently unmeasured |
-| 03 | [Close the feedback loop](03-feedback-loop.md) | The only change that improves the product weekly |
-| 04 | [Enrich the profile input](04-profile-background.md) | Cheap; improves expansion and reranking at once |
-| 05 | [Fix the freshness economics](05-freshness.md) | Horizon and editions done; the request budget is not |
-| 06 | [Reshape how results are presented](06-presentation.md) | 150 undifferentiated rows is not a result |
-| 07 | [Correct the profile-edit message](07-profile-edit-cost.md) | Small, and currently misleading |
-| 08 | [Strengthen the evaluation](08-evaluation.md) | Everything above needs it to be trustworthy |
-| 09 | [Simplify what no longer earns its place](09-simplify.md) | Remove before adding |
-| 10 | [Operational hardening](10-operations.md) | Most findings took hours to see because nothing reports |
+## How to use a prompt
 
-Runbooks for work already in flight live in `docs/runbooks/`.
+Start a Claude Code session on this repo and paste the task's prompt. Each prompt is written to
+work alone.

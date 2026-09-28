@@ -50,6 +50,6 @@ Two honest qualifications:
   of them, but it is movement in the wrong direction and worth watching.
 - **The lexical arm now contributes something it did not before.** At 384 the fused result equalled
   dense alone (18 and 18); at 768 fusion finds one needle dense misses (21 against 20). That is a
-  point against retiring the hybrid, which `docs/tasks/09-simplify.md` raises.
+  point against retiring the hybrid.
 
 Raw scorecards: `before-384.txt`, `after-768.txt`.
