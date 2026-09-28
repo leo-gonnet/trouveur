@@ -23,6 +23,8 @@ from trouveur.models import (
 )
 from trouveur.versions import DERIVE_VERSION
 
+_SEPARATOR = re.compile(r",|\s+-\s+")
+
 version = DERIVE_VERSION
 
 # Austrian contracts commonly pay 14 monthly salaries.
@@ -84,7 +86,9 @@ def _places(
         if not (location.country and location.city):
             parsed_country, parsed_city, remote = _parse_free_text(location.raw)
             says_remote = says_remote or remote
-            if not location.country:
+            # A stated country we cannot read is no country: Workday states "United States of
+            # America" beside a raw "Las Vegas, NV, USA" that names it plainly.
+            if not country:
                 country = parsed_country
             if not location.city:
                 city = parsed_city
@@ -114,8 +118,20 @@ def _places(
 
 def _names_only_a_town(location: Location) -> bool:
     """A bare "London" may be looked up worldwide; "Vienna, VA" may not, because the part we
-    cannot read is exactly what says which Vienna it is."""
-    return not location.region and "," not in location.raw
+    cannot read is exactly what says which Vienna it is. So is a country the source stated and we
+    could not read."""
+    named = [part for part in _parts(location.raw) if fold(part) not in vocab.REMOTE_TERMS]
+    return not location.region and not location.country and len(named) == 1
+
+
+def _parts(raw: str) -> list[str]:
+    """'UK - London' and 'Berlin, Berlin' are two ways of writing one place each. A bare hyphen
+    is not a separator, or 'Castrop-Rauxel' would be two towns."""
+    parts: dict[str, str] = {}
+    for part in _SEPARATOR.split(raw):
+        if part.strip():
+            parts.setdefault(fold(part.strip()), part.strip())
+    return list(parts.values())
 
 
 def _parse_free_text(raw: str) -> tuple[str | None, str | None, bool]:
@@ -124,7 +140,7 @@ def _parse_free_text(raw: str) -> tuple[str | None, str | None, bool]:
     The country is NOT always last -- Workday writes 'AT, Vienna' -- so it is looked for wherever
     it sits, from the end, which keeps 'Georgia, US' resolving to US.
     """
-    parts = [part.strip() for part in raw.split(",") if part.strip()]
+    parts = _parts(raw)
     if not parts:
         return None, None, False
 
@@ -138,6 +154,12 @@ def _parse_free_text(raw: str) -> tuple[str | None, str | None, bool]:
             country = code
             named = named[:index] + named[index + 1 :]
             break
+
+    states = [part for part in named[1:] if fold(part) in vocab.US_STATES]
+    if states and country in (None, "US"):
+        named = [part for part in named if part not in states]
+        if country is None and named and places.exists(named[0], "US"):
+            country = "US"
     return country, (_city(named[0]) if named else None), remote
 
 

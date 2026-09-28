@@ -93,13 +93,20 @@ def test_a_bare_town_resolves_worldwide_when_one_place_dominates(raw, country, p
     assert facets.place_ids == [place_id]
 
 
-@pytest.mark.parametrize("raw", ["Vienna, VA", "Cambridge", "Neustadt"])
+@pytest.mark.parametrize("raw", ["Cambridge", "Neustadt"])
 def test_a_bare_town_is_not_guessed_when_it_cannot_be_told(raw):
-    """"Vienna, VA" is Virginia: the part we cannot read is what says which Vienna. Cambridge is
-    two cities of similar size. Neither may land in somebody's circle."""
+    """Cambridge is two cities of similar size. It may not land in somebody's circle."""
     facets = derive(_job(title="Engineer", locations=[Location(raw=raw)]))
     assert facets.place_ids == []
     assert facets.countries == []
+
+
+def test_a_town_with_a_state_is_never_looked_up_worldwide():
+    """Worldwide, "Vienna" is Wien. "Vienna, VA" is Virginia, and must never reach a circle
+    drawn around Wien."""
+    facets = derive(_job(title="Engineer", locations=[Location(raw="Vienna, VA")]))
+    assert facets.countries == ["US"]
+    assert 2761369 not in facets.place_ids
 
 
 def test_a_country_name_is_a_country_never_a_town():
@@ -114,6 +121,46 @@ def test_a_us_state_named_like_a_country_is_not_read_as_that_country():
     would move to the Caucasus."""
     facets = derive(_job(title="Engineer", locations=[Location(raw="Atlanta, Georgia")]))
     assert "GE" not in facets.countries
+
+
+def test_a_stated_country_we_cannot_read_falls_back_to_the_raw_text():
+    """Workday states "United States of America" beside a raw "Las Vegas, NV, USA". The stated
+    name was unknown, the raw one was never read, and every such posting had no country."""
+    facets = derive(_job(title="Engineer", locations=[
+        Location(raw="Las Vegas, NV, USA", country="Republic of Nowhere")
+    ]))
+    assert facets.countries == ["US"]
+
+
+@pytest.mark.parametrize(
+    ("raw", "country"),
+    [
+        ("Durham, North Carolina, United States of America", "US"),
+        ("UK - London", "GB"),
+        ("US - Austin, TX", "US"),
+        ("Princeton - NJ - US", "US"),
+        ("Berlin, Berlin", "DE"),
+        ("Chicago, IL", "US"),
+        ("Columbus, Ohio", "US"),
+    ],
+)
+def test_the_ways_boards_write_a_place_resolve_its_country(raw, country):
+    """Each of these derived to no country, and a posting with no country passes every location
+    filter: 14% of open postings, shown to a reader who picked only Vienna."""
+    facets = derive(_job(title="Engineer", locations=[Location(raw=raw)]))
+    assert facets.countries == [country]
+
+
+def test_a_state_code_is_not_a_country_unless_the_town_is_in_the_us():
+    """"CA" is California after Redlands and Canada after Toronto."""
+    facets = derive(_job(title="Engineer", locations=[Location(raw="Toronto, CA")]))
+    assert facets.countries == []
+
+
+def test_a_bare_hyphen_is_part_of_a_town_name_not_a_separator():
+    facets = derive(_job(title="Engineer", locations=[Location(raw="Castrop-Rauxel")]))
+    assert facets.countries == ["DE"]
+    assert facets.place_ids != []
 
 
 def test_unknown_country_derives_to_nothing_rather_than_a_guess():

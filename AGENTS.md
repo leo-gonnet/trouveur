@@ -643,7 +643,14 @@ nothing that credit does not: one user's empty balance still cannot touch anothe
   distinguished anywhere on purpose — both mean "you go there", which the country already says.
 - **A posting that states no location passes.** Not an escape clause on one arm of the filter but
   how the filter works: a posting nobody parsed a country out of is not a posting somewhere else,
-  and dropping it would cost recall for a derivation gap.
+  and dropping it would cost recall for a derivation gap. The one exception is a posting derived
+  REMOTE with no country: that is exactly "a fully remote role, wherever it is", so it passes only
+  for a reader who ticked `remote_anywhere`.
+- **The reranker is told the whole location wish** -- circles with their radius, countries, and
+  whether fully remote roles are wanted -- because it is the only judge of what the filter cannot
+  see. Told only the city names, and that remote satisfies them, it put a remote role requiring
+  relocation to San Francisco first for a reader in Vienna who had declined remote work. Where a
+  role is *later* ("relocate within a year") lives in the description, never in a facet.
 - **Cities are filtered by GeoNames id, never by name.** Cities as the source spelled them
   (`job_facet.cities`) are for display only: `Wien` and `Vienna` coexist there, and a
   `f.cities && :cities` clause would silently lose one of them, plus every suburb. Derivation
@@ -926,7 +933,11 @@ still holds the old readings and no re-derive has been scheduled.
   - **Retrieval never re-stamps the profile version a posting was scored under**, or the rows
     most in need of a re-score look current and nothing is ever re-scored.
   - **Location is the only hard filter**, a posting that states no location passes, and a fully
-    remote posting is admitted wherever it was posted.
+    remote posting is admitted wherever it was posted -- and, with no country, only for a reader
+    who accepts fully remote roles.
+  - **A stated country we cannot read falls back to the raw text** (Workday's "United States of
+    America" beside "Las Vegas, NV, USA"), `UK - London` and `Berlin, Berlin` name one place, and
+    a US state implies the US only when the town before it is in the US (`Toronto, CA` is not).
   - **Every spelling of a town resolves to one id** (`Wien`, `Vienna`, `Wien 10., Favoriten`), an
     ambiguous town is left unresolved rather than guessed, a bare town (`London`) resolves
     worldwide only when one place dominates and never when part of the location is unread

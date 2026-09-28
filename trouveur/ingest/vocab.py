@@ -40,7 +40,8 @@ COUNTRIES: dict[str, str] = {
     "estland": "EE", "estonia": "EE",
     "lettland": "LV", "latvia": "LV",
     "litauen": "LT", "lithuania": "LT",
-    "usa": "US", "united states": "US", "us": "US", "vereinigte staaten": "US",
+    "usa": "US", "united states": "US", "united states of america": "US", "us": "US",
+    "vereinigte staaten": "US",
     "kanada": "CA", "canada": "CA",
     "indien": "IN", "india": "IN",
     "israel": "IL",
@@ -112,6 +113,23 @@ COUNTRIES: dict[str, str] = {
     "zimbabwe": "ZW",
 }
 
+# "Chicago, IL" names no country, and US boards write it that way throughout. A state is only
+# evidence once the town before it is found in the US: "Toronto, CA" is Canada. "Georgia" is
+# absent as a name for the same reason it is absent from COUNTRIES; "GA" is unambiguous.
+US_STATES = frozenset({
+    "al", "ak", "az", "ar", "ca", "co", "ct", "de", "dc", "fl", "ga", "hi", "id", "il", "in", "ia",
+    "ks", "ky", "la", "me", "md", "ma", "mi", "mn", "ms", "mo", "mt", "ne", "nv", "nh", "nj", "nm",
+    "ny", "nc", "nd", "oh", "ok", "or", "pa", "ri", "sc", "sd", "tn", "tx", "ut", "vt", "va", "wa",
+    "wv", "wi", "wy",
+    "alabama", "alaska", "arizona", "arkansas", "california", "colorado", "connecticut",
+    "delaware", "district of columbia", "florida", "hawaii", "idaho", "illinois", "indiana",
+    "iowa", "kansas", "kentucky", "louisiana", "maine", "maryland", "massachusetts", "michigan",
+    "minnesota", "mississippi", "missouri", "montana", "nebraska", "nevada", "new hampshire",
+    "new jersey", "new mexico", "new york", "north carolina", "north dakota", "ohio", "oklahoma",
+    "oregon", "pennsylvania", "rhode island", "south carolina", "south dakota", "tennessee",
+    "texas", "utah", "vermont", "virginia", "washington", "west virginia", "wisconsin", "wyoming",
+})
+
 # Arbeitsagentur writes German federal states in screaming snake case.
 REGIONS: dict[str, str] = {
     "baden_wuerttemberg": "Baden-Württemberg",
@@ -137,7 +155,8 @@ REMOTE_TERMS = (
     "work from home", "fully remote", "100% remote", "vollstandig remote",
     # A board naming its work location in words needs the word here, or it is read as a city --
     # Jobicy postings derived a city of "Anywhere".
-    "anywhere", "worldwide", "weltweit", "anywhere in the world", "global",
+    "anywhere", "worldwide", "world wide", "weltweit", "anywhere in the world", "global",
+    "remote job",
 )
 # Every term must be unambiguous about WHERE the work happens: "flexible" was removed after it
 # read "flexible paid time off" as hybrid.

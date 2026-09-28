@@ -32,6 +32,7 @@ POSTINGS = {
     "Germany, town unknown": (["DE"], [], ["DE"], "unknown"),
     "Berlin": (["DE"], [BERLIN], [], "onsite"),
     "fully remote, posted from Germany": (["DE"], [], ["DE"], "remote"),
+    "fully remote, no location": ([], [], [], "remote"),
 }
 
 
@@ -63,6 +64,7 @@ async def _passes(profile, posting: str) -> bool:
         ("Germany, town unknown", False),
         ("Berlin", False),
         ("fully remote, posted from Germany", True),
+        ("fully remote, no location", True),
     ],
 )
 async def test_a_city_filter_keeps_what_its_location_cannot_rule_out(
@@ -87,3 +89,14 @@ async def test_nothing_picked_keeps_everywhere(clean_db, gh_board, aa_listing, a
     await seed_corpus(gh_board, aa_listing, aa_detail)
     _, profile = await seed_user(countries=[], city_ids=[], remote_anywhere=False)
     assert await _passes(profile, "Graz, 150 km from Vienna")
+
+
+async def test_a_remote_posting_with_no_country_needs_remote_anywhere(
+    clean_db, gh_board, aa_listing, aa_detail
+):
+    """A reader who declined fully remote roles was recommended one: it named no country, and a
+    posting with no country passed whatever the reader had said about remote work."""
+    await seed_corpus(gh_board, aa_listing, aa_detail)
+    _, declined = await seed_user(countries=[], city_ids=[VIENNA], remote_anywhere=False)
+    assert not await _passes(declined, "fully remote, no location")
+    assert await _passes(declined, "no location")

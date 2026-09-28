@@ -40,7 +40,11 @@ from trouveur.models import Expansion
 _LOCATION = """
     (
         CAST(:anywhere AS boolean)
-        OR cardinality(f.countries) = 0
+        OR (
+            cardinality(f.countries) = 0
+            -- Remote with no country is exactly "a fully remote role, wherever it is".
+            AND (CAST(:remote_anywhere AS boolean) OR f.work_mode <> 'remote')
+        )
         OR f.countries && CAST(:countries AS text[])
         OR f.place_ids && CAST(:area_ids AS integer[])
         OR f.unplaced_countries && CAST(:area_countries AS text[])

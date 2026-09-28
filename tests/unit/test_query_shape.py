@@ -202,6 +202,7 @@ def test_a_posting_that_states_no_country_is_kept():
     from trouveur.db.queries.match import _ELIGIBLE
 
     assert "cardinality(f.countries) = 0" in _ELIGIBLE
+    assert "f.work_mode <> 'remote'" in _ELIGIBLE
 
 
 def test_fully_remote_is_admitted_wherever_it_was_posted():
