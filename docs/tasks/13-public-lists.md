@@ -1,4 +1,4 @@
-# 12 — Public lists and name guessing
+# 13 — Public lists and name guessing
 
 **Goal.** Find boards without waiting for a lead to point at them.
 
@@ -10,6 +10,14 @@
 - **Name guessing**: for leads with a company but no link, try the company name as a slug on each
   supported platform. Keep a guess only if the board's company name matches.
 - Everything becomes leads and goes through the trial (04). The trial cap keeps the scan short.
+
+**Known traps** (from freehire, `cmd/harvest-boards`):
+- Common Crawl: a wildcard like `*.myworkdayjobs.com` spans ~22 index pages per snapshot. A small
+  page cap silently cuts the tail while the run reports success.
+- Recent snapshots overlap a lot. Two or three are enough.
+- Only 429 means "refused". Some platforms answer an unknown company with 503 (Traffit), so a
+  503 is "no board", not a block.
+- A run that was mostly refused did not happen. Report it as failed, not as "found little".
 
 **Done when.** New boards arrive from each method, marked with their origin, and the trial cap
 holds.

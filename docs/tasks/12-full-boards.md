@@ -1,4 +1,4 @@
-# 11 — Big job boards as full sources
+# 12 — Big job boards as full sources
 
 **Goal.** Put a big job site's jobs straight into the corpus. Do it only when the numbers say
 many jobs live **only** there.
@@ -6,7 +6,7 @@ many jobs live **only** there.
 **Why.** Some jobs have no other home, like LinkedIn "Easy Apply" jobs from companies with no
 board. Leads alone can't give us those.
 
-**When.** When the coverage report shows a real share of leads with no link out (06, 07). A few
+**When.** When the coverage report shows a real share of leads with no link out (07, 08). A few
 percent can wait. Twenty percent can't.
 
 **How.** A normal corpus source for that site. The raw pages are already archived by the lead

@@ -1,4 +1,4 @@
-# 09 — Company sites with JSON-LD
+# 10 — Company sites with JSON-LD
 
 **Goal.** One generic source for any company website that marks its jobs with schema.org
 `JobPosting` (JSON-LD).

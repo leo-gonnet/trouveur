@@ -10,8 +10,8 @@ choose the next source, since the repo names no city.
 - open jobs per source;
 - jobs that only one source has (that source is irreplaceable);
 - boards on, boards found, boards tried and dropped;
-- later, as other tasks land: leads we already had (06), "found it elsewhere" results (03), top
-  unknown platforms (02), blocked sources (05).
+- later, as other tasks land: leads we already had (07), "found it elsewhere" results (03), top
+  unknown platforms (02), blocked sources (06).
 
 **Where.** A section on the dashboard, plus `trouveur coverage --json` for agents and scripts.
 

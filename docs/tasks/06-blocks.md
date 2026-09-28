@@ -1,4 +1,4 @@
-# 05 — Detect blocks, set speed per source
+# 06 — Detect blocks, set speed per source
 
 **Goal.** Trouveur knows when a site blocks it, says so, and slows down. It never mistakes a
 block for "no new jobs".
@@ -36,6 +36,10 @@ Read AGENTS.md and docs/tasks/README.md. Add block detection to trouveur/sources
 
 3. After a block, pause that source and try again later with a longer interval. Reuse the
    existing burst pause in trouveur/work.
+
+Only 429 means refused. A 503 can mean "no such board": freehire found Traffit answers an
+unknown company with 503. A run that was mostly refused must be reported as failed, not as
+"found little".
 
 Tests use a stubbed transport, no network. Include a real empty result that must NOT count
 as a block. One PR.

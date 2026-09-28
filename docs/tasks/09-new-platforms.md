@@ -1,4 +1,4 @@
-# 08 — New job platforms (ATS)
+# 09 — New job platforms (ATS)
 
 **Goal.** Support the job platforms that leads point to most often but that we can't read yet.
 
@@ -20,6 +20,10 @@ SuccessFactors, JOIN, BambooHR, d.vinci, rexx.
 ```
 Read AGENTS.md, docs/tasks/README.md, and trouveur/sources/board.py and feed.py. Add
 <PLATFORM> as a source.
+
+Before probing, check whether freehire (internal/ingest/sources), ats-scrapers
+(src/ats_scrapers/scrapers) or career-ops (providers/) already reads <PLATFORM>. All three
+are MIT. Their code tells you the endpoint and the traps, but re-probe: they may be stale.
 
 1. Probe live with shell commands:
    - how to list one company's jobs;

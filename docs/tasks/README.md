@@ -7,10 +7,11 @@ knowing what we still miss.
 ## How it fits together
 
 ```
-aggregator searches (LinkedIn, ...) ─┐
-links in our own archive            ├─> leads ─> resolver ─> boards ─> nightly sweep ─> corpus
-"found it elsewhere" box            ─┘               │
-                                                     └─> unknown platforms ─> agent ─> adapter PR
+open board lists (ats-scrapers, ...) ─┐
+aggregator searches (LinkedIn, ...)   │
+links in our own archive              ├─> leads ─> resolver ─> boards ─> nightly sweep ─> corpus
+"found it elsewhere" box             ─┘                │
+                                                       └─> unknown platforms ─> agent ─> adapter PR
 
 coverage report ─> tells humans and agents what to build next
 ```
@@ -40,17 +41,18 @@ company's other forty jobs too.
 | 02 | [Leads and resolver](02-leads-and-resolver.md) | code | – |
 | 03 | ["Found it elsewhere" box](03-found-elsewhere.md) | code | 02 |
 | 04 | [Try new boards, turn on the good ones](04-board-trial.md) | code | 02 |
-| 05 | [Detect blocks, set speed per source](05-blocks.md) | code | – |
-| 06 | [LinkedIn as a lead source](06-linkedin-leads.md) | code | 00, 02, 05 |
-| 07 | [More aggregators as lead sources](07-more-aggregators.md) | code, one site per PR | 06 |
-| 08 | [New job platforms (ATS)](08-new-platforms.md) | agent drafts, PR | 01, 02 |
-| 09 | [Company sites with JSON-LD](09-json-ld.md) | code | 02 |
-| 10 | [Public job services](10-public-services.md) | agent research, PR | 00 |
-| 11 | [Big job boards as full sources](11-full-boards.md) | PR, one site each | 06 numbers |
-| 12 | [Public lists and name guessing](12-public-lists.md) | code | 04 |
-| 13 | [Browser fetcher](13-browser.md) | code | a source that needs it |
-| 14 | [LLM reading of careers pages](14-llm-pages.md) | code + LLM | 09 |
-| 15 | [Agent routines](15-agent-routines.md) | routines | 01, 02, 08 |
+| 05 | [Import open board lists](05-open-board-lists.md) | code | 02, 04 |
+| 06 | [Detect blocks, set speed per source](06-blocks.md) | code | – |
+| 07 | [LinkedIn as a lead source](07-linkedin-leads.md) | code | 00, 02, 06 |
+| 08 | [More aggregators as lead sources](08-more-aggregators.md) | code, one site per PR | 07 |
+| 09 | [New job platforms (ATS)](09-new-platforms.md) | agent drafts, PR | 01, 02 |
+| 10 | [Company sites with JSON-LD](10-json-ld.md) | code | 02 |
+| 11 | [Public job services](11-public-services.md) | agent research, PR | 00 |
+| 12 | [Big job boards as full sources](12-full-boards.md) | PR, one site each | 07 numbers |
+| 13 | [Public lists and name guessing](13-public-lists.md) | code | 04 |
+| 14 | [Browser fetcher](14-browser.md) | code | a source that needs it |
+| 15 | [LLM reading of careers pages](15-llm-pages.md) | code + LLM | 10 |
+| 16 | [Agent routines](16-agent-routines.md) | routines | 01, 02, 09 |
 
 ## Not now
 
@@ -58,6 +60,24 @@ company's other forty jobs too.
 - Employer lists from Wikidata, OpenStreetMap or company registers.
 - Communities: Hacker News "Who is hiring", Reddit, Discord.
 - An estimate of the whole market size from source overlap.
+- freehire's API as a nightly source. Fine as a board list (05), too risky to depend on.
+- Liveness checks for jobs no board sweep revisits (freehire's `cmd/liveness`). Needed once we
+  import single jobs by URL.
+- Telegram job channels as a lead source (freehire does this with an LLM).
+
+## Related projects
+
+Others have built parts of this. Read them before building the same thing.
+
+| Project | Useful for |
+|---|---|
+| [freehire](https://github.com/strelov1/freehire) (Go, MIT) | The whole discovery chain: URL to board rules (`internal/ingest/atsdetect`, `atsboard`), board probing (`cmd/harvest-boards`), LinkedIn harvest, Common Crawl, JSON-LD import by URL. US-centred and IT-only. |
+| [ats-scrapers](https://github.com/kalil0321/ats-scrapers) (Python, MIT) | ~80,000 company boards in CSV files; scrapers for EURES, jobs.ch, softgarden, Teamtailor, JOIN. |
+| [JobSpy](https://github.com/speedyapply/JobSpy) (Python, MIT) | LinkedIn, Indeed and Glassdoor search; the LinkedIn apply link parser. |
+| [career-ops](https://github.com/career-ops-hq/career-ops) (JS, MIT) | ~115 providers, a company to board resolver, LLM scoring of jobs against a CV. |
+
+What none of them does, and Trouveur does: every job in a user's area, not only IT, ranked for
+that user every day.
 
 ## How to use a prompt
 

@@ -1,4 +1,4 @@
-# 15 — Agent routines
+# 16 — Agent routines
 
 **Goal.** Agents that run on a schedule, read the coverage report, and propose the next source or
 a fix, as PRs.
@@ -8,7 +8,7 @@ work.
 
 **The routines.**
 - **Source scout** (weekly): reads the top unknown platforms, the "only on this site" shares and
-  the users' countries. Picks the next task 07, 08, 10 or 11 and opens a PR using that task's
+  the users' countries. Picks the next task 08, 09, 11 or 12 and opens a PR using that task's
   prompt.
 - **Adapter doctor** (when a source is blocked or suddenly finds 0): probes the site again,
   finds what changed, and opens a fix PR plus an `AGENTS.md` note.
@@ -23,7 +23,7 @@ PR each.
 **Prompt**
 
 ```
-Read AGENTS.md and docs/tasks/README.md. Tasks 01, 02 and 08 must be merged first.
+Read AGENTS.md and docs/tasks/README.md. Tasks 01, 02 and 09 must be merged first.
 
 1. Give agents read access to `trouveur coverage --json` without making it public (it
    names users' areas). Propose two options with their trade-offs and ask me before

@@ -1,4 +1,4 @@
-# 13 — Browser fetcher
+# 14 — Browser fetcher
 
 **Goal.** Let a source fetch a page with a real browser, when plain HTTP gets blocked or the page
 needs JavaScript.

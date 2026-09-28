@@ -1,6 +1,6 @@
-# 07 — More aggregators as lead sources
+# 08 — More aggregators as lead sources
 
-**Goal.** Do what 06 did, for other big job sites. One site per PR.
+**Goal.** Do what 07 did, for other big job sites. One site per PR.
 
 **Why.** Each aggregator knows different companies. Leads from several sites find more boards.
 
@@ -14,7 +14,7 @@ cleanly.
 **Prompt**
 
 ```
-Read AGENTS.md, docs/tasks/README.md and trouveur/sources/linkedin/ (task 06). Add <SITE>
+Read AGENTS.md, docs/tasks/README.md and trouveur/sources/linkedin/ (task 07). Add <SITE>
 as a lead source, following the LinkedIn pattern exactly:
 - probe first and write the findings into AGENTS.md with the date;
 - per-user queries per city;

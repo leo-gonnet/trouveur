@@ -3,13 +3,17 @@
 **Goal.** A table of leads (jobs seen anywhere, with a link), and a resolver that turns a link
 into a board we can sweep.
 
-**Why.** This is the core of discovery. Every other lead source (03, 06, 07, 12) writes here.
+**Why.** This is the core of discovery. Every other lead source (03, 05, 07, 08, 13) writes
+here.
 
 **How.**
 - `discovery_lead`: where it came from, company, title, place, link, and the result (a board, an
   unknown host, no link, or a duplicate).
 - The resolver is **pure and versioned** (`RESOLVE_VERSION` in `versions.py`). Link to
   `(source, scope)` for every supported platform, reusing `registry.clean_scope`.
+- **Port the URL rules from freehire** (`internal/ingest/atsdetect`, `internal/ingest/atsboard`,
+  MIT) instead of writing them from scratch. They cover ~92 platforms and are tested. Credit the
+  source in a comment.
 - The raw input stays in the raw archive. When a new platform adapter ships, bump the version
   and every old lead is resolved again. No new request is needed.
 - A resolved board goes into `source_tenant` as `origin = discovered`, `enabled = false`.
@@ -33,6 +37,9 @@ Read AGENTS.md and docs/tasks/README.md. Add discovery leads to Trouveur.
    resolve_version.
 
 2. trouveur/discovery/resolve.py: a pure function url -> (source, scope) | unknown host.
+   - Port the URL rules from freehire (github.com/strelov1/freehire,
+     internal/ingest/atsdetect and internal/ingest/atsboard, MIT licence). Keep a comment
+     crediting it. Port their test cases too, as synthetic URLs.
    - Cover every tenant-scoped source in the registry and reuse registry.clean_scope.
    - Add RESOLVE_VERSION to trouveur/versions.py.
    - A version bump must re-resolve old leads through the work queue, like derive.
