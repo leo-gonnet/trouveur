@@ -122,6 +122,11 @@ def resolve_anywhere(city: str) -> Place | None:
     return None
 
 
+def named(name: str) -> tuple[Place, ...]:
+    """Every place called exactly `name`, in any spelling, anywhere."""
+    return _index().by_bare_name.get(fold(name), ())
+
+
 def _variants(city: str):
     value = city.strip()
     yield value

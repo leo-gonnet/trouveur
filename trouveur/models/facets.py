@@ -46,9 +46,10 @@ class JobFacets(BaseModel):
     countries: list[str] = Field(default_factory=list)
     regions: list[str] = Field(default_factory=list)
     cities: list[str] = Field(default_factory=list)
-    # GeoNames ids of the towns resolved from `cities`, and the countries of every location whose
-    # town could not be resolved. The location filter reads these two; `cities` stays as the
-    # source spelled it, for display.
+    # GeoNames ids of the towns resolved from `cities`, and every country a location whose town
+    # could not be resolved may be in: its stated country, or each country a town like "Geneva"
+    # could be in. The location filter reads these two; `cities` stays as the source spelled it,
+    # for display.
     place_ids: list[int] = Field(default_factory=list)
     unplaced_countries: list[str] = Field(default_factory=list)
 

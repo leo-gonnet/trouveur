@@ -111,6 +111,19 @@ COUNTRIES: dict[str, str] = {
     "vanuatu": "VU", "vatican": "VA", "venezuela": "VE", "vietnam": "VN", "viet nam": "VN",
     "wallis and futuna": "WF", "western sahara": "EH", "yemen": "YE", "zambia": "ZM",
     "zimbabwe": "ZW",
+    # As Workday tenants state them. An unreadable STATED country is never looked past -- it may be
+    # what says which of several namesakes the town is -- so each of these passed every filter.
+    # "Congo" alone is left out: it is two countries.
+    "korea, republic of": "KR", "turkiye": "TR", "mainland china": "CN", "china/mainland": "CN",
+    "china pr": "CN", "hong kong sar": "HK", "hong kong, sar": "HK", "hong kong s.a.r.": "HK",
+    "hong kong sar, china": "HK", "china-hong kong (sar)": "HK", "taiwan, china": "TW",
+    "taiwan region": "TW", "taiwan, republic of china": "TW", "chinese taiwan": "TW",
+    "macao s.a.r.": "MO", "macao sar, china": "MO", "china-macau (sar)": "MO",
+    "venezuela, bolivarian republic of": "VE", "bolivia, plurinational state of": "BO",
+    "congo, democratic republic of the": "CD", "congo, the democratic republic of the": "CD",
+    "democratic republic of congo": "CD", "tanzania, united republic of": "TZ",
+    "syrian arab republic": "SY", "palestine": "PS", "palestine, state of": "PS", "bosnia": "BA",
+    "macedonia": "MK", "roumania": "RO",
 }
 
 # "Chicago, IL" names no country, and US boards write it that way throughout. A state is only
@@ -157,6 +170,13 @@ REMOTE_TERMS = (
     # Jobicy postings derived a city of "Anywhere".
     "anywhere", "worldwide", "world wide", "weltweit", "anywhere in the world", "global",
     "remote job",
+)
+# Words a board writes beside a town that say nothing about which town it is: "Berlin Office",
+# "Munich HQ", "Zentrale (Wien)". Left in, they made every such posting unplaceable, and a posting
+# with no place passes every location filter.
+LOCATION_NOISE = (
+    "office", "offices", "hq", "headquarters", "head office", "main office", "zentrale",
+    "hauptsitz", "buro", "buero", "standort", "campus", "hybrid", "onsite", "on-site",
 )
 # Every term must be unambiguous about WHERE the work happens: "flexible" was removed after it
 # read "flexible paid time off" as hybrid.

@@ -11,6 +11,7 @@ import re
 from decimal import Decimal
 
 from trouveur.ingest import places, vocab
+from trouveur.ingest.places import Place
 from trouveur.models import (
     CanonicalJob,
     EmploymentType,
@@ -23,7 +24,21 @@ from trouveur.models import (
 )
 from trouveur.versions import DERIVE_VERSION
 
-_SEPARATOR = re.compile(r",|\s+-\s+")
+_SEPARATOR = re.compile(r",|\s+-\s+|\s*/\s*")
+# One string naming several places, as boards write them: "Berlin; Munich", "Hamburg or Berlin",
+# Workday's "Munich | Berlin".
+_SEVERAL = re.compile(r";|\||\s+(?:or|oder)\s+", re.IGNORECASE)
+_NOISE = re.compile(
+    r"(?<!\w)(?:" + "|".join(re.escape(term) for term in vocab.LOCATION_NOISE) + r")(?!\w)",
+    re.IGNORECASE,
+)
+_WORD = re.compile(r"[^\W\d_]+")
+_NOT_A_PLACE = frozenset(vocab.LOCATION_NOISE + vocab.REMOTE_TERMS)
+# "Frankfurt an der Oder", "United States of America".
+_LONGEST_NAME = 4
+# A word inside text we could not parse is evidence of a town only if it names a city this big
+# somewhere: "From", "Market", "Store" and "Fully" are all towns too.
+_PROMINENT = 100_000
 
 version = DERIVE_VERSION
 
@@ -75,45 +90,156 @@ def _places(
     says_remote = False
 
     for location in locations:
-        country = vocab.COUNTRIES.get(fold(location.country)) if location.country else None
-        city = _city(location.city) if location.city else None
         if location.region:
             region = vocab.REGIONS.get(fold(location.region))
             if region:
                 regions.append(region)
-
-        # Only parse free text where the source gave no structure.
-        if not (location.country and location.city):
-            parsed_country, parsed_city, remote = _parse_free_text(location.raw)
+        for one in _each_named(location):
+            found_countries, city, found_places, found_unplaced, remote = _place(one)
             says_remote = says_remote or remote
-            # A stated country we cannot read is no country: Workday states "United States of
-            # America" beside a raw "Las Vegas, NV, USA" that names it plainly.
-            if not country:
-                country = parsed_country
-            if not location.city:
-                city = parsed_city
-
-        place = None
-        if city and country:
-            place = places.resolve(city, country)
-        elif city and _names_only_a_town(location):
-            place = places.resolve_anywhere(city)
-            country = place.country if place else None
-
-        if country:
-            countries.append(country)
-        if city:
-            cities.append(city)
-        if place:
-            place_ids.append(place.id)
-        elif country:
-            # Known country, unknown town: the location filter can only judge it by the country.
-            unplaced.append(country)
+            countries.extend(found_countries)
+            if city:
+                cities.append(city)
+            place_ids.extend(place.id for place in found_places)
+            unplaced.extend(found_unplaced)
 
     return (
         _unique(countries), _unique(regions), _unique(cities),
         _unique(place_ids), _unique(unplaced), says_remote,
     )
+
+
+def _each_named(location: Location) -> list[Location]:
+    """"Berlin; Munich" and "Hamburg or Berlin" are two places, each read on its own."""
+    if location.city:
+        return [location]
+    pieces = [piece.strip() for piece in _SEVERAL.split(location.raw) if piece.strip()]
+    if len(pieces) < 2:
+        return [location]
+    return [location.model_copy(update={"raw": piece}) for piece in pieces]
+
+
+def _place(location: Location) -> tuple[list[str], str | None, list[Place], list[str], bool]:
+    """The countries, town, places and unplaced countries one location names."""
+    country = vocab.COUNTRIES.get(fold(location.country)) if location.country else None
+    city = _city(location.city) if location.city else None
+    remote = False
+
+    # Only parse free text where the source gave no structure.
+    if not (location.country and location.city):
+        parsed_country, parsed_city, remote = _parse_free_text(location.raw)
+        # A stated country we cannot read is no country: Workday states "United States of
+        # America" beside a raw "Las Vegas, NV, USA" that names it plainly.
+        if not country:
+            country = parsed_country
+        if not location.city:
+            city = parsed_city
+
+    place = None
+    if city and country:
+        place = places.resolve(city, country)
+    elif city and _names_only_a_town(location):
+        place = places.resolve_anywhere(city)
+        country = place.country if place else None
+
+    if place:
+        return [country], city, [place], [], remote
+    if country:
+        # Known country, unknown town: the location filter can only judge it by the country.
+        return [country], city, [], [country], remote
+    if location.country:
+        # A country the source stated and we could not read may be exactly what says which of
+        # several namesakes the town is.
+        return [], city, [], [], remote
+    stated, found, possible = _mentioned(location.raw)
+    return stated + [p.country for p in found], city, found, possible, remote
+
+
+def _mentioned(raw: str) -> tuple[list[str], list[Place], list[str]]:
+    """Every country and town a location we could not parse mentions: "Munich, Bavaria",
+    "Brunswick (Germany)", "Moorgate London".
+
+    Never a guess among namesakes. A town that could be several places adds every country it could
+    be in to the unplaced countries, so "Geneva" is judged as Switzerland-or-the-US: it still
+    reaches anyone looking in either, and no longer reaches someone looking in Vienna.
+    """
+    stated: list[str] = []
+    towns: list[tuple[str, tuple[Place, ...]]] = []
+    # A word naming only small towns is an ordinary word as often as a place ("Fully", "Store",
+    # "Market"). It may add countries a posting could be in, never be the reason it is left out.
+    weak: list[tuple[Place, ...]] = []
+    for part in _parts(raw):
+        if fold(part) in _NOT_A_PLACE:
+            continue
+        found = () if _is_code(part) else places.named(part)
+        if found:
+            towns.append((part, found))
+            continue
+        for text in _names_in(part):
+            key = fold(text)
+            found = places.named(text)
+            if len(key) > 2 and key in vocab.US_STATES:
+                stated.append("US")
+            # "USA" and "AT" are also spellings of towns somewhere; a capital code is the country.
+            elif key in vocab.COUNTRIES and (_is_code(text) or not found):
+                stated.append(vocab.COUNTRIES[key])
+            elif max((p.population for p in found), default=0) >= _PROMINENT:
+                towns.append((text, found))
+            else:
+                weak.append(found)
+    if not stated and not towns:
+        return [], [], []
+
+    found_places: list[Place] = []
+    possible: list[str] = []
+    for found in weak:
+        if not any(p.country in stated for p in found):
+            possible.extend(p.country for p in found)
+    for text, found in towns:
+        place = next(filter(None, (places.resolve(text, code) for code in stated)), None)
+        if place is None and not any(p.country in stated for p in found):
+            if len(found) == 1 and not stated:
+                place = found[0]
+            else:
+                possible.extend(p.country for p in found)
+        if place:
+            found_places.append(place)
+    placed = {place.country for place in found_places}
+    return stated, found_places, possible + [code for code in stated if code not in placed]
+
+
+def _names_in(part: str) -> list[str]:
+    """The longest runs of up to four words in `part` that could each be a name.
+
+    A lowercase word is prose ("an allen Standorten"), and a short capital one is a code: "HR
+    Bengaluru" is human resources, not Croatia, and "SWAN" is a company, not a town in Armenia.
+    """
+    words = list(_WORD.finditer(part))
+    names: list[str] = []
+    start = 0
+    while start < len(words):
+        for size in range(min(_LONGEST_NAME, len(words) - start), 0, -1):
+            text = part[words[start].start() : words[start + size - 1].end()]
+            key = fold(text)
+            if key in _NOT_A_PLACE:
+                break
+            if not text[0].isupper():
+                continue
+            is_code = _is_code(text)
+            if (key in vocab.COUNTRIES and (len(key) > 3 or is_code)) or (
+                not is_code and len(key) > 2
+                and (key in vocab.US_STATES or places.named(text))
+            ):
+                names.append(text)
+                break
+        else:
+            size = 1
+        start += size
+    return names
+
+
+def _is_code(text: str) -> bool:
+    return len(text) <= 4 and text.isupper()
 
 
 def _names_only_a_town(location: Location) -> bool:
@@ -126,11 +252,12 @@ def _names_only_a_town(location: Location) -> bool:
 
 def _parts(raw: str) -> list[str]:
     """'UK - London' and 'Berlin, Berlin' are two ways of writing one place each. A bare hyphen
-    is not a separator, or 'Castrop-Rauxel' would be two towns."""
+    is not a separator, or 'Castrop-Rauxel' would be two towns. 'Berlin Office' is Berlin."""
     parts: dict[str, str] = {}
     for part in _SEPARATOR.split(raw):
-        if part.strip():
-            parts.setdefault(fold(part.strip()), part.strip())
+        part = " ".join(_NOISE.sub(" ", part).split())
+        if part:
+            parts.setdefault(fold(part), part)
     return list(parts.values())
 
 

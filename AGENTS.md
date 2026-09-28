@@ -676,6 +676,20 @@ nothing that credit does not: one user's empty balance still cannot touch anothe
   whenever the country is one the user's circles reach into -- "Germany" alone might be Lörrach,
   inside a circle around Basel. A wrong id would put a posting in the wrong circle and hide it;
   an unresolved one only costs precision, which the reranker recovers.
+- **A location we cannot parse is read for every place it mentions, and a namesake is never
+  chosen** (`derive._mentioned`). "Stating no location" had come to mean "written untidily":
+  `Berlin Office`, `Munich, Bavaria`, `Hamburg or Berlin` and a bare `Geneva` all passed every
+  filter, and 47 of the 50 postings in one Vienna reader's edition were in Berlin, Munich and
+  Paris. So words that name no place (`vocab.LOCATION_NOISE`) are dropped, `;`, `|` and `or`
+  separate places, and whatever is still unread is scanned. A town several places share adds
+  EVERY country it could be in to `unplaced_countries` and leaves `countries` empty -- `Geneva` is
+  Switzerland-or-the-US, which keeps it from Vienna without guessing which -- so the filter judges
+  a posting as unstated only when it has neither. Two rules keep the scan from costing recall,
+  each set by replaying the whole corpus: a word inside unread text is evidence of a town only if
+  some town of that name has 100 000 people (`From`, `Market`, `Store` and `Fully` are all towns),
+  and a smaller one may ADD countries beside other evidence but never be the only reason a
+  posting is placed -- `Media Markt, Fulda` must keep Germany although only Médéa is big enough.
+  A stated country we cannot read is never scanned past: it may be what names the town.
 - **`places.tsv.gz` is vocabulary, and the one generated file we commit.** Built by
   `tools/build_places.py` from GeoNames (CC BY 4.0) via the `geonamescache` wheel, because
   download.geonames.org is not reachable from every build environment. Committing it keeps
@@ -943,6 +957,10 @@ still holds the old readings and no re-derive has been scheduled.
     worldwide only when one place dominates and never when part of the location is unread
     (`Vienna, VA`), a country name (`China`) is a country and never a town, and a posting whose
     town is unresolved passes when its country is one the user's circles reach into.
+  - **A town among words that name no place still resolves** (`Berlin Office`, `DE-Berlin`,
+    `Munich, Bavaria`), one string naming several towns places each, a bare town several places
+    share is judged by all their countries and passes only a reader in one of them, and a word
+    that is also a small town (`Fully`, `Erasmus`) never places a posting on its own.
   - **The rerank prompt carries exactly one advert**, with the profile block before it — batching
     moved scores by slot position, and profile-first is what a prompt-prefix cache reuses.
   - **One failed scoring call does not lose the rest of its wave**, and both limits are tested
