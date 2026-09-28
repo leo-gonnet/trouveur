@@ -22,6 +22,7 @@ VIENNA = places.resolve("Wien", "AT").id
 MODLING = places.resolve("Mödling", "AT").id
 GRAZ = places.resolve("Graz", "AT").id
 BERLIN = places.resolve("Berlin", "DE").id
+GENEVA = places.resolve("Genève", "CH").id
 
 # name: (countries, place_ids, unplaced_countries, work_mode)
 POSTINGS = {
@@ -33,6 +34,7 @@ POSTINGS = {
     "Berlin": (["DE"], [BERLIN], [], "onsite"),
     "fully remote, posted from Germany": (["DE"], [], ["DE"], "remote"),
     "fully remote, no location": ([], [], [], "remote"),
+    "Geneva, Switzerland or the US": ([], [], ["CH", "US"], "onsite"),
 }
 
 
@@ -65,6 +67,7 @@ async def _passes(profile, posting: str) -> bool:
         ("Berlin", False),
         ("fully remote, posted from Germany", True),
         ("fully remote, no location", True),
+        ("Geneva, Switzerland or the US", False),
     ],
 )
 async def test_a_city_filter_keeps_what_its_location_cannot_rule_out(
@@ -100,3 +103,15 @@ async def test_a_remote_posting_with_no_country_needs_remote_anywhere(
     _, declined = await seed_user(countries=[], city_ids=[VIENNA], remote_anywhere=False)
     assert not await _passes(declined, "fully remote, no location")
     assert await _passes(declined, "no location")
+
+
+async def test_a_town_that_could_be_several_places_reaches_a_reader_in_any_of_them(
+    clean_db, gh_board, aa_listing, aa_detail
+):
+    await seed_corpus(gh_board, aa_listing, aa_detail)
+    _, in_us = await seed_user(countries=["US"], city_ids=[])
+    _, near_geneva = await seed_user(
+        "geneva@example.test", countries=[], city_ids=[GENEVA], radius_km=30
+    )
+    assert await _passes(in_us, "Geneva, Switzerland or the US")
+    assert await _passes(near_geneva, "Geneva, Switzerland or the US")

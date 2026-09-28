@@ -93,12 +93,61 @@ def test_a_bare_town_resolves_worldwide_when_one_place_dominates(raw, country, p
     assert facets.place_ids == [place_id]
 
 
-@pytest.mark.parametrize("raw", ["Cambridge", "Neustadt"])
-def test_a_bare_town_is_not_guessed_when_it_cannot_be_told(raw):
-    """Cambridge is two cities of similar size. It may not land in somebody's circle."""
+@pytest.mark.parametrize(
+    ("raw", "could_be"), [("Cambridge", {"GB", "US"}), ("Geneva", {"CH", "US"})]
+)
+def test_a_bare_town_is_judged_by_every_country_it_could_be_in(raw, could_be):
+    """Cambridge is two cities of similar size. It may not land in somebody's circle -- but left
+    with no country at all it passed every filter, and "Geneva" was recommended in Vienna."""
     facets = derive(_job(title="Engineer", locations=[Location(raw=raw)]))
     assert facets.place_ids == []
     assert facets.countries == []
+    assert could_be <= set(facets.unplaced_countries)
+
+
+@pytest.mark.parametrize(
+    ("raw", "place_id"),
+    [("Berlin Office", 2950159), ("Munich HQ", 2867714), ("Zentrale (Wien)", 2761369),
+     ("DE-Berlin", 2950159), ("Brunswick (Germany)", 2945024), ("Munich, Bavaria", 2867714),
+     ("Cybay Hannover", 2910831)],
+)
+def test_a_town_among_words_that_name_no_place_still_resolves(raw, place_id):
+    """Each of these derived to no place and no country, so each passed every location filter:
+    47 of the 50 postings in one Vienna reader's edition were Berlin, Munich and Paris."""
+    facets = derive(_job(title="Engineer", locations=[Location(raw=raw)]))
+    assert place_id in facets.place_ids
+
+
+@pytest.mark.parametrize("raw", ["Hamburg or Berlin", "Berlin; Hamburg", "Hamburg | Berlin"])
+def test_one_string_naming_several_towns_places_each(raw):
+    facets = derive(_job(title="Engineer", locations=[Location(raw=raw)]))
+    assert {2911298, 2950159} <= set(facets.place_ids)
+
+
+@pytest.mark.parametrize("raw", ["Hybrid or Fully Remote", "Erasmus Kindergarten Berliner Straße"])
+def test_a_word_that_is_also_a_small_town_never_places_a_posting(raw):
+    """Fully is a village in Valais and Erasmus one in South Africa. Read as places, these moved
+    postings out of every circle on the strength of an ordinary word."""
+    facets = derive(_job(title="Engineer", locations=[Location(raw=raw)]))
+    assert facets.countries == []
+    assert facets.unplaced_countries == []
+
+
+def test_a_small_town_beside_a_misleading_word_keeps_its_country():
+    """"Media" is a city in Algeria. If only big names counted, this Fulda shop would be judged as
+    Algerian and never reach anyone in Germany."""
+    facets = derive(_job(title="Engineer", locations=[
+        Location(raw="Media Markt, Fulda (am Emaillierwerk)")
+    ]))
+    assert "DE" in facets.unplaced_countries
+
+
+def test_a_town_beside_a_stated_country_we_cannot_read_is_not_looked_up_worldwide():
+    facets = derive(_job(title="Engineer", locations=[
+        Location(raw="Atlantis, ATLANTIS", city="Atlantis", country="ATLANTIS")
+    ]))
+    assert facets.place_ids == []
+    assert facets.unplaced_countries == []
 
 
 def test_a_town_with_a_state_is_never_looked_up_worldwide():
@@ -154,7 +203,7 @@ def test_the_ways_boards_write_a_place_resolve_its_country(raw, country):
 def test_a_state_code_is_not_a_country_unless_the_town_is_in_the_us():
     """"CA" is California after Redlands and Canada after Toronto."""
     facets = derive(_job(title="Engineer", locations=[Location(raw="Toronto, CA")]))
-    assert facets.countries == []
+    assert facets.countries == ["CA"]
 
 
 def test_a_bare_hyphen_is_part_of_a_town_name_not_a_separator():

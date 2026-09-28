@@ -30,8 +30,10 @@ from trouveur.models import Expansion
 # box to undo the filter the user had just set.
 #
 # Unstated location passes: a posting nobody parsed a country out of is not a posting somewhere
-# else. A posting whose town could not be resolved is judged by its country alone, against every
-# country the user's circles reach into -- it might be inside one. Fully remote passes wherever it
+# else. A posting whose town could not be resolved is judged by the countries it may be in, against
+# the user's countries and every country their circles reach into -- it might be inside one. So is
+# "Geneva": it has no country of its own, but it is Switzerland or the US and nowhere else, which
+# is enough to keep it from a reader in Vienna. Fully remote passes wherever it
 # is, because for a role with no office the place named says nothing about whether the reader can
 # take it -- whether it is remote *for them* is in the description, which the reranker reads.
 #
@@ -42,10 +44,12 @@ _LOCATION = """
         CAST(:anywhere AS boolean)
         OR (
             cardinality(f.countries) = 0
+            AND cardinality(f.unplaced_countries) = 0
             -- Remote with no country is exactly "a fully remote role, wherever it is".
             AND (CAST(:remote_anywhere AS boolean) OR f.work_mode <> 'remote')
         )
         OR f.countries && CAST(:countries AS text[])
+        OR f.unplaced_countries && CAST(:countries AS text[])
         OR f.place_ids && CAST(:area_ids AS integer[])
         OR f.unplaced_countries && CAST(:area_countries AS text[])
         OR (CAST(:remote_anywhere AS boolean) AND f.work_mode = 'remote')
