@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field, ValidationError
 from trouveur.config import Settings
 from trouveur.ingest import places
 from trouveur.match import llm
-from trouveur.models import UserProfile
+from trouveur.models import COUNTRY_NAMES, UserProfile
 
 log = logging.getLogger(__name__)
 
@@ -70,8 +70,10 @@ background supports.
 Judge the substance of the role, not the polish of the advert. German and English adverts are
 equally valid and neither is preferred. Penalise heavily: staffing agencies, disguised sales
 roles, internships and working-student roles, and roles far junior or far senior to the
-candidate. Preferred cities are a preference, not a requirement: a role there, nearby, or remote
-satisfies it; elsewhere is a compromise, never a rejection.
+candidate. Where the candidate wants to work is a preference, not a requirement: a role there or
+nearby satisfies it, and a fully remote role satisfies it only if the candidate accepts fully
+remote roles. A role elsewhere, or one that requires relocating elsewhere later, is a compromise,
+never a rejection.
 
 Return ONLY a JSON object, no prose:
 {"score": <int 0-100>, "reason": "<one sentence, max 25 words>",
@@ -86,6 +88,13 @@ class _Score(BaseModel):
 
 def city_names(profile: UserProfile) -> list[str]:
     return [place.name for place in map(places.get, profile.city_ids) if place]
+
+
+def _where(profile: UserProfile) -> str:
+    areas = [f"within {profile.radius_km} km of {name}" for name in city_names(profile)]
+    areas += [COUNTRY_NAMES.get(code, code) for code in profile.countries]
+    remote = "accepted" if profile.remote_anywhere else "not wanted"
+    return f"{'; '.join(areas) or 'anywhere'} | fully remote roles: {remote}"
 
 
 def build_prompt(profile: UserProfile, candidate, *, background: str = "") -> str:
@@ -114,7 +123,7 @@ def build_prompt(profile: UserProfile, candidate, *, background: str = "") -> st
         f"current title: {profile.title or 'unstated'}\n"
         f"years of experience: {profile.years_experience}\n"
         f"languages: {', '.join(profile.languages) or 'unstated'}\n"
-        f"preferred cities: {', '.join(city_names(profile)) or 'none stated'}\n"
+        f"wants to work: {_where(profile)}\n"
         f"objectives: {profile.objectives or 'unstated'}\n"
         f"background: {background or 'unstated'}\n"
         f"must have: {'; '.join(profile.must_have) or 'none stated'}\n"

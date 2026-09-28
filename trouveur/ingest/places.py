@@ -100,6 +100,12 @@ def resolve(city: str, country: str) -> Place | None:
     return None
 
 
+def exists(city: str, country: str) -> bool:
+    """Whether any town of that name is in `country`, however many share it."""
+    by_name = _index().by_name
+    return any((country, fold(variant)) in by_name for variant in _variants(city))
+
+
 def resolve_anywhere(city: str) -> Place | None:
     """The one place `city` names anywhere in the world, or None when it cannot be told.
 

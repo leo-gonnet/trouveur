@@ -98,6 +98,19 @@ def test_the_profile_block_comes_before_the_advert():
     assert prompt.index("CANDIDATE PROFILE") < prompt.index("JOB ADVERT")
 
 
+def test_the_reranker_is_told_the_whole_location_wish():
+    """It was told only the city names, and that remote satisfies them: a reader in Vienna who
+    declined fully remote roles got a remote San Francisco relocation as their top posting."""
+    from trouveur.ingest import places
+
+    vienna = places.resolve("Wien", "AT").id
+    profile = UserProfile(user_id=1, city_ids=[vienna], countries=["DE"], remote_anywhere=False)
+    prompt = rerank_prompt(profile, _Advert())
+    assert "within 30 km of Vienna" in prompt
+    assert "Germany" in prompt
+    assert "fully remote roles: not wanted" in prompt
+
+
 def test_expansion_works_without_a_model():
     """Retrieval must be fully functional for a user who has set no API key."""
     profile = UserProfile(
