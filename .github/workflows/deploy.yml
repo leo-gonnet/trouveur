@@ -51,7 +51,7 @@ jobs:
           script: |
             set -euo pipefail
             cd ~/trouveur
-            # Persist the tag so every `docker compose` call on the host agrees on what runs.
+            PREV_TAG=$(sed -n 's/^TROUVEUR_TAG=//p' .env | tail -n 1)
             if grep -q '^TROUVEUR_TAG=' .env; then
               sed -i "s/^TROUVEUR_TAG=.*/TROUVEUR_TAG=${{ github.sha }}/" .env
             else
@@ -60,8 +60,7 @@ jobs:
             docker compose pull
             docker compose run --rm migrate
             docker compose up -d --remove-orphans
-            # `-f` alone removes only dangling layers, and every deploy tags its image with the
-            # commit sha, so nothing was ever untagged and each ~3.5GB build stayed on the disk
-            # for ever. `-a` is what actually reclaims them; the age filter keeps the last few
-            # days on the host so a rollback needs no pull, and anything older is still in GHCR.
-            docker image prune -af --filter "until=72h"
+            docker image ls ${{ steps.image.outputs.ref }} --format '{{.Tag}}' \
+              | awk -v new=${{ github.sha }} -v prev="$PREV_TAG" '$0 != new && $0 != prev && $0 != "<none>"' \
+              | xargs -r -I{} docker image rm ${{ steps.image.outputs.ref }}:{}
+            docker image prune -f
