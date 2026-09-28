@@ -180,7 +180,8 @@ def _mentioned(raw: str) -> tuple[list[str], list[Place], list[str]]:
             found = places.named(text)
             if len(key) > 2 and key in vocab.US_STATES:
                 stated.append("US")
-            elif key in vocab.COUNTRIES and not found:
+            # "USA" and "AT" are also spellings of towns somewhere; a capital code is the country.
+            elif key in vocab.COUNTRIES and (_is_code(text) or not found):
                 stated.append(vocab.COUNTRIES[key])
             elif max((p.population for p in found), default=0) >= _PROMINENT:
                 towns.append((text, found))
@@ -220,7 +221,9 @@ def _names_in(part: str) -> list[str]:
         for size in range(min(_LONGEST_NAME, len(words) - start), 0, -1):
             text = part[words[start].start() : words[start + size - 1].end()]
             key = fold(text)
-            if not text[0].isupper() or key in _NOT_A_PLACE:
+            if key in _NOT_A_PLACE:
+                break
+            if not text[0].isupper():
                 continue
             is_code = _is_code(text)
             if (key in vocab.COUNTRIES and (len(key) > 3 or is_code)) or (

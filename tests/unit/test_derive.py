@@ -133,6 +133,17 @@ def test_a_word_that_is_also_a_small_town_never_places_a_posting(raw):
     assert facets.unplaced_countries == []
 
 
+@pytest.mark.parametrize(
+    ("raw", "country"),
+    [("USA-NY-Remote Location", "US"), ("US: South San Francisco", "US"), ("Aschach (AT)", "AT")],
+)
+def test_a_capital_country_code_is_the_country_even_where_a_town_shares_it(raw, country):
+    """"Usa" is a town in Japan and "At" one elsewhere; read as towns, these postings named no
+    country and passed every filter."""
+    facets = derive(_job(title="Engineer", locations=[Location(raw=raw)]))
+    assert country in facets.countries
+
+
 def test_a_small_town_beside_a_misleading_word_keeps_its_country():
     """"Media" is a city in Algeria. If only big names counted, this Fulda shop would be judged as
     Algerian and never reach anyone in Germany."""
