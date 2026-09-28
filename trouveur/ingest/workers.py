@@ -147,11 +147,7 @@ async def drain_dedup(conn: AsyncConnection, limit: int = 1000) -> int:
     if not items:
         return 0
     rows = await jobs_q.load_for_dedup(conn, [item.job_id for item in items])
-    markers = []
-    for row in rows:
-        locations = row.locations or []
-        city = (locations[0].get("city") or locations[0].get("raw")) if locations else None
-        markers.append((row.id, dedup_key(row.title, row.company, city)))
+    markers = [(row.id, dedup_key(row.title, row.company)) for row in rows]
     await jobs_q.write_dedup_markers(conn, markers, versions.DEDUP_VERSION)
     await complete(conn, [item.id for item in items])
     return len(markers)

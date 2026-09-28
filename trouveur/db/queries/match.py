@@ -22,6 +22,26 @@ from trouveur.db.schema import (
 from trouveur.ingest import places
 from trouveur.models import Expansion
 
+
+def _admitted(facets: str) -> str:
+    return f"""(
+        {facets}.countries && CAST(:countries AS text[])
+        OR {facets}.unplaced_countries && CAST(:countries AS text[])
+        OR {facets}.place_ids && CAST(:area_ids AS integer[])
+        OR {facets}.unplaced_countries && CAST(:area_countries AS text[])
+        OR (CAST(:remote_anywhere AS boolean) AND {facets}.work_mode = 'remote')
+    )"""
+
+
+_PLACED_TWINS = """
+    FROM job s
+    JOIN job_facet sf ON sf.job_id = s.id
+    WHERE s.dedup_group = j.dedup_group
+      AND s.id <> j.id
+      AND s.closed_at IS NULL
+      AND (cardinality(sf.countries) > 0 OR cardinality(sf.unplaced_countries) > 0)
+"""
+
 # The ONE filter applied before ranking, and deliberately the only one. Every other preference a
 # user states -- salary, languages -- reaches the reranker as text instead, because a rule
 # that rejected a posting here hid it from the reader with no way to find out it existed. The four
@@ -39,22 +59,28 @@ from trouveur.models import Expansion
 #
 # Cities are never compared by name here: `place_ids` are GeoNames ids resolved by derivation, and
 # the circles are resolved from the same list, so `Wien` and `Vienna` are one id on both sides.
-_LOCATION = """
+#
+# A posting whose source named no place at all is judged by its open twins that name one: an
+# aggregator had blanked the location of a role its origin board states, and passing it as
+# unstated showed a Vienna reader Elastic's London role. Only when the source said NOTHING --
+# "Sobernheim" beside a twin in Coburg is the same role in another town, and must keep its own.
+_LOCATION = f"""
     (
         CAST(:anywhere AS boolean)
+        OR {_admitted("f")}
         OR (
             cardinality(f.countries) = 0
             AND cardinality(f.unplaced_countries) = 0
-            -- Remote with no country is exactly "a fully remote role, wherever it is".
-            AND (CAST(:remote_anywhere AS boolean) OR f.work_mode <> 'remote')
+            AND CASE
+                WHEN j.location_text = '' AND EXISTS (SELECT 1 {_PLACED_TWINS})
+                THEN EXISTS (SELECT 1 {_PLACED_TWINS} AND {_admitted("sf")})
+                -- Remote with no country is exactly "a fully remote role, wherever it is".
+                ELSE CAST(:remote_anywhere AS boolean) OR f.work_mode <> 'remote'
+            END
         )
-        OR f.countries && CAST(:countries AS text[])
-        OR f.unplaced_countries && CAST(:countries AS text[])
-        OR f.place_ids && CAST(:area_ids AS integer[])
-        OR f.unplaced_countries && CAST(:area_countries AS text[])
-        OR (CAST(:remote_anywhere AS boolean) AND f.work_mode = 'remote')
     )
 """
+
 
 _ELIGIBLE = f"""
     j.closed_at IS NULL
