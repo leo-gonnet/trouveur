@@ -646,6 +646,11 @@ nothing that credit does not: one user's empty balance still cannot touch anothe
   and dropping it would cost recall for a derivation gap. The one exception is a posting derived
   REMOTE with no country: that is exactly "a fully remote role, wherever it is", so it passes only
   for a reader who ticked `remote_anywhere`.
+- **A posting whose source named no place AT ALL is judged by its twins.** When `location_text` is
+  empty and an open posting in the same `dedup_group` has location facets, it passes only if one
+  of those twins does: it is a copy of a role its origin board places. Only when the source said
+  nothing -- an unresolvable town beside a twin elsewhere ("Sobernheim" and "Coburg") is the same
+  role in another place, and judging it by the twin would hide it from the reader who lives there.
 - **The reranker is told the whole location wish** -- circles with their radius, countries, and
   whether fully remote roles are wanted -- because it is the only judge of what the filter cannot
   see. Told only the city names, and that remote satisfies them, it put a remote role requiring
@@ -810,7 +815,9 @@ nothing that credit does not: one user's empty balance still cannot touch anothe
 - Uniqueness contracts:
   - `job (source, external_id)` is **provenance identity** — "the same row from the same board".
   - `job.dedup_group` is **semantic identity** — "the same job in the world". It is a **marker** and
-    must never merge or delete rows. V1 conflated the two in one UNIQUE constraint and silently
+    must never merge or delete rows. It is keyed on title and company and deliberately NOT on the
+    place: aggregators (Arbeitnow) re-publish company boards with the location blanked, and a key
+    containing the town could never match the copy to its origin. The location filter reads it. V1 conflated the two in one UNIQUE constraint and silently
     dropped every posting that arrived from a second source. Markers can be re-run; a merge cannot
     be undone.
 - **`job_embedding` holds open postings only.** Closing a job deletes its row in the same statement,
@@ -957,6 +964,8 @@ still holds the old readings and no re-derive has been scheduled.
     worldwide only when one place dominates and never when part of the location is unread
     (`Vienna, VA`), a country name (`China`) is a country and never a town, and a posting whose
     town is unresolved passes when its country is one the user's circles reach into.
+  - **A copy whose source named no place is judged by its placed twins**, a copy that names an
+    unresolvable town of its own never is, and a closed twin counts for nothing.
   - **A town among words that name no place still resolves** (`Berlin Office`, `DE-Berlin`,
     `Munich, Bavaria`), one string naming several towns places each, a bare town several places
     share is judged by all their countries and passes only a reader in one of them, and a word

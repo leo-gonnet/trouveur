@@ -115,3 +115,57 @@ async def test_a_town_that_could_be_several_places_reaches_a_reader_in_any_of_th
     )
     assert await _passes(in_us, "Geneva, Switzerland or the US")
     assert await _passes(near_geneva, "Geneva, Switzerland or the US")
+
+
+async def _kept_beside_a_berlin_twin(profile, copy_says: str, *, twin_open: bool = True) -> int:
+    """A copy with no location facets and its twin in Berlin, both open and in one group."""
+    async with connect() as conn:
+        rows = await conn.exec_driver_sql("SELECT id FROM job ORDER BY id LIMIT 2")
+        copy, twin = [row[0] for row in rows.all()]
+        await conn.exec_driver_sql(
+            "UPDATE job SET posted_at = now(), first_seen_at = now(), closed_at = now(), "
+            "dedup_group = NULL"
+        )
+        await conn.exec_driver_sql(
+            "UPDATE job SET closed_at = NULL, dedup_group = $1 WHERE id = ANY($2)",
+            (b"\x01", [copy, twin]),
+        )
+        if not twin_open:
+            await conn.exec_driver_sql("UPDATE job SET closed_at = now() WHERE id = $1", (twin,))
+        await conn.exec_driver_sql(
+            "UPDATE job SET location_text = $1 WHERE id = $2", (copy_says, copy)
+        )
+        await conn.exec_driver_sql(
+            "UPDATE job_facet SET countries = $1, place_ids = $2, unplaced_countries = '{}', "
+            "work_mode = 'onsite' WHERE job_id = $3",
+            ([], [], copy),
+        )
+        await conn.exec_driver_sql(
+            "UPDATE job_facet SET countries = $1, place_ids = $2, unplaced_countries = '{}', "
+            "work_mode = 'onsite' WHERE job_id = $3",
+            (["DE"], [BERLIN], twin),
+        )
+        return await mq.count_pending_rerank(conn, profile, SINCE)
+
+
+async def test_a_copy_whose_source_named_no_place_is_judged_by_its_twins(
+    clean_db, gh_board, aa_listing, aa_detail
+):
+    """Arbeitnow blanks the location of the boards it copies. Passed as unstated, Elastic's
+    London role reached a reader in Vienna while its own board said London."""
+    await seed_corpus(gh_board, aa_listing, aa_detail)
+    _, vienna = await seed_user(countries=[], city_ids=[VIENNA], radius_km=30)
+    _, germany = await seed_user("germany@example.test", countries=["DE"], city_ids=[])
+    assert await _kept_beside_a_berlin_twin(vienna, "") == 0
+    assert await _kept_beside_a_berlin_twin(germany, "") == 2
+
+
+async def test_a_copy_that_names_its_own_town_is_never_judged_by_a_twin(
+    clean_db, gh_board, aa_listing, aa_detail
+):
+    """The same role in Sobernheim and in Coburg is two places. A town we cannot resolve is
+    still the posting's own, and the reader who lives there must keep it."""
+    await seed_corpus(gh_board, aa_listing, aa_detail)
+    _, vienna = await seed_user(countries=[], city_ids=[VIENNA], radius_km=30)
+    assert await _kept_beside_a_berlin_twin(vienna, "Sobernheim") == 1
+    assert await _kept_beside_a_berlin_twin(vienna, "", twin_open=False) == 1

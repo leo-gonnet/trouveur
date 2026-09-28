@@ -89,11 +89,14 @@ class CanonicalJob(BaseModel):
         return hashlib.sha256("|".join(parts).encode()).digest()
 
 
-def dedup_key(title: str, company: str | None, city: str | None) -> bytes:
+def dedup_key(title: str, company: str | None) -> bytes:
     """Fingerprint for 'the same role, posted again or posted elsewhere'.
 
     Only ever written to a MARKER column: two rows sharing a key stay two rows, so a wrong pass
-    can be re-run instead of being unpickable.
+    can be re-run instead of being unpickable. The place is deliberately not part of it: a copy
+    that lost its location on the way through an aggregator is the role it was copied from, and
+    keyed on the town it could never be matched to it. Spaces in the company are ignored, because
+    aggregators write the board's slug ("wppmedia") for the name ("WPP Media").
     """
-    parts = [normalize_for_hash(title), normalize_for_hash(company), normalize_for_hash(city)]
+    parts = [normalize_for_hash(title), normalize_for_hash(company).replace(" ", "")]
     return hashlib.sha256("|".join(parts).encode()).digest()

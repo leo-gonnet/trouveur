@@ -63,8 +63,8 @@ def test_dedup_key_answers_a_different_question_from_content_hash():
     Two boards carrying one vacancy have the same dedup key but need to stay two rows, each with
     its own provenance; the marker records the relationship instead of destroying it.
     """
-    same_role = dedup_key("Wirtschaftsingenieur", "Beispiel GmbH", "München")
-    reworded = dedup_key("Wirtschaftsingenieur", "Beispiel GmbH", "München")
+    same_role = dedup_key("Wirtschaftsingenieur", "Beispiel GmbH")
+    reworded = dedup_key("Wirtschaftsingenieur", "Beispiel GmbH")
     assert same_role == reworded
 
     # Content hash is sensitive to description; the dedup key deliberately is not.
@@ -72,7 +72,15 @@ def test_dedup_key_answers_a_different_question_from_content_hash():
 
 
 def test_dedup_key_separates_different_companies():
-    assert dedup_key("Engineer", "A GmbH", "Wien") != dedup_key("Engineer", "B GmbH", "Wien")
+    assert dedup_key("Engineer", "A GmbH") != dedup_key("Engineer", "B GmbH")
+
+
+def test_a_copy_that_lost_its_location_shares_the_key_of_the_board_it_came_from():
+    """Arbeitnow re-publishes company boards with the location blanked and the board's slug for a
+    name. Keyed on the town and the spelled-out name, the two could never be matched."""
+    assert dedup_key("Software Engineer II", "wppmedia") == dedup_key(
+        "Software Engineer II", "WPP Media"
+    )
 
 
 def test_folding_matches_what_postgres_indexes():
