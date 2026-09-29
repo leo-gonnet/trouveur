@@ -353,6 +353,7 @@ window, and therefore **closes nothing**. Only a backfill that pages to the end 
   it validates: a non-number and a negative are both HTTP 400. **`day_range=0` means no filter at
   all** — the whole ~170 000-posting corpus — so it must never be reached by rounding a small
   window down. Measured 2026-09-27: `1` → 1 247 postings, `7` → 19 958, `30` → 53 901.
+  The daily delta asks for **2**: seven days was ~1 000 requests and HTTP 429 every night.
 - **A page whose rows we already hold means the cursor is stuck**, whatever the cursor says, and
   `sweep_feed` abandons the walk there. It is not an end of corpus and never makes a scope
   closable — a stalled cursor that reads as "complete" would retire everything the feed holds.

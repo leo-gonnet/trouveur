@@ -407,6 +407,17 @@ def test_a_pinned_old_posting_above_todays_does_not_end_the_sweep():
     assert [document.external_id for document in seen] == ["today", "also-today"]
 
 
+def test_workable_asks_for_two_days_not_the_week_it_was_rate_limited_on():
+    """Seven days at a fixed 20 a page is ~1,000 requests a night; Workable cut every one of those
+    sweeps off with HTTP 429 around page 400."""
+    from trouveur.sources.workable import WorkableSource
+
+    client = StubClient(default=(200, {"jobs": [], "totalSize": 0}))
+    asyncio.run(collect(WorkableSource(), client))
+
+    assert client.requested[0][2]["day_range"] == "2"
+
+
 def test_workable_pages_with_pagetoken_not_with_the_name_the_response_uses():
     """The response says `nextPageToken`; the request parameter is `pageToken`.
 
