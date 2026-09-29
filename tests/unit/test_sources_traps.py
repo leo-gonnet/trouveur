@@ -360,33 +360,51 @@ def test_a_delta_sweep_reports_no_closable_scope():
     assert outcome.closable_scopes == []
 
 
-def test_a_delta_sweep_stops_once_postings_fall_outside_the_window():
-    """Arbeitnow IS newest-first, so the first old posting means everything after it is older.
+def _arbeitnow_pages(*pages):
+    """Arbeitnow links each page to the next by a complete URL, until the last."""
+    base = "https://www.arbeitnow.com/api/job-board-api"
+    urls = [base] + [f"{base}?page={number}" for number in range(2, len(pages) + 1)]
+    responses = {}
+    for index, rows in enumerate(pages):
+        links = {"next": urls[index + 1]} if index + 1 < len(pages) else {}
+        responses[urls[index]] = (200, {"data": rows, "links": links})
+    return StubClient(responses=responses)
 
-    Workable is deliberately not this test's subject: its feed leads with boosted postings and
-    the same assumption cost it a day's intake. See the two guards below.
-    """
+
+def test_a_delta_sweep_stops_one_page_past_the_window_and_never_walks_on():
+    """The window's edge is a page with nothing inside it. The walk must end there, not follow the
+    cursor through years of history, and not stop before the rows of today it has not read."""
     from trouveur.sources.arbeitnow import ArbeitnowSource
 
     old = int((datetime.now(UTC) - timedelta(days=90)).timestamp())
     new = int(datetime.now(UTC).timestamp())
-    client = StubClient(
-        default=(
-            200,
-            {
-                "data": [
-                    {"slug": "new", "created_at": new, "title": "A"},
-                    {"slug": "old", "created_at": old, "title": "B"},
-                ],
-                "links": {"next": "https://www.arbeitnow.com/api/job-board-api?page=2"},
-            },
-        )
+    client = _arbeitnow_pages(
+        [{"slug": "new", "created_at": new, "title": "A"},
+         {"slug": "old", "created_at": old, "title": "B"}],
+        [{"slug": "older", "created_at": old, "title": "C"}],
+        [{"slug": "never-read", "created_at": new, "title": "D"}],
     )
     _outcome, seen = asyncio.run(collect(ArbeitnowSource(delta_window=timedelta(days=7)), client))
 
     assert [document.external_id for document in seen] == ["new"]
-    # It must stop rather than follow the cursor for ever.
-    assert len(client.requested) == 1
+    assert len(client.requested) == 2
+
+
+def test_a_pinned_old_posting_above_todays_does_not_end_the_sweep():
+    """Arbeitnow pins a weeks-old posting at the top of page one. Stopping at the first old row
+    collected nothing on 2026-09-29, and the sweep still reported success."""
+    from trouveur.sources.arbeitnow import ArbeitnowSource
+
+    pinned = int((datetime.now(UTC) - timedelta(days=48)).timestamp())
+    new = int(datetime.now(UTC).timestamp())
+    client = _arbeitnow_pages(
+        [{"slug": "pinned", "created_at": pinned, "title": "A"},
+         {"slug": "today", "created_at": new, "title": "B"}],
+        [{"slug": "also-today", "created_at": new, "title": "C"}],
+    )
+    _outcome, seen = asyncio.run(collect(ArbeitnowSource(delta_window=timedelta(days=7)), client))
+
+    assert [document.external_id for document in seen] == ["today", "also-today"]
 
 
 def test_workable_pages_with_pagetoken_not_with_the_name_the_response_uses():

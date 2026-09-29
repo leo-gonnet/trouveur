@@ -344,6 +344,10 @@ window, and therefore **closes nothing**. Only a backfill that pages to the end 
   published today), and only the unboosted tail is date-descending. Breaking on the first
   out-of-window row — which is what `sweep_feed` does for every other feed — stops it after about
   thirty postings.
+- **Arbeitnow pins a weeks-old posting above today's** (48 days old at the top of page one on
+  2026-09-29). Breaking on the first out-of-window row collected nothing that night and the sweep
+  still reported success, so `sweep_feed` skips an old row and ends the walk on the first PAGE
+  with nothing inside the window -- one page past the edge, never the years of history behind it.
 - **`day_range=N` is a real server-side date filter** and is how Workable's window is narrowed
   instead (`sweep_feed(server_side_window=True)`). Unlike Arbeitsagentur's `veroeffentlichtseit`
   it validates: a non-number and a negative are both HTTP 400. **`day_range=0` means no filter at
@@ -939,6 +943,8 @@ still holds the old readings and no re-derive has been scheduled.
     boosted out-of-window posting rather than stopping on it.
   - **A feed whose cursor stops advancing is abandoned, not paged to `MAX_PAGES`**, and the stall
     leaves the scope unclosable.
+  - **A pinned old posting above today's does not end a delta sweep**, and the walk stops one
+    page past the window rather than following the cursor on.
   - **A delta sweep reports no closable scope**, and a capped single-page feed reports none even on
     a backfill.
   - **A bare top-level array board is read as the list itself** (Lever, Breezy, Rippling), and an
