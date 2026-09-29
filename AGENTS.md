@@ -109,6 +109,12 @@ that runs periodically, plus a rich but simple web UI. Multi-user (for now, a fe
   `first_seen_at`.** One asks how old the ADVERT is, the other asks when WE got it, and folding
   them together drops every posting a board dated before we discovered it -- on the one run that
   could ever have offered it. Guarded by a test.
+- **A scheduled run matches only once its sweep is prepared** (`service.prepare_arrivals`): facets,
+  dedup and vector for every posting in the candidate window, up to `MATCH_WAIT_LIMIT`. It used to
+  match straight after the sweep, when none of that sweep's postings had facets or a vector yet,
+  and by the next night they had left the window -- Greenhouse, Ashby, Workday and Personio, swept
+  first, never reached a nightly edition. Only work that could run now is waited for, so an item
+  backing off, a paused source or a refill of the older corpus cannot hold the run.
 - **`pending_rerank` is bounded by what the run retrieved, not by an age rule of its own**, so
   "how far back do we look" is answered in exactly one place. A posting the scorer stopped short of
   is simply not retrieved tomorrow.
@@ -982,6 +988,9 @@ still holds the old readings and no re-derive has been scheduled.
   - **A scheduled run whose key is rejected is FAILED with the reason on the run**, not SUCCESS
     with `scored: 0`. Asserted over `_execute`, because the hole was in the runner and the
     match pipeline had recorded the error correctly all along.
+  - **The nightly match waits for what the sweep brought in**, and an item backing off does not
+    hold it. **A profile with nothing to search for is skipped, not failed** -- it turned every
+    nightly run red while the real users had been matched.
   - **A daily ceiling counts today only** — yesterday's spend cannot hold today's run back, or the
     ceiling would never lift.
   - **A balance is grants minus spend, and a second grant adds to the first** rather than replacing

@@ -289,6 +289,22 @@ async def refill_all(
             on_chunk(total, cursor)
 
 
+async def waiting_since(conn: AsyncConnection, first_seen_since: datetime) -> int:
+    """Work that could run now for postings first seen since `first_seen_since`. Items backing off,
+    paused or parked are not counted: nothing done now would move them."""
+    return int(
+        await conn.scalar(
+            sa.select(sa.func.count())
+            .select_from(work_item.join(job, job.c.id == work_item.c.job_id))
+            .where(
+                job.c.first_seen_at > first_seen_since,
+                work_item.c.not_before <= sa.func.now(),
+            )
+        )
+        or 0
+    )
+
+
 async def backlog(conn: AsyncConnection) -> dict[str, dict[str, int]]:
     """Queue depth per kind, for the dashboard. Parked items are counted separately."""
     rows = await conn.execute(
