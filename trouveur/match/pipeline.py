@@ -43,6 +43,9 @@ class MatchReport:
     stopped_on_ceiling: bool = False
     stopped_on_credit: bool = False
     stopped_on_scores: bool = False
+    # Why this user was not matched at all when that is nothing to fix on our side -- a profile
+    # with nothing to search for. Kept out of `errors`, which is what fails a run.
+    skipped: str | None = None
     errors: list[str] = field(default_factory=list)
 
     def summary(self) -> str:
@@ -54,6 +57,7 @@ class MatchReport:
             + (" [daily ceiling reached]" if self.stopped_on_ceiling else "")
             + (" [out of credit]" if self.stopped_on_credit else "")
             + (" [scores ran out]" if self.stopped_on_scores else "")
+            + (f" [skipped: {self.skipped}]" if self.skipped else "")
         )
 
 
@@ -153,7 +157,7 @@ async def run_for_user(
 
     queries, adverts = expansion.queries, expansion.adverts
     if not queries:
-        report.errors.append(
+        report.skipped = (
             "This profile yields no search queries; set at least a title or some keywords."
         )
         return report
