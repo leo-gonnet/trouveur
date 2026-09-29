@@ -78,10 +78,9 @@
       <input name="radius_km" type="number" min="{{ radius_bounds[0] }}" max="{{ radius_bounds[1] }}"
              value="{{ profile.radius_km }}"></label>
     <label class="check"><input type="checkbox" name="remote_anywhere" value="yes"
-      {% if profile.remote_anywhere %}checked{% endif %}>Also fully remote roles, wherever they are</label>
-    <p class="hint">A role with no office is in no country, so the one it was posted from says
-      nothing about whether you could take it. Whether it is remote <em>for you</em> is in the
-      advert, which the reranker reads.</p>
+      {% if profile.remote_anywhere %}checked{% endif %}>Include fully remote roles, wherever they are</label>
+    <p class="hint">Unticked, no fully remote role is shown, whatever country it lists. Hybrid roles,
+      and roles that do not say, are still shown.</p>
   </section>
 
   <p class="actions"><button class="primary" type="submit">Save profile</button></p>
