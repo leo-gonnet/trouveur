@@ -731,8 +731,12 @@ async def test_a_scheduled_run_fails_and_records_why_when_the_key_is_rejected(
     async def no_sweep(**kwargs):
         return IngestReport()
 
+    async def nothing_to_prepare(_settings):
+        return 0
+
     monkeypatch.setattr(llm.httpx, "AsyncClient", RejectingClient)
     monkeypatch.setattr(service.ingest, "run", no_sweep)
+    monkeypatch.setattr(service, "prepare_arrivals", nothing_to_prepare)
 
     async with connect() as conn:
         await admin_q.enqueue_run(conn, trigger=RunTrigger.SCHEDULED)
@@ -749,3 +753,96 @@ async def test_a_scheduled_run_fails_and_records_why_when_the_key_is_rejected(
     assert entry["scored"] == 0
     # The trap: free retrieval still succeeded, so a verdict keyed on it reads green.
     assert entry["retrieved"] > 0
+
+
+async def test_the_nightly_match_waits_for_what_the_sweep_brought_in(
+    clean_db, gh_board, aa_listing, aa_detail
+):
+    """The match ran straight after the sweep, before any of the sweep's postings had facets or a
+    vector, and by the next night they had left the candidate window: Greenhouse, Ashby, Workday
+    and Personio never reached a nightly edition. An item backing off after an error must not
+    hold the run, or one 403 would delay every edition by the whole wait limit."""
+    from trouveur.config import get_settings
+    from trouveur.db.engine import connect
+    from trouveur.runner import service
+    from trouveur.work import WorkKind, enqueue, waiting_since
+
+    await seed_corpus(gh_board, aa_listing, aa_detail)
+    async with connect() as conn:
+        arrival, stuck = [
+            row[0]
+            for row in (await conn.exec_driver_sql("SELECT id FROM job ORDER BY id LIMIT 2")).all()
+        ]
+        await conn.exec_driver_sql("UPDATE job SET first_seen_at = now()")
+        await conn.exec_driver_sql("DELETE FROM job_facet WHERE job_id = $1", (arrival,))
+        await enqueue(conn, WorkKind.DERIVE, [arrival], "arrival-version")
+        await enqueue(conn, WorkKind.DETAIL, [stuck], "1")
+        await conn.exec_driver_sql(
+            "UPDATE work_item SET not_before = now() + interval '1 hour' WHERE kind = 'detail'"
+        )
+
+    assert await service.prepare_arrivals(get_settings()) == 0
+    async with connect() as conn:
+        derived = await conn.exec_driver_sql(
+            "SELECT count(*) FROM job_facet WHERE job_id = $1", (arrival,)
+        )
+        assert derived.scalar_one() == 1
+        assert await waiting_since(conn, datetime.now(UTC) - timedelta(hours=25)) == 0
+
+
+async def test_a_profile_with_nothing_to_search_for_is_skipped_not_failed(
+    clean_db, gh_board, aa_listing, aa_detail, monkeypatch
+):
+    """One account with an empty profile turned every nightly run red, while the real users had
+    been matched perfectly well. Nothing about it is ours to fix, so it is a note, not a failure."""
+    from trouveur.config import get_settings
+    from trouveur.db.engine import connect
+    from trouveur.db.queries import admin as admin_q
+    from trouveur.ingest.pipeline import IngestReport
+    from trouveur.models import RunStatus, RunTrigger
+    from trouveur.runner import service
+
+    await seed_corpus(gh_board, aa_listing, aa_detail)
+    await seed_user("empty@example.test", title="", keywords=[])
+
+    async def no_sweep(**kwargs):
+        return IngestReport()
+
+    async def nothing_to_prepare(_settings):
+        return 0
+
+    monkeypatch.setattr(service.ingest, "run", no_sweep)
+    monkeypatch.setattr(service, "prepare_arrivals", nothing_to_prepare)
+    async with connect() as conn:
+        await admin_q.enqueue_run(conn, trigger=RunTrigger.SCHEDULED)
+        run = await admin_q.claim_next_run(conn)
+    await service._execute(get_settings(), run)
+    async with connect() as conn:
+        finished = (await admin_q.recent_runs(conn, limit=1))[0]
+
+    assert finished.status == RunStatus.SUCCESS.value
+    assert "no search queries" in finished.report["matches"][0]["skipped"]
+
+
+async def test_a_round_that_moves_nothing_ends_the_wait(clean_db, gh_board, aa_listing, aa_detail,
+                                                       monkeypatch):
+    """A detail half that raised on every round moved nothing, and the run waited out its whole
+    limit -- two hours -- before matching anything."""
+    from trouveur.config import get_settings
+    from trouveur.db.engine import connect
+    from trouveur.runner import service
+    from trouveur.work import WorkKind, enqueue, waiting_since
+
+    await seed_corpus(gh_board, aa_listing, aa_detail)
+    async with connect() as conn:
+        job_id = (await conn.exec_driver_sql("SELECT min(id) FROM job")).scalar_one()
+        await conn.exec_driver_sql("UPDATE job SET first_seen_at = now()")
+        await enqueue(conn, WorkKind.DETAIL, [job_id], "1")
+        waiting = await waiting_since(conn, datetime.now(UTC) - timedelta(hours=25))
+
+    async def stuck(_settings):
+        return {"detail": 0, "derive": 0, "embed": 0, "dedup": 0}
+
+    monkeypatch.setattr(service, "drain_queues", stuck)
+    assert waiting > 0
+    assert await service.prepare_arrivals(get_settings()) == waiting
