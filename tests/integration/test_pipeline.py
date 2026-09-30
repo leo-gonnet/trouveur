@@ -731,8 +731,12 @@ async def test_a_scheduled_run_fails_and_records_why_when_the_key_is_rejected(
     async def no_sweep(**kwargs):
         return IngestReport()
 
+    async def nothing_to_prepare(_settings):
+        return 0
+
     monkeypatch.setattr(llm.httpx, "AsyncClient", RejectingClient)
     monkeypatch.setattr(service.ingest, "run", no_sweep)
+    monkeypatch.setattr(service, "prepare_arrivals", nothing_to_prepare)
 
     async with connect() as conn:
         await admin_q.enqueue_run(conn, trigger=RunTrigger.SCHEDULED)
@@ -804,7 +808,11 @@ async def test_a_profile_with_nothing_to_search_for_is_skipped_not_failed(
     async def no_sweep(**kwargs):
         return IngestReport()
 
+    async def nothing_to_prepare(_settings):
+        return 0
+
     monkeypatch.setattr(service.ingest, "run", no_sweep)
+    monkeypatch.setattr(service, "prepare_arrivals", nothing_to_prepare)
     async with connect() as conn:
         await admin_q.enqueue_run(conn, trigger=RunTrigger.SCHEDULED)
         run = await admin_q.claim_next_run(conn)
@@ -814,3 +822,27 @@ async def test_a_profile_with_nothing_to_search_for_is_skipped_not_failed(
 
     assert finished.status == RunStatus.SUCCESS.value
     assert "no search queries" in finished.report["matches"][0]["skipped"]
+
+
+async def test_a_round_that_moves_nothing_ends_the_wait(clean_db, gh_board, aa_listing, aa_detail,
+                                                       monkeypatch):
+    """A detail half that raised on every round moved nothing, and the run waited out its whole
+    limit -- two hours -- before matching anything."""
+    from trouveur.config import get_settings
+    from trouveur.db.engine import connect
+    from trouveur.runner import service
+    from trouveur.work import WorkKind, enqueue, waiting_since
+
+    await seed_corpus(gh_board, aa_listing, aa_detail)
+    async with connect() as conn:
+        job_id = (await conn.exec_driver_sql("SELECT min(id) FROM job")).scalar_one()
+        await conn.exec_driver_sql("UPDATE job SET first_seen_at = now()")
+        await enqueue(conn, WorkKind.DETAIL, [job_id], "1")
+        waiting = await waiting_since(conn, datetime.now(UTC) - timedelta(hours=25))
+
+    async def stuck(_settings):
+        return {"detail": 0, "derive": 0, "embed": 0, "dedup": 0}
+
+    monkeypatch.setattr(service, "drain_queues", stuck)
+    assert waiting > 0
+    assert await service.prepare_arrivals(get_settings()) == waiting

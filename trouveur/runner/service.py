@@ -242,7 +242,9 @@ async def prepare_arrivals(settings: Settings) -> int:
     their postings had ever reached a nightly edition.
 
     Only work that could run now counts, so an item backing off after an error, a paused source or
-    a parked item cannot hold the run; nor can a refill of the older corpus after a version bump.
+    a parked item cannot hold the run. A round that moves nothing ends the wait: nothing will move
+    on the next one either, and a detail half that raised every round held a run for its whole
+    limit.
     """
     since = datetime.now(UTC) - timedelta(hours=retrieve.NEW_ARRIVALS_HOURS)
     deadline = datetime.now(UTC) + MATCH_WAIT_LIMIT
@@ -251,11 +253,9 @@ async def prepare_arrivals(settings: Settings) -> int:
             waiting = await waiting_since(conn, since)
         if not waiting:
             return 0
-        if datetime.now(UTC) >= deadline:
+        if datetime.now(UTC) >= deadline or not any((await drain_queues(settings)).values()):
             log.warning("matching with %d new posting(s) still unprepared", waiting)
             return waiting
-        if not any((await drain_queues(settings)).values()):
-            await asyncio.sleep(TICK_SECONDS)
 
 
 async def _execute_match_only(settings: Settings, run) -> None:
