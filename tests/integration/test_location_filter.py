@@ -34,6 +34,7 @@ POSTINGS = {
     "Berlin": (["DE"], [BERLIN], [], "onsite"),
     "fully remote, posted from Germany": (["DE"], [], ["DE"], "remote"),
     "fully remote, no location": ([], [], [], "remote"),
+    "fully remote, open in Austria": (["AT"], [], ["AT"], "remote"),
     "Geneva, Switzerland or the US": ([], [], ["CH", "US"], "onsite"),
 }
 
@@ -169,3 +170,23 @@ async def test_a_copy_that_names_its_own_town_is_never_judged_by_a_twin(
     _, vienna = await seed_user(countries=[], city_ids=[VIENNA], radius_km=30)
     assert await _kept_beside_a_berlin_twin(vienna, "Sobernheim") == 1
     assert await _kept_beside_a_berlin_twin(vienna, "", twin_open=False) == 1
+
+
+async def test_a_reader_who_declined_fully_remote_roles_sees_none_whatever_country_they_list(
+    clean_db, gh_board, aa_listing, aa_detail
+):
+    """"Remote in Albania, Andorra, Austria, ..." listed the reader's country, so it passed, and
+    such roles were 21 of the 50 postings shown to a reader in Vienna who had declined remote
+    work. Declined means declined -- also for a reader who picked no place at all."""
+    await seed_corpus(gh_board, aa_listing, aa_detail)
+    _, declined = await seed_user(countries=[], city_ids=[VIENNA], remote_anywhere=False)
+    _, accepted = await seed_user(
+        "accepted@example.test", countries=[], city_ids=[VIENNA], remote_anywhere=True
+    )
+    _, everywhere = await seed_user(
+        "everywhere@example.test", countries=[], city_ids=[], remote_anywhere=False
+    )
+    assert not await _passes(declined, "fully remote, open in Austria")
+    assert await _passes(accepted, "fully remote, open in Austria")
+    assert not await _passes(everywhere, "fully remote, open in Austria")
+    assert await _passes(declined, "Mödling, near Vienna")
