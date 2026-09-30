@@ -815,9 +815,12 @@ nothing that credit does not: one user's empty balance still cannot touch anothe
 - Uniqueness contracts:
   - `job (source, external_id)` is **provenance identity** — "the same row from the same board".
   - `job.dedup_group` is **semantic identity** — "the same job in the world". It is a **marker** and
-    must never merge or delete rows. It is keyed on title and company and deliberately NOT on the
+    must never merge or delete rows. It is keyed on title and employer and deliberately NOT on the
     place: aggregators (Arbeitnow) re-publish company boards with the location blanked, and a key
-    containing the town could never match the copy to its origin. The location filter reads it. V1 conflated the two in one UNIQUE constraint and silently
+    containing the town could never match the copy to its origin. The employer is the board id when
+    the posting came from a board and the name otherwise, compared exactly as letters and digits:
+    Arbeitnow names employers by that id ("Ddome"), while the board's postings use the display name
+    ("DataDome"). Never loosen that to a fuzzy match -- two companies that sound alike are not one. The location filter reads it. V1 conflated the two in one UNIQUE constraint and silently
     dropped every posting that arrived from a second source. Markers can be re-run; a merge cannot
     be undone.
 - **`job_embedding` holds open postings only.** Closing a job deletes its row in the same statement,

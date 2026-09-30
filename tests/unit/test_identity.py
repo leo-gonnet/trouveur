@@ -75,6 +75,17 @@ def test_dedup_key_separates_different_companies():
     assert dedup_key("Engineer", "A GmbH") != dedup_key("Engineer", "B GmbH")
 
 
+def test_an_aggregator_copy_matches_its_board_by_the_board_id_not_the_name():
+    """Arbeitnow names the employer by its board id; the board's own postings use the display
+    name. Matched by name, "Ddome" and "DataDome" were never twins."""
+    assert dedup_key("Senior Product Manager", "Ddome") == dedup_key(
+        "Senior Product Manager", "DataDome", board="ddome"
+    )
+    assert dedup_key("Senior Product Manager", "Ddome") != dedup_key(
+        "Senior Product Manager", "Ddome GmbH"
+    )
+
+
 def test_a_copy_that_lost_its_location_shares_the_key_of_the_board_it_came_from():
     """Arbeitnow re-publishes company boards with the location blanked and the board's slug for a
     name. Keyed on the town and the spelled-out name, the two could never be matched."""
