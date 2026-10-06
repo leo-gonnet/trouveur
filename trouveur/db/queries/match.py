@@ -23,13 +23,20 @@ from trouveur.ingest import places
 from trouveur.models import Expansion
 
 
+def _remote_allowed(facets: str) -> str:
+    return f"(CAST(:remote_anywhere AS boolean) OR {facets}.work_mode <> 'remote')"
+
+
 def _admitted(facets: str) -> str:
     return f"""(
-        {facets}.countries && CAST(:countries AS text[])
-        OR {facets}.unplaced_countries && CAST(:countries AS text[])
-        OR {facets}.place_ids && CAST(:area_ids AS integer[])
-        OR {facets}.unplaced_countries && CAST(:area_countries AS text[])
-        OR (CAST(:remote_anywhere AS boolean) AND {facets}.work_mode = 'remote')
+        {_remote_allowed(facets)}
+        AND (
+            {facets}.countries && CAST(:countries AS text[])
+            OR {facets}.unplaced_countries && CAST(:countries AS text[])
+            OR {facets}.place_ids && CAST(:area_ids AS integer[])
+            OR {facets}.unplaced_countries && CAST(:area_countries AS text[])
+            OR (CAST(:remote_anywhere AS boolean) AND {facets}.work_mode = 'remote')
+        )
     )"""
 
 
@@ -53,9 +60,13 @@ _PLACED_TWINS = """
 # else. A posting whose town could not be resolved is judged by the countries it may be in, against
 # the user's countries and every country their circles reach into -- it might be inside one. So is
 # "Geneva": it has no country of its own, but it is Switzerland or the US and nowhere else, which
-# is enough to keep it from a reader in Vienna. Fully remote passes wherever it
-# is, because for a role with no office the place named says nothing about whether the reader can
-# take it -- whether it is remote *for them* is in the description, which the reranker reads.
+# is enough to keep it from a reader in Vienna.
+#
+# A fully remote role is shown only to a reader who asked for them (`remote_anywhere`), and then
+# wherever it was posted: for a role with no office the place named says nothing about whether the
+# reader can take it. A reader who did not ask sees none, whatever country it lists -- "remote in
+# Albania, Andorra, Austria, ..." was 21 of 50 postings in one Vienna reader's edition. Only a role
+# DERIVED remote is kept out; hybrid, on site and unstated all pass.
 #
 # Cities are never compared by name here: `place_ids` are GeoNames ids resolved by derivation, and
 # the circles are resolved from the same list, so `Wien` and `Vienna` are one id on both sides.
@@ -66,17 +77,19 @@ _PLACED_TWINS = """
 # "Sobernheim" beside a twin in Coburg is the same role in another town, and must keep its own.
 _LOCATION = f"""
     (
-        CAST(:anywhere AS boolean)
-        OR {_admitted("f")}
-        OR (
-            cardinality(f.countries) = 0
-            AND cardinality(f.unplaced_countries) = 0
-            AND CASE
-                WHEN j.location_text = '' AND EXISTS (SELECT 1 {_PLACED_TWINS})
-                THEN EXISTS (SELECT 1 {_PLACED_TWINS} AND {_admitted("sf")})
-                -- Remote with no country is exactly "a fully remote role, wherever it is".
-                ELSE CAST(:remote_anywhere AS boolean) OR f.work_mode <> 'remote'
-            END
+        {_remote_allowed("f")}
+        AND (
+            CAST(:anywhere AS boolean)
+            OR {_admitted("f")}
+            OR (
+                cardinality(f.countries) = 0
+                AND cardinality(f.unplaced_countries) = 0
+                AND CASE
+                    WHEN j.location_text = '' AND EXISTS (SELECT 1 {_PLACED_TWINS})
+                    THEN EXISTS (SELECT 1 {_PLACED_TWINS} AND {_admitted("sf")})
+                    ELSE TRUE
+                END
+            )
         )
     )
 """

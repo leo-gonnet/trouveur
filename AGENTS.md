@@ -648,15 +648,17 @@ nothing that credit does not: one user's empty balance still cannot touch anothe
   form had a "not stated" tick box beside three of them — a control whose only job was to undo the
   filter the user had just set. Do not add a fifth: a filter here hides a posting with no way for
   the reader to learn it existed, while a preference in the prompt only moves it down the list.
-- **`remote_anywhere` belongs to the location filter, not to a work mode.** A fully remote role is
-  in no country, so the country it was posted from cannot be used to reject it; whether it is remote
-  *for the reader* is in the description, which the reranker reads. Onsite and hybrid are not
-  distinguished anywhere on purpose — both mean "you go there", which the country already says.
+- **`remote_anywhere` belongs to the location filter, and unticked it means NO fully remote role.**
+  Ticked, a fully remote role passes wherever it was posted: a role with no office is in no country,
+  so the one it names cannot reject it. Unticked, none passes, whatever country it lists -- "remote
+  in Albania, Andorra, Austria, ..." named the reader's country and was 21 of 50 postings shown to
+  a reader in Vienna who had declined remote work. Only a posting DERIVED remote is kept out:
+  hybrid, on site and unstated all pass. Onsite and hybrid are not distinguished anywhere on
+  purpose — both mean "you go there", which the country already says.
 - **A posting that states no location passes.** Not an escape clause on one arm of the filter but
   how the filter works: a posting nobody parsed a country out of is not a posting somewhere else,
-  and dropping it would cost recall for a derivation gap. The one exception is a posting derived
-  REMOTE with no country: that is exactly "a fully remote role, wherever it is", so it passes only
-  for a reader who ticked `remote_anywhere`.
+  and dropping it would cost recall for a derivation gap. A posting derived REMOTE passes only for
+  a reader who ticked `remote_anywhere`, with or without a country.
 - **A posting whose source named no place AT ALL is judged by its twins.** When `location_text` is
   empty and an open posting in the same `dedup_group` has location facets, it passes only if one
   of those twins does: it is a copy of a role its origin board places. Only when the source said
@@ -967,8 +969,8 @@ still holds the old readings and no re-derive has been scheduled.
   - **Retrieval never re-stamps the profile version a posting was scored under**, or the rows
     most in need of a re-score look current and nothing is ever re-scored.
   - **Location is the only hard filter**, a posting that states no location passes, and a fully
-    remote posting is admitted wherever it was posted -- and, with no country, only for a reader
-    who accepts fully remote roles.
+    remote posting is admitted wherever it was posted for a reader who accepts fully remote roles
+    and never for one who does not, whatever country it lists.
   - **A stated country we cannot read falls back to the raw text** (Workday's "United States of
     America" beside "Las Vegas, NV, USA"), `UK - London` and `Berlin, Berlin` name one place, and
     a US state implies the US only when the town before it is in the US (`Toronto, CA` is not).
