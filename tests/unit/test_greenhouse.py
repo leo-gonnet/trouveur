@@ -105,7 +105,7 @@ async def test_sweep_marks_each_fetched_board_closable(gh_board):
     assert outcome.closable_scopes == ["beispiel"]
     assert outcome.complete is True
     assert all(doc.scope == "beispiel" for batch in batches for doc in batch)
-    # Recorded per tenant so the dashboard can show which board answered.
+    # Recorded per tenant so Operations can show which board answered.
     assert [(r.scope, r.ok, r.documents) for r in outcome.scope_results] == [("beispiel", True, 2)]
 
 

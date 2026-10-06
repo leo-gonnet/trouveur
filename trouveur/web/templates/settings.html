@@ -17,25 +17,27 @@
   <section class="section">
     <div class="section-head"><h2>Credit</h2></div>
     <div class="kpis">
-      {{ m.kpi('${:.2f}'.format(credit.balance_usd), 'remaining') }}
-      {{ m.kpi('${:.2f}'.format(credit.granted_usd), 'granted') }}
-      {{ m.kpi('${:.4f}'.format(credit.spent_usd), 'spent, all time') }}
+      {{ m.kpi(m.money(credit.balance_usd), 'remaining') }}
+      {{ m.kpi(m.money(today.cost_usd if today else 0), 'spent today') }}
     </div>
     {% if credit.granted_usd > 0 %}
       {% set used = (credit.spent_usd / credit.granted_usd * 100) %}
       <div class="bar"><span style="width: {{ [used, 100] | min }}%"></span></div>
+      <p class="hint">{{ m.money(credit.spent_usd) }} of {{ m.money(credit.granted_usd) }} granted.
+        {% if grants %}Last topped up {{ grants[0].created_at | localtime('%d %b') }}
+          {%- if grants[0].granted_by %} by {{ grants[0].granted_by }}{% endif %}.{% endif %}</p>
     {% endif %}
-    <p class="hint">Credit is granted by an administrator; there is no key of your own to add.
+    <p class="hint">Credit is granted by an administrator.
       When it runs out, scoring stops and everything free keeps working.</p>
-    {% if grants %}
+    {% if history %}
       <table>
-        <tr><th>Granted</th><th class="num">Amount</th><th>By</th><th>Note</th></tr>
-        {% for row in grants %}
-          <tr><td>{{ row.created_at | localtime('%Y-%m-%d') }}</td>
-              <td class="num">${{ '%.2f' % row.amount_usd }}</td>
-              <td>{{ row.granted_by or '—' }}</td><td>{{ row.note or '' }}</td></tr>
+        <tr><th>Day</th><th class="num">Spent</th></tr>
+        {% for row in history %}
+          <tr><td>{{ row.period_day }}</td><td class="num">{{ m.money(row.cost_usd) }}</td></tr>
         {% endfor %}
       </table>
+    {% else %}
+      <p class="empty">Nothing spent yet.</p>
     {% endif %}
   </section>
 
@@ -57,7 +59,7 @@
       {# The worst case, not a second ceiling: there is one limit and it is the day's. A monthly
          cap on top would be two numbers for one decision, and the month is the one a reader
          actually worries about -- so it is stated, never set. #}
-      <p class="hint">At most <strong>${{ '%.2f' % (profile.daily_ceiling_usd * 30) }}</strong>
+      <p class="hint">At most <strong>{{ m.money(profile.daily_ceiling_usd * 30) }}</strong>
         over thirty days, if every day spends the whole ceiling. Most days spend far less: a day's
         new arrivals cost a few cents to score.</p>
       {% if profile.scoring_enabled %}
@@ -66,27 +68,6 @@
     </form>
     <p class="hint">Scored with <code>{{ model }}</code>{% if provider %} on <code>{{ provider }}</code>{% endif %}.
       The model is chosen by evaluation, not per user, so every score here is comparable.</p>
-  </section>
-
-  <section class="section">
-    <div class="section-head"><h2>Usage</h2></div>
-    <div class="kpis">
-      {{ m.kpi('${:.4f}'.format(today.cost_usd if today else 0), 'spent today') }}
-      {{ m.kpi(today.calls if today else 0, 'calls today') }}
-      {{ m.kpi('${:.4f}'.format(month_to_date), 'this month') }}
-    </div>
-    {% if history %}
-      <table>
-        <tr><th>Day</th><th class="num">Cost</th><th class="num">Calls</th><th class="num">Tokens in</th></tr>
-        {% for row in history %}
-          <tr><td>{{ row.period_day }}</td><td class="num">${{ '%.4f' % row.cost_usd }}</td>
-              <td class="num">{{ row.calls }}</td>
-              <td class="num">{{ '{:,}'.format(row.tokens_in) }}</td></tr>
-        {% endfor %}
-      </table>
-    {% else %}
-      <p class="empty">Nothing spent yet.</p>
-    {% endif %}
   </section>
 
   <section class="section">

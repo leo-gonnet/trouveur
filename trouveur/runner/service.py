@@ -152,7 +152,7 @@ def _match_payload(matches: Sequence[matching.MatchReport]) -> list[dict]:
     """What each user's match did, `errors` included.
 
     A run that left a user unscored has to say why in the report and not only in a log line: the
-    log lives on the host and the report is what the Scans page reads.
+    log lives on the host and the report is what the Operations page reads.
     """
     return [
         {

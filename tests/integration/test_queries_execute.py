@@ -84,8 +84,9 @@ def _arguments(ctx: dict) -> dict[str, dict]:
         "admin.remove_tenant": {"source": source, "scope": "probe-tenant"},
         "admin.recent_sweeps": {},
         "admin.source_health": {},
-        "admin.corpus_overview": {},
-        "admin.derived_coverage": {"fresh_since": _cutoff()},
+        "admin.open_job_count": {},
+        "admin.system_overview": {"fresh_since": _cutoff()},
+        "admin.tenants_needing_attention": {},
         "admin.description_coverage": {},
         "admin.ensure_schedule": {},
         "admin.get_schedule": {},
@@ -179,7 +180,6 @@ def _arguments(ctx: dict) -> dict[str, dict]:
             "user_id": user_id, "profile_version": 1, "expansion_version": 1,
             "expansion": Expansion(queries=["ingenieur"]),
         },
-        "match.match_stats": {"user_id": user_id},
         # users
         "users.get_user_by_email": {"email": ctx["email"]},
         "users.get_user": {"user_id": user_id},
@@ -201,7 +201,6 @@ def _arguments(ctx: dict) -> dict[str, dict]:
         },
         "users.credit_grants": {"user_id": user_id},
         "users.today_spend": {"user_id": user_id},
-        "users.month_to_date_spend": {"user_id": user_id},
         "users.add_spend": {
             "user_id": user_id, "tokens_in": 1, "tokens_out": 1, "cost_usd": Decimal("0.001"),
         },

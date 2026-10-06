@@ -87,7 +87,7 @@ async def _public_id() -> str:
 
 @pytest.mark.parametrize(
     "path",
-    ["/recommendations", "/search", "/dashboard", "/profile", "/settings", "/how-it-works"],
+    ["/recommendations", "/search", "/profile", "/settings", "/how-it-works"],
 )
 async def test_page_renders(client, path):
     response = await client.get(path)
@@ -110,7 +110,8 @@ async def test_an_admin_route_refuses_an_ordinary_user(client, method, path):
     """Checked by prefix in the middleware, not per handler: a per-route check is the line somebody
     forgets on the next route, and the route that leaks is always the newest one.
 
-    Scans owns the SHARED schedule and queues real sweeps, so it is not one reader's to retime.
+    Operations owns the SHARED schedule and queues real sweeps, so it is not one reader's
+    to retime.
     """
     response = await client.request(method, path)
     assert response.status_code == 303, f"{method} {path} answered an ordinary user"
@@ -174,7 +175,10 @@ async def test_the_out_of_credit_banner_is_on_every_page_until_credit_is_granted
     for path in ("/recommendations", "/search", "/profile"):
         body = (await client.get(path)).text
         assert 'class="banner warn"' in body, path
-    assert "Ask an\n  administrator to top it up." in (await client.get("/search")).text
+    # Whitespace-collapsed: the assertion is about what the banner SAYS, and matching the
+    # template's own line wrapping made it fail the next time that paragraph was re-wrapped.
+    said = " ".join((await client.get("/search")).text.split())
+    assert "Ask an administrator to top it up." in said
 
     async with connect() as conn:
         await users_q.grant_credit(
@@ -198,13 +202,13 @@ async def test_the_balance_is_readable_from_the_topbar(client, seeded):
 async def test_the_page_is_a_reading_list_with_no_console_on_it(client, seeded):
     """Everything above the results was pipeline jargon the reader could not act on.
 
-    The last run's candidate and cost counts are diagnostics and live on the dashboard; the
+    The last run's candidate and cost counts are diagnostics and live on Operations; the
     button is gone because matching is started by the scan, a profile change and a new key.
     """
     body = (await client.get("/recommendations")).text
     assert "Match now" not in body
     assert "candidates" not in body
-    assert "retrieved</" not in body, "lifetime pipeline counts belong on the dashboard"
+    assert "retrieved</" not in body, "lifetime pipeline counts belong on Operations"
     assert "<h1>" not in body, "the nav already says which page this is"
 
 
@@ -827,15 +831,22 @@ async def test_a_short_or_mismatched_new_password_is_refused(client):
     assert mismatch.headers["location"] == "/settings?password=mismatch"
 
 
-async def test_an_admin_is_shown_no_balance_because_they_need_none(admin):
-    """An admin grants credit and has none of their own, so a zero balance in their topbar would
-    read as a problem to fix rather than as a category that does not apply."""
+async def test_an_admin_is_shown_a_balance_and_can_top_their_own_account_up(admin):
+    """An admin holds credit like any other account, and the UI must not special-case them.
+
+    The exemption that used to be here was a branch one account in the installation could reach,
+    so nothing exercised it. What replaces it has to actually work for them: a balance in the
+    topbar, a grant form on their own row, and a banner that does not tell them to ask
+    themselves.
+    """
     body = (await admin.get("/users")).text
-    assert "needs none" in body
-    # The specific banner, not any banner: the one about a missing installation key is an admin's
-    # to act on and must still reach them.
-    assert "Your credit is used up" not in body, "an admin was told to top themselves up"
-    assert 'title="LLM credit remaining"' not in body, "an admin was shown a balance"
+    assert "needs none" not in body, "an admin's row still refuses to offer a top-up"
+    assert body.count('action="/users/') >= 1, "no grant form was rendered at all"
+    assert 'title="LLM credit remaining"' in body, "an admin was shown no balance"
+    assert "Ask an administrator to top it up" not in body, (
+        "an admin was told to ask an administrator, which is themselves"
+    )
+    assert "Grant yourself more on" in body
 
 
 async def test_disabling_an_account_revokes_the_session_it_already_holds(client, admin, seeded):
@@ -941,7 +952,7 @@ async def test_a_display_name_defaults_to_the_local_part_and_is_editable(client,
         "/settings/account", data={"display_name": "Renamed", "digest_enabled": "on"}
     )).status_code == 303
     body = (await client.get("/recommendations")).text
-    assert "<summary>Renamed</summary>" in body, (
+    assert '<span class="name">Renamed</span>' in body, (
         "the name came from the session cookie, so it is a month stale after a rename"
     )
 

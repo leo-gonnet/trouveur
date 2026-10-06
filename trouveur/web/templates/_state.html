@@ -1,6 +1,11 @@
+{# Rendered here and not in job_card: hx-swap replaces only this span, so a copy in the card
+   would still read "saved" after the reader pressed "dismissed". #}
 <span class="states" hx-target="this" hx-swap="outerHTML">
-  {% for state in ['saved', 'applied', 'dismissed'] %}
-    <button hx-post="/job/{{ job_id }}/state" hx-vals='{"state": "{{ state }}"}'
-            aria-pressed="{{ 'true' if current == state else 'false' }}">{{ state }}</button>
-  {% endfor %}
+  {% if current != 'new' %}<span class="pill filed">{{ current }}</span>{% endif %}
+  <span class="set">
+    {% for state in ['saved', 'applied', 'dismissed'] %}
+      <button hx-post="/job/{{ job_id }}/state" hx-vals='{"state": "{{ state }}"}'
+              aria-pressed="{{ 'true' if current == state else 'false' }}">{{ state }}</button>
+    {% endfor %}
+  </span>
 </span>

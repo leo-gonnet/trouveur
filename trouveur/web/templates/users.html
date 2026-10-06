@@ -29,28 +29,23 @@
       <tr>
         <td>{{ row.display_name }}{% if row.is_admin %} <span class="pill">admin</span>{% endif %}</td>
         <td>{{ row.email }}</td>
-        <td class="num">${{ '%.2f' % row.granted_usd }}</td>
-        <td class="num">${{ '%.4f' % row.spent_usd }}</td>
+        <td class="num">{{ m.money(row.granted_usd) }}</td>
+        <td class="num">{{ m.money(row.spent_usd) }}</td>
         <td class="num">
-          {%- if row.is_admin %}—
-          {%- elif row.balance_usd > 0 %}<span class="pill good">${{ '%.2f' % row.balance_usd }}</span>
-          {%- else %}<span class="pill bad">${{ '%.2f' % row.balance_usd }}</span>{% endif %}</td>
-        <td class="num">${{ '%.2f' % row.daily_ceiling_usd }}</td>
+          {%- if row.balance_usd > 0 %}<span class="pill good">{{ m.money(row.balance_usd) }}</span>
+          {%- else %}<span class="pill bad">{{ m.money(row.balance_usd) }}</span>{% endif %}</td>
+        <td class="num">{{ m.money(row.daily_ceiling_usd) }}</td>
         <td>
           {% if not row.is_active %}<span class="pill bad">disabled</span>
           {% elif not row.scoring_enabled %}<span class="pill">paused</span>
           {% else %}<span class="pill good">active</span>{% endif %}
         </td>
         <td>
-          {% if row.is_admin %}
-            <span class="hint">needs none</span>
-          {% else %}
-            <form method="post" action="/users/{{ row.id }}/credit" class="inline">
-              <input name="amount_usd" inputmode="decimal" placeholder="5.00" size="5">
-              <input name="note" placeholder="note" size="12">
-              <button type="submit">Grant</button>
-            </form>
-          {% endif %}
+          <form method="post" action="/users/{{ row.id }}/credit" class="inline">
+            <input name="amount_usd" inputmode="decimal" placeholder="5.00" size="5">
+            <input name="note" placeholder="note" size="12">
+            <button type="submit">Grant</button>
+          </form>
         </td>
       </tr>
     {% endfor %}

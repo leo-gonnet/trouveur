@@ -10,8 +10,8 @@
 
 {% if editions %}
 <nav class="editions">
-  {% if newer %}<a href="{{ m.edition_href(newer) }}">← {{ newer.day.strftime('%d %b') }}</a>
-  {% else %}<span class="muted">← newer</span>{% endif %}
+  {% if newer %}<a class="step" href="{{ m.edition_href(newer) }}">← {{ newer.day.strftime('%d %b') }}</a>
+  {% else %}<span class="step disabled">← newer</span>{% endif %}
   <select onchange="location = this.value">
     {% for row in editions %}
       <option value="{{ m.edition_href(row) }}"
@@ -20,8 +20,8 @@
       </option>
     {% endfor %}
   </select>
-  {% if older %}<a href="{{ m.edition_href(older) }}">{{ older.day.strftime('%d %b') }} →</a>
-  {% else %}<span class="muted">older →</span>{% endif %}
+  {% if older %}<a class="step" href="{{ m.edition_href(older) }}">{{ older.day.strftime('%d %b') }} →</a>
+  {% else %}<span class="step disabled">older →</span>{% endif %}
 </nav>
 {% endif %}
 

@@ -1,29 +1,17 @@
 {% extends "base.html" %}{% block title %}Profile · Trouveur{% endblock %}
 {% from "_macros.html" import tags %}
 {% block content %}
-<div class="page-head">
-  <h1>Profile</h1>
-  <p class="hint">What a good match is, for you. Retrieval and scoring both read this.</p>
-</div>
+<div class="page-head"><h1>Profile</h1></div>
 
 {% if request.query_params.get('saved') %}
   {% if request.query_params.get('rescore') == '1' %}
-    <p class="notice warn">Saved. A scoring field changed, so a matching run has started and a new
-      edition will appear in <a href="/recommendations">Recommendations</a> shortly. Re-scoring
-      costs money on your own key.</p>
+    <p class="notice warn">Saved. A new edition is being scored against your credit; it will
+      appear in <a href="/recommendations">Recommendations</a> shortly, beside the one you
+      already have.</p>
   {% else %}
-    <p class="notice good">Saved. No scoring field changed, so nothing will be re-scored.</p>
+    <p class="notice good">Saved.</p>
   {% endif %}
 {% endif %}
-
-<p class="notice">
-  Everything on this page decides what a good match is, so changing any of it starts a fresh
-  matching run over the last week, scoring <strong>at most {{ rescore_estimate }}</strong>
-  postings on your own key &mdash; fewer in practice, since only what your new search terms find
-  is judged, and scoring stops once the scores run out. Nothing already published is touched: the
-  run adds a new edition for today beside the one you have, so you can still read what you were
-  shown before the change.
-</p>
 
 <form method="post" action="/profile" class="grid">
   <section class="section">
@@ -32,58 +20,49 @@
     <label>Years of experience<input name="years_experience" type="number" min="0" max="60" value="{{ profile.years_experience }}"></label>
     <div class="field">
       <span class="field-name">Languages you work in</span>
-      {{ tags('languages', profile.languages, options=language_names, placeholder='Pick a language…',
-              hint='Told to the reranker; not a filter.') }}
+      {{ tags('languages', profile.languages, options=language_names, placeholder='Pick a language…') }}
     </div>
-    <label>Objectives <span class="hint">free text; what you want next, and used to expand your search queries</span>
+    <label>Objectives <span class="hint">what you want next</span>
       <textarea name="objectives" rows="4">{{ profile.objectives }}</textarea></label>
-    <label>Background <span class="hint">free text, up to {{ background_max_chars }} characters; what you have actually done, in your own words. Read by both the search expansion and the scorer, so a summary beats a pasted CV.</span>
+    <label>Background <span class="hint">a summary, not a pasted CV</span>
       <textarea name="background" rows="8" maxlength="{{ background_max_chars }}">{{ profile.background }}</textarea></label>
   </section>
 
   <section class="section">
     <div class="section-head"><h2>What you want</h2></div>
-    <p class="hint">Type one, press Enter, repeat.</p>
     <div class="field">
       <span class="field-name">Keywords</span>
-      {{ tags('keywords', profile.keywords, placeholder='Add a keyword…',
-              hint='Each one is a search query on its own.') }}
+      {{ tags('keywords', profile.keywords, placeholder='Add a keyword, then Enter…') }}
     </div>
     <div class="field">
       <span class="field-name">Must have</span>
-      {{ tags('must_have', profile.must_have, placeholder='Add a requirement…',
-              hint='Searched for, and shown to the reranker.') }}
+      {{ tags('must_have', profile.must_have, placeholder='Add a requirement, then Enter…') }}
     </div>
-    <label>Minimum salary <span class="hint">&euro;/year; a preference too &mdash; most adverts state no figure, and none of them are rejected for it</span>
+    <label>Minimum salary <span class="hint">&euro;/year &mdash; a preference, not a filter</span>
       <input name="min_salary_eur_year" value="{{ profile.min_salary_eur_year }}"></label>
   </section>
 
   <section class="section">
     <div class="section-head"><h2>Where</h2></div>
-    <p class="hint">The only filter applied in the query, before anything is ranked. Everything
-      else on this page is a preference the reranker weighs. A posting is kept if it is in one
-      of your countries <em>or</em> near one of your cities. A posting that names no place is
-      always kept, and so is one that names only a country your cities are in.</p>
+    <p class="hint">The only filter. Everything else here is a preference.</p>
     <div class="field">
       <span class="field-name">Countries</span>
       {{ tags('countries', profile.countries, options=country_names, placeholder='Pick a country…',
-              hint='The whole country. Leave countries and cities empty to accept everywhere.') }}
+              hint='Leave countries and cities empty for everywhere.') }}
     </div>
     <div class="field">
       <span class="field-name">Cities</span>
       {{ tags('city_ids', profile.city_ids, options=city_names, placeholder='Type a city, then pick it…',
-              suggest='/places', hint='Any spelling finds it: Wien, Vienna, Vienne.') }}
+              suggest='/places', hint='Wien, Vienna, Vienne — any spelling finds it.') }}
     </div>
     <label>Distance around each city <span class="hint">km</span>
       <input name="radius_km" type="number" min="{{ radius_bounds[0] }}" max="{{ radius_bounds[1] }}"
              value="{{ profile.radius_km }}"></label>
     <label class="check"><input type="checkbox" name="remote_anywhere" value="yes"
-      {% if profile.remote_anywhere %}checked{% endif %}>Include fully remote roles, wherever they are</label>
-    <p class="hint">Unticked, no fully remote role is shown, whatever country it lists. Hybrid roles,
-      and roles that do not say, are still shown.</p>
+      {% if profile.remote_anywhere %}checked{% endif %}>Include fully remote roles</label>
+    <span class="hint">Unticked, no fully remote role is shown at all.</span>
   </section>
 
   <p class="actions"><button class="primary" type="submit">Save profile</button></p>
 </form>
-<script src="/static/app.js"></script>
 {% endblock %}

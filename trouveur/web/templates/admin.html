@@ -1,7 +1,8 @@
-{% extends "base.html" %}{% block title %}Scans · Trouveur{% endblock %}
+{% extends "base.html" %}{% import "_macros.html" as m %}
+{% block title %}Operations · Trouveur{% endblock %}
 {% block content %}
 <div class="page-head">
-  <h1>Scans</h1>
+  <h1>Operations</h1>
   <p class="hint">
     The web app only ever queues a run. The runner service executes it — they share nothing but
     the database, so either can be restarted without disturbing the other.
@@ -45,6 +46,146 @@
         {% if active_run %}<span class="hint">A run is already {{ active_run.status }}.</span>{% endif %}
       </p>
     </form>
+  </section>
+</div>
+
+<div class="kpis">
+  {{ m.kpi('{:,}'.format(overview.open_jobs), 'open postings') }}
+  {{ m.kpi('{:,}'.format(overview.new_today), 'new today') }}
+  {{ m.kpi('{:,}'.format(overview.derived), 'with facets') }}
+  {{ m.kpi('{:,}'.format(overview.embedded), 'with embeddings') }}
+  {# reltuples; NULL until ANALYZE has run. #}
+  {{ m.kpi('~{:,}'.format(overview.total_estimate) if overview.total_estimate is not none
+           else '—', 'ever collected (approx.)') }}
+</div>
+
+<section class="section">
+<div class="section-head"><h2>Sources</h2></div>
+  <p class="hint">
+    A sweep can succeed and still not have seen everything. <em>Complete</em> means it observed a
+    source's whole live set, which is the only basis on which a posting may be retired.
+    <em>Overflowed</em> counts partitions holding more results than the API will page through —
+    those postings were never fetched, and the count is the only place that shows it.
+  </p>
+  {% if health %}
+  <table>
+    <tr><th>Source</th><th>Last run</th><th>Documents</th><th>Partitions</th><th>Overflowed</th><th>Complete</th><th>Status</th></tr>
+    {% for row in health %}
+    <tr>
+      <td>{{ row.source }}</td>
+      <td>{{ row.started_at | localtime }}</td>
+      <td class="num">{{ '{:,}'.format(row.documents_seen) }}</td>
+      <td class="num">{{ row.partitions_done }}/{{ row.partitions_total }}</td>
+      <td class="num">{% if row.partitions_overflowed %}<span class="pill bad">{{ row.partitions_overflowed }}</span>{% else %}0{% endif %}</td>
+      <td>{% if row.complete %}<span class="pill good">yes</span>{% else %}<span class="pill">delta</span>{% endif %}</td>
+      <td>{% if row.ok %}<span class="pill good">ok</span>{% else %}<span class="pill bad">failed</span>{% endif %}</td>
+    </tr>
+    {% if row.error %}<tr><td colspan="7" class="hint">{{ row.error }}</td></tr>{% endif %}
+    {% endfor %}
+  </table>
+  {% else %}<p class="empty">No sweep has run yet.</p>{% endif %}
+  {% set seen = health | map(attribute='source') | list %}
+  {% set never = sources | reject('in', seen) | list %}
+  {% if never %}
+    <p class="notice warn">Configured but never run: {{ never | join(', ') }}.</p>
+  {% endif %}
+</section>
+
+<section class="section">
+  <div class="section-head">
+    <h2>Boards needing attention</h2>
+    <span class="hint">
+      {{ '{:,}'.format(tenant_totals.tenants) }} in the crawl set ·
+      {{ '{:,}'.format(tenant_totals.sweeping) }} sweeping
+    </span>
+  </div>
+  <p class="hint">
+    Read-only. The crawl set is shared by every user, so changing it is an operator action on the
+    server — <code>trouveur tenants add|enable|disable|remove</code>. Only boards that are failing
+    or awaiting review are listed: a board is never dropped automatically, because a run of
+    failures is as likely to be a provider outage as a dead board, so a streak that keeps growing
+    is one to remove by hand. A <em>candidate</em> is a discovery pass's proposal, disabled until
+    somebody promotes it. The whole set is <code>trouveur tenants list</code>.
+  </p>
+  {% if tenants %}
+  <table>
+    <tr><th>Source</th><th>Tenant</th><th>State</th><th class="num">Postings</th>
+        <th>Last success</th><th class="num">Failures</th></tr>
+    {% for row in tenants %}
+    <tr>
+      <td>{{ row.source }}</td>
+      <td><code>{{ row.scope }}</code></td>
+      <td>
+        {% if row.enabled %}<span class="pill good">sweeping</span>
+        {% else %}<span class="pill">{{ 'candidate' if row.origin == 'discovered' else 'disabled' }}</span>{% endif %}
+      </td>
+      <td class="num">{{ '{:,}'.format(row.last_documents or 0) }}</td>
+      <td>{{ row.last_ok_at | localtime('%Y-%m-%d %H:%M') if row.last_ok_at else 'never' }}</td>
+      <td class="num">
+        {% if row.consecutive_failures %}
+          <span class="pill bad">{{ row.consecutive_failures }}</span>
+        {% else %}0{% endif %}
+      </td>
+    </tr>
+    {% if row.last_error %}<tr><td colspan="6" class="hint">{{ row.last_error }}</td></tr>{% endif %}
+    {% endfor %}
+  </table>
+  {% if tenants | length < tenant_totals.failing + tenant_totals.candidates %}
+    <p class="hint">Showing the worst {{ tenants | length }} of
+      {{ '{:,}'.format(tenant_totals.failing + tenant_totals.candidates) }} —
+      <code>trouveur tenants list --failing</code> for the rest.</p>
+  {% endif %}
+  {% elif tenant_totals.tenants %}
+    <p class="empty">Every board swept cleanly, and nothing is awaiting review.</p>
+  {% else %}
+    <p class="empty">No tenants registered. Add one with <code>trouveur tenants add</code>.</p>
+  {% endif %}
+</section>
+
+<div class="grid">
+  <section class="section">
+    <div class="section-head"><h2>Derived coverage</h2></div>
+    <p class="hint">A posting can be stored and searchable but still invisible to recommendations
+      until its facets and embedding land. This is that gap, rather than it looking like poor recall.</p>
+    <table>
+      <tr><td>Open postings</td><td class="num">{{ '{:,}'.format(overview.open_jobs) }}</td></tr>
+      <tr><td>Inside the horizon</td><td class="num">{{ '{:,}'.format(overview.fresh_jobs) }}</td></tr>
+      <tr><td>With facets derived</td><td class="num">{{ '{:,}'.format(overview.derived) }}</td></tr>
+      <tr><td>With embeddings</td><td class="num">{{ '{:,}'.format(overview.embedded) }}</td></tr>
+    </table>
+    {# _DENSE_SQL does not filter on embedding_version, so during a model change the old vectors
+       are ranked against a query vector from the new one. Shown only when it is wrong. #}
+    {% if overview.vector_spaces > 1 %}
+      <p class="notice bad"><strong>{{ overview.vector_spaces }} embedding versions are
+        present.</strong> The dense arm ranks every vector against the same query, so postings
+        still holding the previous model's vector are being compared across two spaces and score
+        by nothing at all. Drain the embed queue until this reads one.</p>
+    {% endif %}
+  </section>
+
+  <section class="section">
+    <div class="section-head"><h2>Work queues</h2></div>
+    {# NOT `queues`: _run_status() spreads one of its own, keyed by kind, into this context. #}
+    {% if queue_ages %}
+    <table>
+      <tr><th>Kind</th><th class="num">Pending</th><th>Oldest</th></tr>
+      {% for row in queue_ages %}
+        <tr><td>{{ row.kind }}</td><td class="num">{{ '{:,}'.format(row.total) }}</td>
+            <td>{{ row.oldest | localtime }}</td></tr>
+      {% endfor %}
+    </table>
+    {% else %}<p class="empty">All queues drained.</p>{% endif %}
+  </section>
+
+  <section class="section">
+    <div class="section-head"><h2>Open postings by country</h2></div>
+    {% if countries %}
+    <table>
+      {% for row in countries %}
+        <tr><td>{{ row.country }}</td><td class="num">{{ '{:,}'.format(row.jobs) }}</td></tr>
+      {% endfor %}
+    </table>
+    {% else %}<p class="empty">Nothing derived yet.</p>{% endif %}
   </section>
 </div>
 

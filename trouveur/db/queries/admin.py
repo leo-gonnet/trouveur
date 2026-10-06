@@ -45,7 +45,7 @@ async def list_tenants(
     three failed sweeps are as likely to be a provider outage as a dead board, and a crawl set
     that shrinks on its own shrinks silently -- so the streak is the whole of the signal, and
     alphabetical order buried it: a Greenhouse slug that had 404ed for weeks sat at row 180 of
-    211 on the dashboard and read exactly like the 210 healthy ones.
+    211 on the page and read exactly like the 210 healthy ones.
     """
     stmt = (
         sa.select(
@@ -80,6 +80,63 @@ async def list_tenants(
     if failing_only:
         stmt = stmt.where(source_scope_health.c.consecutive_failures > 0)
     return list(await conn.execute(stmt))
+
+
+async def tenants_needing_attention(
+    conn: AsyncConnection, *, limit: int = 50
+) -> tuple[list[sa.Row], dict[str, int]]:
+    """The boards a human has to decide about, and a count of the ones they do not.
+
+    The crawl set is not a list anybody reads. There is no index of tenants anywhere, so a board
+    can 404 every night for ever and the only symptom is an integer going up -- and nothing
+    retires it automatically, on purpose, because a failure streak is as likely to be a provider
+    outage as a dead board. The page exists to surface the few that need a decision: the ones
+    failing, and the candidates a discovery pass has proposed.
+
+    Rendering the whole set did the opposite: measured at 10,000 tenants, 1.9 MiB of HTML and
+    10,769 rows in a page that otherwise weighs 39 KB. `list_tenants` is how the CLI reads it all.
+    """
+    rows = list(
+        await conn.execute(
+            sa.text(
+                """
+                SELECT t.source, t.scope, t.enabled, t.origin::text AS origin, t.note,
+                       h.last_ok_at, h.last_documents, h.last_error,
+                       coalesce(h.consecutive_failures, 0) AS consecutive_failures
+                FROM source_tenant t
+                LEFT JOIN source_scope_health h
+                       ON h.source = t.source AND h.scope = t.scope
+                WHERE coalesce(h.consecutive_failures, 0) > 0
+                   OR t.origin = 'discovered'
+                ORDER BY coalesce(h.consecutive_failures, 0) DESC, t.source, t.scope
+                LIMIT :limit
+                """
+            ),
+            {"limit": limit},
+        )
+    )
+    totals = (
+        await conn.execute(
+            sa.text(
+                """
+                SELECT count(*) AS tenants,
+                       count(*) FILTER (WHERE t.enabled) AS sweeping,
+                       count(*) FILTER (
+                           WHERE coalesce(h.consecutive_failures, 0) > 0) AS failing,
+                       count(*) FILTER (WHERE t.origin = 'discovered') AS candidates
+                FROM source_tenant t
+                LEFT JOIN source_scope_health h
+                       ON h.source = t.source AND h.scope = t.scope
+                """
+            )
+        )
+    ).one()
+    return rows, {
+        "tenants": int(totals.tenants),
+        "sweeping": int(totals.sweeping or 0),
+        "failing": int(totals.failing or 0),
+        "candidates": int(totals.candidates or 0),
+    }
 
 
 async def add_tenants(
@@ -183,7 +240,7 @@ async def record_scope_health(
 
 async def scope_health(conn: AsyncConnection, failing_only: bool = False) -> list[sa.Row]:
     """Per-tenant health, worst first. A tenant failing for days is one to drop with
-    `trouveur tenants remove`; the dashboard shows this read-only."""
+    `trouveur tenants remove`; Operations shows this read-only."""
     stmt = source_scope_health.select()
     if failing_only:
         stmt = stmt.where(source_scope_health.c.consecutive_failures > 0)
@@ -245,17 +302,60 @@ async def source_health(conn: AsyncConnection) -> list[sa.Row]:
     )
 
 
-async def corpus_overview(conn: AsyncConnection) -> sa.Row:
+async def open_job_count(conn: AsyncConnection) -> int:
+    """How many postings are live. The eval harness wants this one number and nothing else."""
+    return int(
+        (
+            await conn.execute(
+                sa.text("SELECT count(*) FROM job WHERE closed_at IS NULL")
+            )
+        ).scalar_one()
+    )
+
+
+async def system_overview(conn: AsyncConnection, fresh_since: datetime) -> sa.Row:
+    """The corpus in one round trip: how much there is, and how much of it retrieval can use.
+
+    Facets and embeddings arrive asynchronously, so a stored, searchable posting can still be
+    invisible to the recommender. That gap is what this measures, rather than it looking like
+    poor recall.
+
+    Every count here is served by an index. A `count(DISTINCT company)` that nobody acted on cost
+    a seq scan plus a sort of every row: measured on 400k postings, 3.6s cold with a 13 MB
+    external merge sort, on every load of a page any user could open.
+
+    `total_estimate` is `reltuples`, because an exact "ever collected" is the one figure that
+    cannot avoid a full scan. It stays labelled as an approximation, and is NULL rather than 0
+    when ANALYZE has never run.
+    """
     return (
         await conn.execute(
-            sa.select(
-                sa.func.count().label("total"),
-                sa.func.count().filter(job.c.closed_at.is_(None)).label("open"),
-                sa.func.count()
-                .filter(job.c.first_seen_at > sa.func.now() - sa.text("interval '1 day'"))
-                .label("new_today"),
-                sa.func.count(sa.distinct(job.c.company)).label("companies"),
-            ).select_from(job)
+            sa.text(
+                """
+                SELECT
+                    (SELECT count(*) FROM job WHERE closed_at IS NULL) AS open_jobs,
+                    (SELECT count(*) FROM job
+                      WHERE first_seen_at > now() - interval '1 day') AS new_today,
+                    -- NULL, not 0, when ANALYZE has never run: reltuples is -1 for
+                    -- "unknown" on a table nothing has analysed yet, and clamping that to zero
+                    -- reports an empty archive with total confidence. The page says it cannot
+                    -- estimate instead, exactly as the sweep estimate does with no history.
+                    (SELECT CASE WHEN reltuples < 0 THEN NULL ELSE reltuples::bigint END
+                       FROM pg_class WHERE oid = 'job'::regclass) AS total_estimate,
+                    -- The denominator coverage is measured against: job_embedding holds
+                    -- postings open AND inside the horizon, so comparing it to open_jobs
+                    -- reports a permanent shortfall that is the policy, not a backlog.
+                    (SELECT count(*) FROM job j
+                      WHERE j.closed_at IS NULL
+                        AND COALESCE(j.posted_at, j.first_seen_at) > :fresh_since) AS fresh_jobs,
+                    (SELECT count(*) FROM job j JOIN job_facet f ON f.job_id = j.id
+                      WHERE j.closed_at IS NULL AND f.derive_version > 0) AS derived,
+                    (SELECT count(*) FROM job_embedding) AS embedded,
+                    (SELECT count(DISTINCT embedding_version)
+                       FROM job_embedding) AS vector_spaces
+                """
+            ),
+            {"fresh_since": fresh_since},
         )
     ).one()
 
@@ -272,32 +372,6 @@ async def description_coverage(conn: AsyncConnection) -> int:
         ).scalar_one()
         or 0
     )
-
-
-async def derived_coverage(conn: AsyncConnection, fresh_since: datetime) -> sa.Row:
-    """How much of the open corpus is actually usable by retrieval. Facets and embeddings arrive
-    asynchronously, so a stored, searchable job can still be invisible to the recommender."""
-    return (
-        await conn.execute(
-            sa.text(
-                """
-                SELECT
-                    (SELECT count(*) FROM job WHERE closed_at IS NULL) AS open_jobs,
-                    -- The denominator coverage is measured against: job_embedding holds
-                    -- postings open AND inside the horizon, so comparing it to open_jobs
-                    -- reports a permanent shortfall that is the policy, not a backlog.
-                    (SELECT count(*) FROM job j
-                     WHERE j.closed_at IS NULL
-                       AND COALESCE(j.posted_at, j.first_seen_at) > :fresh_since) AS fresh_jobs,
-                    (SELECT count(*) FROM job j JOIN job_facet f ON f.job_id = j.id
-                     WHERE j.closed_at IS NULL AND f.derive_version > 0) AS derived,
-                    (SELECT count(*) FROM job_embedding) AS embedded,
-                    (SELECT count(DISTINCT embedding_version) FROM job_embedding) AS vector_spaces
-                """
-            ),
-            {"fresh_since": fresh_since},
-        )
-    ).one()
 
 
 async def ensure_schedule(conn: AsyncConnection) -> None:

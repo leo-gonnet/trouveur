@@ -95,7 +95,7 @@ that runs periodically, plus a rich but simple web UI. Multi-user (for now, a fe
 ### Two windows, and they are not the same question
 
 - **`retrieval_horizon_days` is RETENTION**: how old an advert may be and how long `job_embedding`
-  keeps its vector. Seven days. Read by retrieval, the embed queue, the pruner and the dashboard,
+  keeps its vector. Seven days. Read by retrieval, the embed queue, the pruner and Operations,
   which all have to agree.
 - **`retrieve.NEW_ARRIVALS_HOURS` is the CANDIDATE WINDOW**: how far back a run held after a sweep
   looks. Twenty-five hours, so a run starting late cannot drop a sliver of the day. A posting gets
@@ -419,7 +419,7 @@ Rules that follow:
 
 - **Managing the crawl set is a CLI action, not a web one** (`trouveur tenants …`). It is shared by
   every user, so enlarging it is an operator decision — exposing it per user means one person
-  adding five hundred boards and everyone paying the crawl cost. The dashboard shows it read-only.
+  adding five hundred boards and everyone paying the crawl cost. Operations shows it read-only.
   Managing ACCOUNTS is the opposite and is a web action (`/users`), because the cost is bounded by
   the credit that page grants: an account costs what it is given, a board costs everybody.
 - **A discovery pass inserts `enabled = false`, `origin = 'discovered'`.** It proposes; a human
@@ -532,10 +532,14 @@ nothing that credit does not: one user's empty balance still cannot touch anothe
   corrected by a negative one rather than by an edit.
 - **Spend is metered per DAY** (`user_llm_spend.period_day`), because the ceiling is a day. Tested
   against a running monthly total a daily ceiling would never lift.
-- **An admin needs no credit, and is still metered.** `Spending.unlimited_credit` exempts them from
-  the balance and from nothing else: their own daily ceiling applies, and an unlimited balance is not
-  a reason to be unmetered. They are shown no balance rather than a zero, which would read as a
-  problem to fix.
+- **An admin holds credit exactly like everybody else.** There is no exemption and re-adding one
+  is a regression. `Spending.unlimited_credit` bought nothing a grant does not -- an admin tops
+  their own account up on the Users page in two clicks, and that top-up is recorded in the
+  append-only grant table rather than being an invisible permission -- while costing a branch
+  through the whole cost path and three more in the UI, each reachable by one account in the
+  installation and therefore exercised by nobody. The one consequence is real and intended: a
+  fresh installation scores nothing until its first admin grants themselves credit, which the
+  out-of-credit banner says on every page.
 - **Bump `profile.version` only for fields that change what a good match is** (`SCORING_FIELDS`). A
   cost setting such as `scoring_enabled` must not invalidate a cache and bill a re-score.
 - **Text the reranker reads is multiplied by every posting scored; text expansion reads is not.** This
@@ -594,7 +598,7 @@ nothing that credit does not: one user's empty balance still cannot touch anothe
   in silence. It lives beside `scoring_enabled` and is not a `SCORING_FIELD`: declining an email
   must not bill a re-score.
 - **Recommendations shows no run statistics at all.** `retrieved`/`passed`/`scored` and the cost
-  of the last run are diagnostics; they live on the dashboard. The page is a reading list, and
+  of the last run are diagnostics; they live on Operations. The page is a reading list, and
   "450 candidates" is not a sentence a reader can act on.
 - **An empty balance, or a missing installation key, is a full-width `.banner warn` on every
   page**, set by the session middleware (`request.state.out_of_credit`,
@@ -634,6 +638,24 @@ nothing that credit does not: one user's empty balance still cannot touch anothe
 - **The score is the first thing on a row and it is coloured** (`score_pill`, `.score.high/.mid/
   .low`). The band names in the macro and in `app.css` must match: they did not, and every score
   of 65 and over rendered with no colour at all for as long as that went unnoticed.
+- **A row's actions are revealed on hover; a posting the reader FILED shows a tag, not the
+  control.** Four controls on every row, used on almost none of them, were a quarter of the
+  row's width of permanent furniture. They live in a gutter `.job-main` reserves whether they
+  are shown or not, so revealing them cannot reflow the list under the pointer, and
+  `pointer-events` rather than `visibility` is what stops an invisible button being clicked --
+  `visibility: hidden` would make them unfocusable and `:focus-within` could then never fire,
+  which is the whole keyboard path. Leaving the control on show for a saved or applied posting
+  was tried and is worse: four controls appearing on some rows and not others punch holes down
+  a list whose evenness is the point. So the resting state is one `.filed` tag, pulled out of
+  the flow to the right edge the control will occupy -- in flow it is pushed left by the width
+  of two things nobody can see. It is rendered by `_state.html` and never by `job_card`:
+  `hx-swap` replaces only that span, so a copy in the card would still read "saved" after the
+  reader pressed "dismissed". Guarded by a test.
+- **A touch layout is keyed on `(hover: none) and (pointer: coarse)`, never on `hover` alone.**
+  A headless browser reports `hover: none` with no pointer at all, so on the shorter query every
+  screenshot and every rendering check silently measures the touch layout instead of the one
+  people use -- and a hover-revealed control looks permanently broken in the only pictures anyone
+  takes of it.
 - **Profile list fields are picked, not typed.** `countries` is validated against what derivation
   can produce (`COUNTRY_NAMES`, pinned to `vocab.COUNTRIES` by a test). Free text there once
   saved `Remote` and then failed validation on every read: the Profile page and the match run
@@ -743,14 +765,22 @@ nothing that credit does not: one user's empty balance still cannot touch anothe
   you". Everything else that was there was pipeline vocabulary.
 - **Templates never re-derive.** Read stored facets. A template that parses a location or infers a
   work mode is a second implementation of a question `derive.py` already answered.
-- **The dashboard must surface what fails silently**: partition overflow, sweep completeness, the
+- **Operations must surface what fails silently**: partition overflow, sweep completeness, the
   gap between stored and recommendable, queue depth, and more than one embedding version present.
+- **More than one embedding version is an ALARM, not a measurement.** One vector space is the
+  only correct answer, so stating it every day was a row of noise; it is shown only when it is
+  wrong. It can only be wrong DURING a model change, and that is exactly when it matters:
+  `_DENSE_SQL` does **not** filter on `embedding_version`, so it orders every row in
+  `job_embedding` by distance to a query vector from the NEW model, and the rows still holding
+  the old one are compared across two spaces and rank by nothing at all. A re-embed is hours of
+  CPU, so that is hours of nightly editions quietly polluted with no other symptom anywhere.
 - **A run must be watchable while it runs, not only once it is over.** The runner writes
   `sources_total`/`sources_done`/`current_source` on `pipeline_run` as it goes, and the sweep sink
   updates `source_sweep.documents_seen` per batch. Without those a long source and a wedged one
   look identical — which is exactly how a Workday sweep sat for an hour before anyone noticed.
 - **Estimate only from measured history, and say so when there is none.** The remaining time on
-  the Scans page is the sum of each pending source's median duration over its own last sweeps.
+  the Operations page is the sum of each pending source's median duration over its own last
+  sweeps.
   Averaging *across* sources would be fiction: a board is seconds and Arbeitsagentur is half an
   hour. A source with no history contributes nothing and the page says it cannot estimate yet.
 - **Cancellation is a request, not a kill** (`pipeline_run.cancel_requested`). A queued run ends
@@ -765,15 +795,59 @@ nothing that credit does not: one user's empty balance still cannot touch anothe
   value already exists and a second source could disagree with the first. The package version
   is static and says nothing about a deploy. A tag that is not a commit is shown unlinked.
 - **The nav is the reader's pages; the account menu is everything else.** Recommendations, Search,
-  Dashboard, Profile and How it works sit on the left; Settings, and for an admin Scans and Users,
-  sit in a `<details class="menu">` under the username on the right, with the credit balance as a
-  `pill` beside it. `<details>` because a dropdown is not worth a script: it closes on the next
-  navigation or on a second click, and nothing in it needs dismissing on an outside click.
+  Profile and How it works sit on the left; Settings, and for an admin Operations and Users, sit
+  in a `<details class="menu">` under the username on the right, with the credit balance as a
+  `pill` beside it. `<details>` because the PANEL needs no script: it opens, closes on a second
+  click and closes on the next navigation by itself. **Escape and an outside click are handled in
+  `app.js`**, because the element comes with neither and anything that behaves like a menu is
+  expected to have both -- left open it sits there behind whatever the reader does next, which no
+  other menu on the web does. Both are a handful of lines in a file that already loads on every
+  page for the htmx error toast. Escape returns focus to the trigger, or focus is left on an
+  element that has just been hidden; the outside-click handler tests `menu.contains`, which is
+  what stops it fighting the element's own toggle.
+- **The account trigger is a control and is drawn as one**: a monogram from the display name, the
+  name, and a caret that turns, over a surface that appears on hover and is HELD while the panel
+  is open -- the only thing on screen tying an open panel to what opened it. Plain text with a
+  caret read as a label that happened to be clickable, with no hit area beyond the glyphs. The
+  monogram is derived and never uploaded: an avatar nobody can set is a thing to store, moderate
+  and serve, and the initial already separates the accounts one installation holds. Surfaces
+  drawn on the bar are `--on-primary-soft`/`--on-primary-softer`, translucent so they track the
+  bar instead of being a second colour to keep in step with it.
+- **There is no reader dashboard, and adding one back is a regression.** Everything that was on
+  it was operator diagnostics -- partition overflow, embed queue depth, vector spaces in use, the
+  whole crawl set -- none of which a reader can do anything about, and the two figures that were
+  theirs are already elsewhere: the balance in the topbar on every page, the day's spend on
+  Settings beside the ceiling it is measured against. `retrieved`/`scored` are run statistics and
+  are banned from a reader's page for the same reason they are banned from Recommendations.
+  `/dashboard` is gone outright, not redirected. A landing page would also put a screen in front
+  of the one thing anybody comes for: `/` redirects to Recommendations, and the only question a
+  home page could answer -- is there anything new today -- is already answered in context by the
+  edition dropdown.
 - **Admin-only is enforced by PREFIX in the session middleware** (`ADMIN_PREFIXES`), never per
   route, for the same reason the session check is: a per-handler check is the line somebody forgets
-  on the next route, and the route that leaks is always the newest one. Scans owns the shared
+  on the next route, and the route that leaks is always the newest one. Operations owns the shared
   schedule and queues real sweeps, so it is not one reader's to retime; Users creates accounts and
-  grants credit. Dashboard stays open — it is read-only diagnostics plus the reader's own spend.
+  grants credit.
+- **Operations is ONE page, not a Scans page and a Dashboard.** Everything on it answers the same
+  question -- is the corpus being collected properly -- and only an operator can act on any of it,
+  so two pages meant reading both to answer once.
+- **A diagnostic figure must be worth what it costs to produce.** `corpus_overview` carried
+  `count(DISTINCT company)`, which nobody acted on: a seq scan plus a sort of every row of a table
+  that is over 2 GB in production. Measured on 400k postings it was 3.6s cold, spilling a 13 MB
+  external merge sort onto the disk the runner and the sweeps are using, on every load of a page
+  any user could open; the whole page was 1,363ms of serial database work and is now 83ms. Every
+  count on the page is served by an index, and the one that cannot be -- "ever collected" -- is
+  `pg_class.reltuples`, shown as an approximation, and **NULL rather than 0 when ANALYZE has
+  never run**: reltuples is -1 for "unknown", and clamping that to zero reports an empty archive
+  with total confidence.
+- **Tenant health lists the boards needing a DECISION, never the crawl set.** There is no index
+  of tenants anywhere, so a board can 404 every night for ever with no symptom but an integer
+  going up, and nothing retires it automatically because a streak is as likely to be a provider
+  outage. So the page shows what is failing and what a discovery pass has proposed, worst first,
+  capped, with a count of the rest; `trouveur tenants list` is where the whole set is read.
+  Rendering all of it was measured at 10,000 tenants: 1.9 MiB of HTML and 10,769 table rows in a
+  page that otherwise weighs 39 KB, with the ~680 failing boards buried among them -- the same
+  failure `list_tenants`'s ordering was written to fix, two orders of magnitude worse.
 - **An admin account is the FIRST account**, decided in `users_q.create_user` when the table is
   empty, because at that moment there is provably nobody else it could be. Every later account is
   created by an admin and is not one. A test fixture must pass `is_admin` explicitly or it silently
@@ -801,10 +875,58 @@ nothing that credit does not: one user's empty balance still cannot touch anothe
   row, so no route passes a name at all.
 - **A login failure logs the user id, never the address.** A log file is not the place to
   accumulate people's email addresses, and the id is what anyone reading it would look up anyway.
-- **Styling lives in one file:** `web/static/app.css`, light only, one system sans-serif, the
-  logo's navy on white. The logo's red-orange is used in the logo and nowhere else, and there
-  is no display font: that combination read as another product's theme. No inline `<style>`
-  blocks beyond one-off layout tweaks.
+- **Styling lives in one file:** `web/static/app.css`, light only, **Inter**, the logo's navy on
+  white. The logo's red-orange is used in the logo and nowhere else, and there is still no
+  display font and no second face: that combination read as another product's theme. One text
+  face, self-hosted. `system-ui` was the rule until the page was looked at on three machines and
+  rendered in three typefaces -- SF, Segoe, and whatever the distribution shipped -- so nobody
+  could see what anybody else saw, and the weakest of the three was the one development happened
+  on. No inline `<style>` blocks beyond one-off layout tweaks.
+- **Nothing the browser loads comes from another origin.** htmx and the font are vendored into
+  `static/vendor/` with their licences and `VENDOR.md`. A CDN on the critical path tells a third
+  party the reader's IP, page and timing on every load of a product whose whole content is
+  somebody's job search -- and when it is slow, proxied or down, htmx never arrives and every
+  state button silently does nothing. Neither failure appears in a log anyone reads, so it is a
+  test (`test_no_template_or_stylesheet_reaches_an_external_origin`), not a convention. Links a
+  reader clicks are a different thing and are fine.
+- **A font is declared per unicode-range, so an ordinary page fetches one subset.** `latin-ext`
+  exists because the corpus is European and names arrive as their boards spell them -- without
+  it a Kraków or a Timișoara falls back to the system font mid-word.
+- **The topbar is sticky and every full-bleed band centres its contents in `.band`.** An edition
+  is ~2400px tall, so the nav, the balance and the account menu were otherwise reachable only
+  from the top. Sticky is not a scroll container, so the page is still the only thing that
+  scrolls. `main` caps at `--measure` and the bands' contents must cap at the same value or the
+  brand sits at x=24 while the first job title starts at x=576 on a wide screen, and the header
+  reads as a different layout stacked on the content. **`.band` is not `.bar`** -- that name was
+  already the progress bar.
+- **A failed htmx swap must say so** (`static/app.js`, `.toast`). htmx leaves the DOM alone and is
+  silent on an error, so pressing "saved" against a 500 or a dropped connection looked exactly
+  like pressing it successfully, and the reader believed they had filed something nothing
+  recorded.
+- **A lapsed session is sent away with `HX-Redirect`, never with a 303** (`_auth_redirect`).
+  htmx follows a redirect transparently, so the login page came back as a 200 and was swapped
+  into whatever the button targeted -- an entire login form inside a 28px control. Guarded by a
+  test, on the session middleware's three exits, because those are the ones that fire underneath
+  a button rather than in answer to a click on a link.
+- **The mobile nav wraps; it does not scroll sideways.** Scrolling clipped the last two
+  destinations with nothing to say they were there, and `overflow-x: auto` painted a scrollbar
+  track across the navy bar on every phone.
+- **`input` is `width: 100%`, so a control that must size itself needs `form.inline`.** The
+  grant form on Users carried `size="5"` and `size="12"` and the global rule ignored both: the
+  amount, the note and the button each filled the table cell and stacked, three rows of
+  furniture per account beside a one-line admin row. Nothing errors, and it only shows at the
+  one width the markup never anticipated.
+- **A hint that FOLLOWS something is a footnote to it and takes its margin above.** Listed per
+  preceding element (`table`, `form`, `.kpis`, `.bar`), because the default `.hint` margin is
+  below -- which is right for the lead paragraph of a section and wrong for every note after a
+  form, where it sat against the Save button it was not about.
+- **The account menu says WHICH account.** The summary shows the display name, because an
+  address would otherwise sit in every screenshot; the panel is shut until asked, so the login
+  itself belongs inside it -- the only place outside Settings that answers "who am I". Admin
+  destinations are named as a set rather than listed as more of the reader's own pages, and Log
+  out is ruled off: leaving is not another destination, and it sat a pixel from a link. Anything
+  added inside the panel must be given the page's colours back -- `.topbar .hint` and
+  `.topbar a` are `primary-fg`, so a hint dropped in there renders white on white.
 - **The design system is the token block and the component list at the top of `app.css`.** A
   template uses those classes and nothing else: no colour, radius or spacing is written in a
   template, and a new look is a new component in `app.css`, not a one-off. The vocabulary is
@@ -817,7 +939,9 @@ nothing that credit does not: one user's empty balance still cannot touch anothe
   never caps its own height; a nested scrollbar was tried and rejected. Dashboard-style pages
   are boxed sections (`.section`); recommendations and search are a mail-style list of rows
   (`.results` / `.job`), not cards.
-- No build step, no Node, on purpose — plain CSS and HTMX only.
+- No build step, no Node, on purpose — plain CSS and HTMX only. Vendored assets are committed
+  rather than fetched at build time for the same reason: a fresh clone works offline, and local
+  development loads exactly the bytes production serves.
 
 ## Database rules
 
@@ -995,8 +1119,9 @@ still holds the old readings and no re-derive has been scheduled.
   - **A user with no credit makes no paid call at all**, expansion included, and retrieval still
     runs. Asserted over the whole run, not over the scorer: gating the rerank alone still bills
     three expansion calls per profile version to somebody who was granted nothing.
-  - **An admin needs no credit and is still held to their own daily ceiling**, and the run reports
-    which of the two limits stopped it.
+  - **An admin with no credit makes no paid call**, exactly like any other account, and the run
+    reports which of the two limits stopped it. Asserted over `run_for_user`: the exemption used
+    to be decided in `_allowance`, so a test below that gate passes with it back in place.
   - **A scheduled run whose key is rejected is FAILED with the reason on the run**, not SUCCESS
     with `scored: 0`. Asserted over `_execute`, because the hole was in the runner and the
     match pipeline had recorded the error correctly all along.
@@ -1048,6 +1173,10 @@ still holds the old readings and no re-derive has been scheduled.
     lists two editions rather than one.
   - **A closed posting stays in its edition** and the dropdown's count still matches the rows.
   - **Recommendations carries no heading, no run statistics and no button.**
+  - **No template or stylesheet names an external origin for a subresource**, and the session
+    middleware sends an htmx caller away by header rather than by a redirect it would swap in.
+  - **A filed posting's resting tag is rendered by the fragment htmx swaps**, never by the card
+    around it, or it keeps saying "saved" after the reader pressed "dismissed".
   - **The scan hour is a wall-clock hour and does not drift with DST** -- `run_hour = 7` is seven
     in the morning in January and in July alike.
   - **A posting's age is counted in calendar days, not elapsed hours**: measured as elapsed
@@ -1227,8 +1356,10 @@ chore(deploy): pin the postgres image to pg16
 ```
 
 Types: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`, `build`. Describe the problem and the
-evidence, not a diff summary. Never commit generated files or secrets -- `places.tsv.gz` is the
-one exception, see Web UI.
+evidence, not a diff summary. Never commit generated files or secrets. Two things are
+deliberately committed and neither is generated by us: `places.tsv.gz`, which is vocabulary, and
+`web/static/vendor/`, which is third-party code and fonts we serve from our own origin -- both
+explained in Web UI, the second with its provenance and licences in `vendor/VENDOR.md`.
 
 ## Keeping this file updated
 

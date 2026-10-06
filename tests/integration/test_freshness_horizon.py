@@ -3,7 +3,7 @@
 A job radar that surfaces a vacancy a fortnight late has, for anything competitive, found
 nothing. The horizon is how that is enforced, and it is enforced in four places that have to
 agree: what retrieval will return, what the queue considers worth embedding, what the pruner
-removes, and what the dashboard measures coverage against.
+removes, and what Operations measures coverage against.
 """
 
 from __future__ import annotations

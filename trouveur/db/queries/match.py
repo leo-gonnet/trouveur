@@ -695,19 +695,3 @@ async def put_query_expansion(
         )
     )
 
-
-async def match_stats(conn: AsyncConnection, user_id: int) -> sa.Row:
-    return (
-        await conn.execute(
-            sa.text(
-                """
-                SELECT count(*) AS retrieved,
-                       count(*) FILTER (WHERE llm_score IS NOT NULL) AS scored,
-                       count(*) FILTER (WHERE state = 'saved') AS saved,
-                       count(*) FILTER (WHERE state = 'applied') AS applied
-                FROM user_job_match WHERE user_id = :user_id
-                """
-            ),
-            {"user_id": user_id},
-        )
-    ).one()

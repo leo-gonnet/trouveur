@@ -388,13 +388,13 @@ async def run_eval(limit: int = 200, rerank: bool = False) -> Scorecard:
     await drain_everything()
 
     async with connect() as conn:
-        overview = await admin_q.corpus_overview(conn)
+        open_jobs = await admin_q.open_job_count(conn)
         coverage = await admin_q.description_coverage(conn)
 
     card = Scorecard(
         limit=limit,
         embedding_version=embedding_version(),
-        corpus_open=int(overview.open),
+        corpus_open=open_jobs,
         corpus_with_description=int(coverage),
     )
     for persona in load_personas():

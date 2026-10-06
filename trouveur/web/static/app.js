@@ -109,3 +109,55 @@
 
   document.querySelectorAll(".tags").forEach(enhance);
 })();
+
+// htmx leaves the DOM untouched and says nothing when a swap fails, so pressing a state button
+// against a 500 or a dropped connection looks exactly like pressing it successfully.
+(function () {
+  let holder = null;
+  let timer = null;
+
+  function show(message) {
+    if (!holder) {
+      holder = document.createElement("div");
+      holder.className = "toast";
+      holder.setAttribute("role", "status");
+      holder.setAttribute("aria-live", "polite");
+      document.body.appendChild(holder);
+    }
+    holder.textContent = message;
+    holder.hidden = false;
+    window.clearTimeout(timer);
+    timer = window.setTimeout(() => { holder.hidden = true; }, 6000);
+  }
+
+  document.body.addEventListener("htmx:responseError", (event) => {
+    const status = event.detail.xhr.status;
+    show(status === 404
+      ? "That posting is no longer there. Reload the page."
+      : `That did not save (error ${status}). Nothing was changed; try again.`);
+  });
+  document.body.addEventListener("htmx:sendError", () => {
+    show("Could not reach Trouveur. Nothing was changed; check your connection.");
+  });
+  document.body.addEventListener("htmx:timeout", () => {
+    show("That timed out. Nothing was changed; try again.");
+  });
+})();
+
+// <details> opens, closes on a second click and closes on the next navigation by itself. It does
+// not come with these two, and `contains` is what keeps them from undoing the click that opened it.
+(function () {
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    document.querySelectorAll("details.menu[open]").forEach((menu) => {
+      menu.open = false;
+      menu.querySelector("summary")?.focus();
+    });
+  });
+
+  document.addEventListener("click", (event) => {
+    document.querySelectorAll("details.menu[open]").forEach((menu) => {
+      if (!menu.contains(event.target)) menu.open = false;
+    });
+  });
+})();
