@@ -10,7 +10,7 @@ import asyncio
 import logging
 from collections.abc import Sequence
 from dataclasses import asdict
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from trouveur import clock, versions
 from trouveur.config import Settings, get_settings
@@ -19,16 +19,20 @@ from trouveur.db.queries import admin as admin_q
 from trouveur.ingest import pipeline as ingest
 from trouveur.ingest import workers
 from trouveur.match import pipeline as matching
+from trouveur.match import retrieve
 from trouveur.models import RunStatus, RunTrigger
 from trouveur.notify import send_digests
 from trouveur.sources import build_sources
 from trouveur.sources.http import PoliteClient
-from trouveur.work import WorkKind, refill_all, release_stale
+from trouveur.work import WorkKind, refill_all, release_stale, waiting_since
 
 log = logging.getLogger(__name__)
 
 TICK_SECONDS = 20
 _DETAIL_PER_TICK = 40
+# How long a scheduled run waits for its own sweep to be prepared before matching anyway. Workday
+# alone is a detail fetch per posting at one a second, so a busy night is about an hour of it.
+MATCH_WAIT_LIMIT = timedelta(hours=2)
 
 # Embed is left out: its stale query would queue postings still waiting for a description, which
 # persist deliberately holds back, and a model change re-embeds the corpus for hours -- a decision
@@ -159,6 +163,7 @@ def _match_payload(matches: Sequence[matching.MatchReport]) -> list[dict]:
             "stopped_on_ceiling": match.stopped_on_ceiling,
             "stopped_on_credit": match.stopped_on_credit,
             "stopped_on_scores": match.stopped_on_scores,
+            "skipped": match.skipped,
             "errors": match.errors,
         }
         for match in matches
@@ -209,8 +214,7 @@ async def _execute(settings: Settings, run) -> None:
         log.info("run %s cancelled after %d source(s)", run.id, len(report.per_source))
         return
 
-    # Not gated on the queues being empty: a user should see today's postings as soon as they
-    # are usable, not once the last embedding in a 36k backlog has landed.
+    unprepared = await prepare_arrivals(settings)
     matches = await matching.run_all(settings)
     notified = 0
     if settings.smtp_host:
@@ -221,10 +225,37 @@ async def _execute(settings: Settings, run) -> None:
         "summary": report.summary(),
         "sources": {name: asdict(item) for name, item in report.per_source.items()},
         "matches": _match_payload(matches),
+        "unprepared": unprepared,
         "digests_sent": notified,
     }
     async with connect() as conn:
         await admin_q.finish_run(conn, run.id, status=status, report=payload, error=error)
+
+
+async def prepare_arrivals(settings: Settings) -> int:
+    """Work the queues until every posting the match is about to consider has its facets and its
+    vector, or MATCH_WAIT_LIMIT passes. Returns how many were still waiting.
+
+    Matching straight after the sweep saw none of what the sweep had just brought in: a posting
+    with no facets or no vector is invisible to retrieval, and by the next night it had left the
+    candidate window. Greenhouse, Ashby, Workday and Personio are swept first, and not one of
+    their postings had ever reached a nightly edition.
+
+    Only work that could run now counts, so an item backing off after an error, a paused source or
+    a parked item cannot hold the run. A round that moves nothing ends the wait: nothing will move
+    on the next one either, and a detail half that raised every round held a run for its whole
+    limit.
+    """
+    since = datetime.now(UTC) - timedelta(hours=retrieve.NEW_ARRIVALS_HOURS)
+    deadline = datetime.now(UTC) + MATCH_WAIT_LIMIT
+    while True:
+        async with connect() as conn:
+            waiting = await waiting_since(conn, since)
+        if not waiting:
+            return 0
+        if datetime.now(UTC) >= deadline or not any((await drain_queues(settings)).values()):
+            log.warning("matching with %d new posting(s) still unprepared", waiting)
+            return waiting
 
 
 async def _execute_match_only(settings: Settings, run) -> None:

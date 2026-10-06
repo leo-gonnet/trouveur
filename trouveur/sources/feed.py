@@ -66,8 +66,8 @@ async def sweep_feed(
             reached_end = True
             break
 
-        exhausted = False
         added = 0
+        in_window = 0
         for row in rows:
             job_id = identify(row)
             if not job_id:
@@ -76,11 +76,13 @@ async def sweep_feed(
             if external_id in seen_ids:
                 continue
             added += 1
-            posted = published_at(row)
-            if cutoff is not None and posted is not None and posted < cutoff:
-                exhausted = True
-                break
             seen_ids.add(external_id)
+            posted = published_at(row)
+            # Skipped, not stopped on: Arbeitnow pins a weeks-old posting above today's, and
+            # breaking on it collected nothing at all on 2026-09-29 while reporting success.
+            if cutoff is not None and posted is not None and posted < cutoff:
+                continue
+            in_window += 1
             pending.append(
                 RawDocument(
                     source=source,
@@ -96,7 +98,8 @@ async def sweep_feed(
             outcome.documents += BATCH
             del pending[:BATCH]
 
-        if exhausted:
+        # A whole page older than the window is its edge: at most one page past it, never years.
+        if cutoff is not None and added and not in_window:
             reached_end = True
             break
         # A full page of rows we already hold means the cursor is not advancing, whatever it

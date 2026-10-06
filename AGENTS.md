@@ -109,6 +109,12 @@ that runs periodically, plus a rich but simple web UI. Multi-user (for now, a fe
   `first_seen_at`.** One asks how old the ADVERT is, the other asks when WE got it, and folding
   them together drops every posting a board dated before we discovered it -- on the one run that
   could ever have offered it. Guarded by a test.
+- **A scheduled run matches only once its sweep is prepared** (`service.prepare_arrivals`): facets,
+  dedup and vector for every posting in the candidate window, up to `MATCH_WAIT_LIMIT`. It used to
+  match straight after the sweep, when none of that sweep's postings had facets or a vector yet,
+  and by the next night they had left the window -- Greenhouse, Ashby, Workday and Personio, swept
+  first, never reached a nightly edition. Only work that could run now is waited for, so an item
+  backing off, a paused source or a refill of the older corpus cannot hold the run.
 - **`pending_rerank` is bounded by what the run retrieved, not by an age rule of its own**, so
   "how far back do we look" is answered in exactly one place. A posting the scorer stopped short of
   is simply not retrieved tomorrow.
@@ -338,11 +344,16 @@ window, and therefore **closes nothing**. Only a backfill that pages to the end 
   published today), and only the unboosted tail is date-descending. Breaking on the first
   out-of-window row — which is what `sweep_feed` does for every other feed — stops it after about
   thirty postings.
+- **Arbeitnow pins a weeks-old posting above today's** (48 days old at the top of page one on
+  2026-09-29). Breaking on the first out-of-window row collected nothing that night and the sweep
+  still reported success, so `sweep_feed` skips an old row and ends the walk on the first PAGE
+  with nothing inside the window -- one page past the edge, never the years of history behind it.
 - **`day_range=N` is a real server-side date filter** and is how Workable's window is narrowed
   instead (`sweep_feed(server_side_window=True)`). Unlike Arbeitsagentur's `veroeffentlichtseit`
   it validates: a non-number and a negative are both HTTP 400. **`day_range=0` means no filter at
   all** — the whole ~170 000-posting corpus — so it must never be reached by rounding a small
   window down. Measured 2026-09-27: `1` → 1 247 postings, `7` → 19 958, `30` → 53 901.
+  The daily delta asks for **2**: seven days was ~1 000 requests and HTTP 429 every night.
 - **A page whose rows we already hold means the cursor is stuck**, whatever the cursor says, and
   `sweep_feed` abandons the walk there. It is not an end of corpus and never makes a scope
   closable — a stalled cursor that reads as "complete" would retire everything the feed holds.
@@ -933,6 +944,8 @@ still holds the old readings and no re-derive has been scheduled.
     boosted out-of-window posting rather than stopping on it.
   - **A feed whose cursor stops advancing is abandoned, not paged to `MAX_PAGES`**, and the stall
     leaves the scope unclosable.
+  - **A pinned old posting above today's does not end a delta sweep**, and the walk stops one
+    page past the window rather than following the cursor on.
   - **A delta sweep reports no closable scope**, and a capped single-page feed reports none even on
     a backfill.
   - **A bare top-level array board is read as the list itself** (Lever, Breezy, Rippling), and an
@@ -982,6 +995,9 @@ still holds the old readings and no re-derive has been scheduled.
   - **A scheduled run whose key is rejected is FAILED with the reason on the run**, not SUCCESS
     with `scored: 0`. Asserted over `_execute`, because the hole was in the runner and the
     match pipeline had recorded the error correctly all along.
+  - **The nightly match waits for what the sweep brought in**, and an item backing off does not
+    hold it. **A profile with nothing to search for is skipped, not failed** -- it turned every
+    nightly run red while the real users had been matched.
   - **A daily ceiling counts today only** — yesterday's spend cannot hold today's run back, or the
     ceiling would never lift.
   - **A balance is grants minus spend, and a second grant adds to the first** rather than replacing

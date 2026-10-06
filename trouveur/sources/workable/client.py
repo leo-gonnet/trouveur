@@ -25,6 +25,10 @@ from trouveur.sources.parse import iso_datetime
 SOURCE = "workable"
 
 _JOBS_URL = "https://jobs.workable.com/api/v1/jobs"
+# Two days, not the seven the other feeds use: at a fixed 20 a page, seven days is ~1,000 requests
+# a night, and Workable answered HTTP 429 at about page 400 every night of 2026-09-25..29. Two
+# still covers one missed night.
+_DELTA_WINDOW = timedelta(days=2)
 
 
 class WorkableSource:
@@ -33,7 +37,7 @@ class WorkableSource:
     tenant_scoped = False
 
     def __init__(self, delta_window: timedelta | None = None) -> None:
-        self.delta_window = delta_window or timedelta(days=7)
+        self.delta_window = delta_window or _DELTA_WINDOW
 
     async def sweep(
         self, client: PoliteClient, sink: DocumentSink, *, backfill: bool = False

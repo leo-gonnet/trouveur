@@ -11,6 +11,7 @@ from trouveur.work.queue import (
     refill_all,
     release_stale,
     requeue_parked,
+    waiting_since,
 )
 
 __all__ = [
@@ -26,4 +27,5 @@ __all__ = [
     "refill_all",
     "release_stale",
     "requeue_parked",
+    "waiting_since",
 ]
