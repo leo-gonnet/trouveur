@@ -8,6 +8,7 @@ downstream may know which source a row came from.
 from __future__ import annotations
 
 import hashlib
+import re
 from datetime import datetime
 from decimal import Decimal
 from enum import StrEnum
@@ -16,6 +17,8 @@ from pydantic import BaseModel, Field
 
 from trouveur.models.text import normalize_for_hash
 from trouveur.versions import CONTENT_HASH_VERSION
+
+_EMPLOYER_NOISE = re.compile(r"[^a-z0-9]")
 
 
 class SalaryPeriod(StrEnum):
@@ -89,14 +92,19 @@ class CanonicalJob(BaseModel):
         return hashlib.sha256("|".join(parts).encode()).digest()
 
 
-def dedup_key(title: str, company: str | None) -> bytes:
+def dedup_key(title: str, company: str | None, board: str | None = None) -> bytes:
     """Fingerprint for 'the same role, posted again or posted elsewhere'.
 
     Only ever written to a MARKER column: two rows sharing a key stay two rows, so a wrong pass
     can be re-run instead of being unpickable. The place is deliberately not part of it: a copy
     that lost its location on the way through an aggregator is the role it was copied from, and
-    keyed on the town it could never be matched to it. Spaces in the company are ignored, because
-    aggregators write the board's slug ("wppmedia") for the name ("WPP Media").
+    keyed on the town it could never be matched to it.
+
+    The employer is the company's own board id when the posting came from one, and its name
+    otherwise, because aggregators name the employer by that id: Arbeitnow's "Ddome" is the board
+    `ddome`, whose postings call themselves "DataDome". Both are compared exactly, as letters and
+    digits only -- a looser match would join two companies that merely sound alike.
     """
-    parts = [normalize_for_hash(title), normalize_for_hash(company).replace(" ", "")]
+    employer = _EMPLOYER_NOISE.sub("", normalize_for_hash(board or company))
+    parts = [normalize_for_hash(title), employer]
     return hashlib.sha256("|".join(parts).encode()).digest()

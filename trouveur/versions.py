@@ -10,7 +10,7 @@ from __future__ import annotations
 DERIVE_VERSION = 7
 
 # Markers only; never merges or deletes rows.
-DEDUP_VERSION = 2
+DEDUP_VERSION = 3
 
 # The field set and encoding behind content_hash. Bumping invalidates every cached LLM score and
 # bills every user a full re-score, so bump it only when the hash input genuinely changed.

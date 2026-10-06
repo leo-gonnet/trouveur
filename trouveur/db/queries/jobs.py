@@ -93,7 +93,7 @@ async def load_for_dedup(conn: AsyncConnection, job_ids: Sequence[int]) -> list[
         return []
     return list(
         await conn.execute(
-            sa.select(job.c.id, job.c.title, job.c.company).where(
+            sa.select(job.c.id, job.c.title, job.c.company, job.c.scope).where(
                 job.c.id.in_(list(job_ids))
             )
         )

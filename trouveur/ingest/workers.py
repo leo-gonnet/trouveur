@@ -26,6 +26,7 @@ from trouveur.models import (
     SalaryQuote,
     dedup_key,
 )
+from trouveur.sources.base import GLOBAL_SCOPE
 from trouveur.sources.errors import SourceError
 from trouveur.sources.http import PoliteClient
 from trouveur.work import WorkKind, claim, complete, fail, pause_source
@@ -147,10 +148,20 @@ async def drain_dedup(conn: AsyncConnection, limit: int = 1000) -> int:
     if not items:
         return 0
     rows = await jobs_q.load_for_dedup(conn, [item.job_id for item in items])
-    markers = [(row.id, dedup_key(row.title, row.company)) for row in rows]
+    markers = [
+        (row.id, dedup_key(row.title, row.company, _board(row.scope))) for row in rows
+    ]
     await jobs_q.write_dedup_markers(conn, markers, versions.DEDUP_VERSION)
     await complete(conn, [item.id for item in items])
     return len(markers)
+
+
+def _board(scope: str | None) -> str | None:
+    """The company's own board id, when the posting came from one. Workday's scope is
+    `tenant:wdN:site`, and the tenant is the company."""
+    if not scope or scope == GLOBAL_SCOPE:
+        return None
+    return scope.split(":")[0]
 
 
 async def drain_detail(
