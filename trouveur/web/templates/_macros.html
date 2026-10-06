@@ -17,7 +17,7 @@
 {% macro places(job) %}
   {%- set names = (job.cities or []) | list -%}
   {%- if names -%}{{ names | join(', ') }}{%- endif -%}
-  {%- if job.countries -%}{% if names %} · {% endif %}{{ job.countries | join('/') }}{%- endif -%}
+  {%- if job.countries -%}{% if names %}, {% endif %}{{ job.countries | join('/') }}{%- endif -%}
   {%- if not names and not job.countries -%}location not stated{%- endif -%}
 {% endmacro %}
 
@@ -27,6 +27,14 @@
     {%- if job.salary_max_eur_year and job.salary_min_eur_year %}–{{ '{:,.0f}'.format(job.salary_max_eur_year) }}{% endif %}
     &euro;/yr
   {%- else -%}salary not stated{%- endif -%}
+{% endmacro %}
+
+{# Two decimals: four is how spend is stored, not how a balance reads. Anything that rounds
+   to nothing says so rather than showing $0.00. #}
+{% macro money(amount) %}
+  {%- set value = amount | float -%}
+  {%- if value > 0 and value < 0.01 -%}&lt;$0.01
+  {%- else -%}${{ '%.2f' % value }}{%- endif -%}
 {% endmacro %}
 
 {% macro kpi(value, label) %}
@@ -53,17 +61,17 @@
   <div class="job-main">
     <a class="job-title" href="/job/{{ job.public_id }}">{{ job.title }}</a>
     <p class="meta">
-      {{ job.company or 'company not stated' }} ·
+      <span class="who">{{ job.company or 'company not stated' }}</span> ·
       {{ places(job) }} ·
       {% if job.work_mode and job.work_mode != 'unknown' %}{{ job.work_mode }} · {% endif %}
-      {{ salary(job) }} ·
-      {{ job.source }} ·
-      <span class="age">{{ job.posted_at | posted_age }}</span>
-      {% if job.closed_at %} · <span class="pill bad">closed</span>{% endif %}
+      <span class="pay">{{ salary(job) }}</span> ·
+      <span class="age">{{ job.posted_at | posted_age }}</span> ·
+      {{ job.source }}
+      {%- if job.closed_at %} <span class="pill bad">closed</span>{% endif %}
     </p>
-    {% if job.llm_reason %}<p class="reason">{{ job.llm_reason }}</p>{% endif %}
-    {% if job.llm_red_flags %}
-      <p class="flags">{% for flag in job.llm_red_flags %}<span class="pill warn">{{ flag }}</span>{% endfor %}</p>
+    {% if job.llm_reason or job.llm_red_flags %}
+      <p class="reason">{{ job.llm_reason }}
+        {%- for flag in job.llm_red_flags %} <span class="pill warn">{{ flag }}</span>{% endfor %}</p>
     {% endif %}
   </div>
   <div class="actions">

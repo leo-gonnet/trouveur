@@ -221,7 +221,7 @@ async def test_the_runner_refills_rows_below_the_shipped_version_once(
     assert parked == 1
 
 
-async def _funded_user(*, credit="5", ceiling="5", admin=False):
+async def _funded_user(*, credit="5", ceiling="5", is_admin=False):
     """A user with matches waiting to be scored and the means to pay for scoring them.
 
     `credit` and `ceiling` are separate on purpose: they are the two independent limits, and a test
@@ -231,7 +231,7 @@ async def _funded_user(*, credit="5", ceiling="5", admin=False):
     from trouveur.db.queries import match as mq
     from trouveur.db.queries import users as uq
 
-    user_id, profile = await seed_user(title="Process Engineer")
+    user_id, profile = await seed_user(title="Process Engineer", is_admin=is_admin)
     # The ceiling is read off the profile the scorer is handed, so it is set here rather than
     # written and read back: the column's round trip is test_queries_execute's job.
     profile = profile.model_copy(update={"daily_ceiling_usd": Decimal(ceiling)})
@@ -255,7 +255,7 @@ async def _funded_user(*, credit="5", ceiling="5", admin=False):
 
     # What `_allowance` would have returned. Built rather than called, because these tests exercise
     # the scorer and not the gate in front of it.
-    return user_id, profile, Spending(api_key="sk-test", unlimited_credit=admin), job_ids
+    return user_id, profile, Spending(api_key="sk-test"), job_ids
 
 
 async def test_one_failed_call_does_not_lose_the_rest_of_the_wave(
@@ -467,47 +467,43 @@ async def test_a_user_with_no_credit_buys_nothing_at_all(
     assert report.retrieved > 0, "retrieval is free and must run regardless"
 
 
-async def test_an_admin_needs_no_credit_but_is_still_capped_by_their_own_ceiling(
+async def test_an_admin_holds_credit_like_everybody_else(
     clean_db, gh_board, aa_listing, aa_detail, monkeypatch
 ):
-    """An admin grants credit and has none of their own, so the balance cannot apply to them. The
-    daily ceiling still does: an unlimited balance is not a reason to be unmetered."""
-    from trouveur.config import get_settings
+    """Re-adding the admin exemption is the regression this catches.
+
+    `Spending.unlimited_credit` was a branch through the whole cost path and three more in the UI,
+    reachable by one account in the installation and therefore exercised by nobody. It bought
+    nothing a grant does not: an admin tops their own account up on the Users page in two clicks,
+    and that top-up is recorded in the append-only grant table instead of being invisible.
+
+    Asserted over `run_for_user`, not over the scorer: the exemption used to be decided in
+    `_allowance`, so a test below that gate would pass with it back in place.
+    """
     from trouveur.db.engine import connect
-    from trouveur.match import llm, pipeline, rerank
+    from trouveur.db.queries import users as users_q
+    from trouveur.match import expand, pipeline, rerank
 
     await seed_corpus(gh_board, aa_listing, aa_detail)
-    user_id, profile, spending, job_ids = await _funded_user(
-        credit="0", ceiling="5", admin=True
-    )
-    assert spending.unlimited_credit is True
-
-    async def score_one(settings, prof, candidate, **kwargs):
-        return (
-            rerank._Score(score=80, reason="x"),
-            llm.Usage(tokens_in=500, tokens_out=40, cost_usd=Decimal("0.0001")),
+    user_id, _, _, _ = await _funded_user(credit="0", ceiling="5", is_admin=True)
+    async with connect() as conn:
+        assert (await users_q.get_user(conn, user_id)).is_admin is True, (
+            "the fixture did not actually create an admin, so this asserts nothing"
         )
 
-    monkeypatch.setattr(rerank, "score_one", score_one)
+    async def refuse(*args, **kwargs):
+        raise AssertionError("an admin with no credit may make no paid call either")
 
-    # The ceiling first, while nothing has been scored yet: a run that scored everything would
-    # leave nothing pending, and the second half would pass by having nothing to buy.
-    capped = profile.model_copy(update={"daily_ceiling_usd": Decimal(0)})
-    report = pipeline.MatchReport(user_id=user_id)
-    async with connect() as conn:
-        assert await pipeline._score_pending(
-            conn, get_settings(), capped, spending, report, job_ids
-        ) == []
-    assert report.stopped_on_ceiling is True, "an admin's own ceiling did not apply"
-    assert report.stopped_on_credit is False, "credit cannot stop an admin who needs none"
+    monkeypatch.setattr(rerank, "score_one", refuse)
+    monkeypatch.setattr(expand, "expand_with_model", refuse)
+    monkeypatch.setattr(expand, "expand_adverts", refuse)
+    monkeypatch.setattr(expand, "summarise_background", refuse)
 
-    report = pipeline.MatchReport(user_id=user_id)
-    async with connect() as conn:
-        scored = await pipeline._score_pending(
-            conn, get_settings(), profile, spending, report, job_ids
-        )
-    assert len(scored) == len(job_ids), "an admin was stopped by a balance they do not need"
-    assert report.stopped_on_credit is False
+    report = await pipeline.run_for_user(user_id, whole_horizon=True)
+
+    assert report.scored == 0
+    assert report.cost_usd == 0
+    assert report.retrieved > 0, "retrieval is free and must run for an admin too"
 
 
 async def test_credit_runs_out_before_the_ceiling_does_and_says_which(

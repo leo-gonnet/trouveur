@@ -72,13 +72,10 @@ class Spending:
     """
 
     api_key: str
-    # An admin grants credit and needs none of their own. Their daily ceiling still applies,
-    # because an unlimited balance is not a reason to be unmetered.
-    unlimited_credit: bool = False
 
 
 async def _allowance(
-    conn: AsyncConnection, settings: Settings, user, profile: UserProfile
+    conn: AsyncConnection, settings: Settings, profile: UserProfile
 ) -> Spending | None:
     """Whether anything may be spent for this user, and on what key.
 
@@ -86,25 +83,24 @@ async def _allowance(
     working: the installation has no key, the user paused scoring, their credit is gone, or today's
     ceiling is already reached. Only the third needs somebody else to act, which is why the report
     and the banner distinguish it.
+
+    An admin holds credit like anybody else and tops their own account up on the Users page.
     """
     if not settings.openrouter_api_key.strip() or not profile.scoring_enabled:
         return None
-    unlimited = bool(user is not None and user.is_admin)
-    ceiling_left, credit_left = await _headroom(conn, profile, unlimited=unlimited)
-    if ceiling_left <= 0 or (credit_left is not None and credit_left <= 0):
+    ceiling_left, credit_left = await _headroom(conn, profile)
+    if ceiling_left <= 0 or credit_left <= 0:
         return None
-    return Spending(api_key=settings.openrouter_api_key.strip(), unlimited_credit=unlimited)
+    return Spending(api_key=settings.openrouter_api_key.strip())
 
 
 async def _headroom(
-    conn: AsyncConnection, profile: UserProfile, *, unlimited: bool
-) -> tuple[Decimal, Decimal | None]:
-    """What is left of today's ceiling, and of granted credit. `None` credit means unlimited."""
+    conn: AsyncConnection, profile: UserProfile
+) -> tuple[Decimal, Decimal]:
+    """What is left of today's ceiling, and of granted credit."""
     spend_row = await users_q.today_spend(conn, profile.user_id)
     today = Decimal(spend_row.cost_usd) if spend_row else Decimal(0)
     ceiling_left = Decimal(profile.daily_ceiling_usd) - today
-    if unlimited:
-        return ceiling_left, None
     return ceiling_left, Decimal((await users_q.credit(conn, profile.user_id)).balance_usd)
 
 
@@ -151,8 +147,7 @@ async def run_for_user(
             report.errors.append("This user has no profile row.")
             return report
         profile = profile_from_row(profile_row)
-        user = await users_q.get_user(conn, user_id)
-        spending = await _allowance(conn, settings, user, profile)
+        spending = await _allowance(conn, settings, profile)
         expansion = await _queries(conn, settings, profile, spending, report)
 
     queries, adverts = expansion.queries, expansion.adverts
@@ -433,9 +428,7 @@ async def _score_pending(
         # same user is claimed with SKIP LOCKED precisely so it CAN proceed in parallel. Against a
         # process-local belief, two runs would each authorise a full day's ceiling. Two indexed
         # reads per 25 postings, against 25 model calls -- the cost is not measurable.
-        ceiling_left, credit_left = await _headroom(
-            conn, profile, unlimited=spending.unlimited_credit
-        )
+        ceiling_left, credit_left = await _headroom(conn, profile)
         # Before the block goes out, and priced for the whole block: its calls are issued
         # together, so a check against one call's cost would authorise all of them. Never after --
         # a retry loop that empties someone's credit is not something to discover from them.
@@ -451,7 +444,7 @@ async def _score_pending(
                 len(uncached) - start,
             )
             break
-        if credit_left is not None and not rerank.affordable(credit_left, need):
+        if not rerank.affordable(credit_left, need):
             report.stopped_on_credit = True
             log.info(
                 "user %s is out of credit ($%.4f left); %d jobs left unscored",

@@ -1,5 +1,5 @@
 """What counts as fresh, defined once. Read by both retrieval arms, the embed queue, the pruner
-and the dashboard; the five disagreeing produces an index that grows without bound, or a posting
+and Operations; the five disagreeing produces an index that grows without bound, or a posting
 embedded every night and pruned every morning.
 
 Age is `COALESCE(posted_at, first_seen_at)`, never `posted_at` alone: a source that quietly

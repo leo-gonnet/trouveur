@@ -306,7 +306,7 @@ async def waiting_since(conn: AsyncConnection, first_seen_since: datetime) -> in
 
 
 async def backlog(conn: AsyncConnection) -> dict[str, dict[str, int]]:
-    """Queue depth per kind, for the dashboard. Parked items are counted separately."""
+    """Queue depth per kind, for Operations. Parked items are counted separately."""
     rows = await conn.execute(
         sa.select(
             work_item.c.kind,

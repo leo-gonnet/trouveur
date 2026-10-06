@@ -8,18 +8,35 @@
 
    Components: .topbar .nav .menu .banner .page-head .section .section-head .grid .kpis .kpi table .pill
    .score button/.btn(.primary .danger .ghost) label/input .field .tags .switch
-   .notice .empty .bar
-   .results .job .job-main .states .editions .pager .searchbar .login .foot
+   .notice .empty .bar .toast
+   .band .results .job .job-main .states .filed .editions .step .pager .searchbar .login .foot
    .doc .diagram (the How it works page only) */
+
+/* Vendored; see static/vendor/VENDOR.md. One subset per unicode-range, so an ordinary page
+   fetches only `latin`. */
+@font-face {
+  font-family: Inter; font-style: normal; font-weight: 100 900; font-display: swap;
+  src: url(vendor/inter-latin.woff2) format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+                 U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212,
+                 U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: Inter; font-style: normal; font-weight: 100 900; font-display: swap;
+  src: url(vendor/inter-latin-ext.woff2) format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304,
+                 U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB,
+                 U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
 
 :root {
   color-scheme: light;
 
   --space-1: .25rem; --space-2: .5rem; --space-3: .75rem; --space-4: 1rem;
   --space-5: 1.5rem; --space-6: 2rem; --space-7: 3rem;
-  --radius: 4px; --control: 38px;
+  --radius: 4px; --control: 38px; --measure: 1440px;
   --fs-sm: 13px; --fs-md: 14px;
-  --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
   --bg: #f6f7f9;
@@ -27,8 +44,13 @@
   --surface-2: #eef0f3;
   --border: #d9dee5;
   --fg: #1e2634;
+  --fg-soft: #4a5464;
   --fg-muted: #66707d;
+  --hover: #f7f9fb;
   --primary: #2b3648;    --primary-fg: #ffffff;   --primary-soft: #e9edf3;
+  /* Surfaces drawn on the navy bar. */
+  --on-primary-soft: rgb(255 255 255 / .10);
+  --on-primary-softer: rgb(255 255 255 / .16);
   --good: #256c43;       --good-soft: #e4f1e8;
   --warn: #8a5308;       --warn-soft: #fbf0da;
   --bad: #a3271f;        --bad-soft: #fae6e4;
@@ -44,6 +66,9 @@ body {
   margin: 0; min-height: 100vh; display: flex; flex-direction: column;
   background: var(--bg); color: var(--fg);
   font: 400 15px/1.55 var(--font); -webkit-font-smoothing: antialiased;
+  /* cv11: a single-storey `l` that cannot be read as a `1` beside tabular figures. */
+  font-feature-settings: "cv11", "ss03";
+  font-optical-sizing: auto;
 }
 a { color: var(--primary); text-decoration: underline; text-underline-offset: 2px; }
 a:hover { color: var(--fg-muted); }
@@ -57,10 +82,13 @@ code, kbd { font: .86em var(--mono); background: var(--surface-2); padding: 1px 
 :focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 
 /* ---------- Layout ---------- */
+/* Full-bleed band, contents in the same column as `main`. */
 .topbar {
-  display: flex; align-items: center; gap: var(--space-5); flex-wrap: wrap;
   padding: 0 var(--space-6); background: var(--primary); color: var(--primary-fg);
+  position: sticky; top: 0; z-index: 20;
 }
+.band { display: flex; align-items: center; gap: var(--space-5); flex-wrap: wrap;
+        width: 100%; max-width: var(--measure); margin: 0 auto; }
 .topbar a, .topbar .hint, .topbar .ghost { color: var(--primary-fg); text-decoration: none; opacity: .78; }
 .topbar a:hover, .topbar .ghost:hover { opacity: 1; background: transparent; border-color: transparent; }
 .topbar :focus-visible { outline-color: var(--primary-fg); }
@@ -77,31 +105,53 @@ code, kbd { font: .86em var(--mono); background: var(--surface-2); padding: 1px 
 /* The account menu. <details>, so it opens with no JavaScript; the marker is replaced by a
    caret because a disclosure triangle reads as "expand this text". */
 .menu { position: relative; }
-.menu > summary { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-3) 0;
-                  cursor: pointer; list-style: none; opacity: .78; }
+.menu > summary { display: flex; align-items: center; gap: var(--space-2);
+                  margin: var(--space-2) 0; padding: var(--space-1) var(--space-2);
+                  border-radius: var(--radius); cursor: pointer; list-style: none; opacity: .78;
+                  transition: background .12s ease; }
+.menu > summary:hover { background: var(--on-primary-soft); }
+.menu[open] > summary { background: var(--on-primary-softer); }
+.avatar { flex: none; display: grid; place-items: center; width: 26px; height: 26px;
+          border-radius: 999px; background: var(--on-primary-softer); color: var(--primary-fg);
+          font-size: 12px; font-weight: 600; line-height: 1; text-transform: uppercase; }
 .menu > summary::-webkit-details-marker { display: none; }
-.menu > summary::after { content: "\25be"; font-size: 11px; }
+.menu > summary::after { content: "\25be"; font-size: 13px; line-height: 1; opacity: .8;
+                         transition: transform .12s ease; }
+.menu[open] > summary::after { transform: rotate(180deg); }
 .menu[open] > summary, .menu > summary:hover { opacity: 1; }
-.menu-panel { position: absolute; right: 0; top: 100%; z-index: 10; min-width: 11rem;
-              display: grid; padding: var(--space-2) 0; background: var(--surface);
+.menu-panel { position: absolute; right: 0; top: calc(100% + 4px); z-index: 10; min-width: 14rem;
+              display: grid; padding: 0 0 var(--space-2); background: var(--surface);
               border: 1px solid var(--border); border-radius: var(--radius);
               box-shadow: 0 6px 20px rgb(0 0 0 / .13); }
+/* The topbar sets primary-fg on a, .hint and .label, which is white on white inside the
+   panel. */
+.menu-who { display: grid; gap: 1px; padding: var(--space-3) var(--space-4);
+            border-bottom: 1px solid var(--border); margin-bottom: var(--space-2);
+            font-size: var(--fs-md); }
+.topbar .menu-panel .label, .topbar .menu-panel .hint { color: var(--fg-muted); opacity: 1; }
+.topbar .menu-panel .menu-who span:not(.label) { color: var(--fg); }
+.menu-group { display: block; padding: var(--space-2) var(--space-4) var(--space-1); }
+.menu-panel form { border-top: 1px solid var(--border); margin-top: var(--space-2);
+                   padding-top: var(--space-2); }
 /* Inside the panel the surface is the page, not the topbar, so the topbar's inherited colour
    would put navy text on navy. */
 .topbar .menu-panel a, .topbar .menu-panel .ghost { color: var(--fg); opacity: 1; }
 .menu-panel a, .menu-panel button { padding: var(--space-2) var(--space-4); text-align: left;
                                     font-size: var(--fs-md); }
-.menu-panel a[aria-current="page"] { font-weight: 600; }
+.menu-panel a[aria-current="page"] { font-weight: 600;
+                                     box-shadow: inset 2px 0 0 var(--primary); }
 .menu-panel a:hover, .topbar .menu-panel .ghost:hover { background: var(--surface-2); }
 .menu-panel button { width: 100%; height: auto; border: 0; border-radius: 0; background: none; }
 
-.banner { padding: var(--space-3) var(--space-6); font-size: var(--fs-md); text-align: center; }
+.banner { padding: var(--space-3) var(--space-6); font-size: var(--fs-md); }
+.banner .band { display: block; text-align: center; }
 .banner.warn { background: var(--warn-soft); color: var(--warn); }
 .banner a { color: inherit; }
 
-main { flex: 1; width: 100%; max-width: 1440px; margin: 0 auto; padding: var(--space-5) var(--space-6) var(--space-7); }
+main { flex: 1; width: 100%; max-width: var(--measure); margin: 0 auto; padding: var(--space-5) var(--space-6) var(--space-7); }
 .foot { padding: var(--space-4) var(--space-6); border-top: 1px solid var(--border);
-        font-size: var(--fs-sm); color: var(--fg-muted); display: flex; gap: var(--space-4); }
+        font-size: var(--fs-sm); color: var(--fg-muted); }
+.foot .band { gap: var(--space-4); }
 .foot a { color: inherit; }
 .page-head { display: grid; gap: var(--space-2); justify-items: start; margin-bottom: var(--space-5);
              padding-bottom: var(--space-4); border-bottom: 1px solid var(--border); }
@@ -113,7 +163,9 @@ main { flex: 1; width: 100%; max-width: 1440px; margin: 0 auto; padding: var(--s
 .section-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3);
                 margin-bottom: var(--space-4); }
 .section > .hint { margin-bottom: var(--space-3); max-width: 80ch; }
-.section > table + .hint, .section > .bar + .hint { margin: var(--space-3) 0 0; }
+/* A hint that follows something takes its margin above, not below. */
+.section > table + .hint, .section > .bar + .hint, .section > form + .hint,
+.section > .kpis + .hint { margin: var(--space-3) 0 0; }
 .grid { display: grid; gap: var(--space-5); align-items: start; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
 .grid > * { min-width: 0; }
 .grid .section { margin: 0; }
@@ -123,6 +175,11 @@ main { flex: 1; width: 100%; max-width: 1440px; margin: 0 auto; padding: var(--s
 /* ---------- KPIs ---------- */
 .kpis { display: grid; gap: var(--space-4); margin-bottom: var(--space-5);
         grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+.section + .kpis, .grid + .kpis { margin-top: var(--space-5); }
+/* A section in a grid column is ~280px wide inside its padding, so the page-level 140px
+   minimum fits one tile and stacks the rest. */
+.section > .kpis { grid-template-columns: repeat(auto-fit, minmax(104px, 1fr)); }
+.section > .kpis:last-child { margin-bottom: 0; }
 .kpi { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-3) var(--space-4); }
 .kpi .value { display: block; font-size: 28px; font-weight: 600; line-height: 1.2; margin-top: var(--space-1);
               font-variant-numeric: tabular-nums; }
@@ -155,9 +212,9 @@ a.pill:hover { color: var(--fg); border-color: var(--border); }
 
 /* The first thing read on a row and what the list is sorted by, so it is sized to be glanced at.
    Band names must match score_pill in _macros.html: they did not, and every score of 65 and over
-   rendered uncoloured. */
-.score { flex: none; min-width: 2.75rem; text-align: center; font-weight: 700; font-size: 15px;
-         line-height: 1.1; padding: var(--space-2); border-radius: var(--radius);
+   rendered uncoloured. It grades the title, so its line box matches the title's. */
+.score { flex: none; min-width: 2.9rem; text-align: center; font-weight: 700; font-size: 15px;
+         line-height: 22px; padding: 0 var(--space-2); border-radius: var(--radius);
          font-variant-numeric: tabular-nums; }
 .score.high { background: var(--good-soft); color: var(--good); }
 .score.mid  { background: var(--warn-soft); color: var(--warn); }
@@ -211,7 +268,11 @@ input:disabled, textarea:disabled, select:disabled {
 .switch input:focus-visible + .track { box-shadow: 0 0 0 3px var(--primary-soft); }
 textarea { height: auto; min-height: 76px; padding: var(--space-2) var(--space-3); resize: vertical; }
 form .actions { margin-top: var(--space-5); }
-form.inline { display: inline; }
+/* `input` is width:100% globally, so a `size` attribute is ignored and the controls stack. */
+form.inline { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+form.inline input, form.inline select { width: auto; }
+td form.inline input, td form.inline button { height: 30px; }
+td form.inline button { padding: 0 var(--space-3); }
 
 /* A list field: a labelled group rather than a <label>, since it holds several controls. The
    textarea is what is posted; the script hides it and edits it through the chips. */
@@ -264,6 +325,7 @@ form.inline { display: inline; }
 .notice a { color: inherit; }
 .section > .notice { margin: var(--space-3) 0 0; }
 .empty { padding: var(--space-6) var(--space-5); color: var(--fg-muted); }
+.section > .empty { padding-left: 0; padding-right: 0; }
 
 /* ---------- Progress ---------- */
 .bar { height: 6px; border-radius: var(--radius); background: var(--surface-2); overflow: hidden; }
@@ -275,26 +337,53 @@ form.inline { display: inline; }
 
 /* ---------- Job results ---------- */
 /* A mail-style list: one row per posting, score on the left, actions on the right, hairlines
-   between. The page is the only scroll container: the list never caps its own height. */
+   between. The page is the only scroll container: the list never caps its own height.
+
+   The row is a three-part grid even though only two parts are in flow: the score, the body, and
+   a reserved right gutter the actions are absolutely positioned into. Reserving it means the
+   actions can appear on hover without the list reflowing under the pointer, and it gives every
+   row the same measure, which is what the eye reads as alignment down a long page. */
 .results { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
-.job { display: flex; align-items: center; gap: var(--space-4); padding: var(--space-4) var(--space-5);
-       border-top: 1px solid var(--border); }
+.job { position: relative; display: flex; align-items: flex-start; gap: var(--space-4);
+       padding: var(--space-4) var(--space-5); border-top: 1px solid var(--border); }
 .job:first-child { border-top: 0; }
-.job:hover { background: var(--surface-2); }
-.job-main { flex: 1; min-width: 0; }
-.job-title { color: var(--fg); font-weight: 600; font-size: 16px; text-decoration: none; }
+.job:hover { background: var(--hover); }
+.job::before { content: ""; position: absolute; left: 0; top: -1px; bottom: -1px; width: 2px;
+               background: transparent; }
+.job:hover::before, .job:focus-within::before { background: var(--primary); }
+.job-main { flex: 1; min-width: 0; padding-right: 20rem; }
+.job-title { display: inline-block; color: var(--fg); font-weight: 600; font-size: 16px;
+             line-height: 1.35; letter-spacing: -.011em; text-decoration: none; }
 .job-title:hover { text-decoration: underline; }
-.meta { color: var(--fg-muted); font-size: var(--fs-md); margin-top: 2px; }
-.reason { font-size: var(--fs-md); margin-top: var(--space-1); }
-.flags { display: flex; flex-wrap: wrap; gap: var(--space-1); margin-top: var(--space-2); }
+
+.meta { color: var(--fg-muted); font-size: var(--fs-md); margin-top: 3px; }
+.meta .who { color: var(--fg); font-weight: 500; }
+.meta .pay { color: var(--fg); font-variant-numeric: tabular-nums; }
+.meta .pill { margin-left: var(--space-1); }
+.reason { color: var(--fg-soft); font-size: var(--fs-md); margin-top: var(--space-2); max-width: 92ch; }
+.reason .pill { margin-left: var(--space-1); vertical-align: baseline; }
+.age { white-space: nowrap; }
+
 .actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-top: var(--space-3); }
 .actions .spacer { flex: 1; }
-.job .actions { margin: 0; flex: none; justify-content: flex-end; gap: var(--space-4); font-size: var(--fs-md); }
+/* Revealed on hover. `pointer-events` rather than `visibility`: hidden that way they are
+   unfocusable and :focus-within can never fire. */
+.job .actions { position: absolute; top: var(--space-4); right: var(--space-5); z-index: 1;
+                margin: 0; flex: none; flex-wrap: nowrap; justify-content: flex-end;
+                gap: var(--space-3); font-size: var(--fs-md); }
+.job .actions > a, .job .states .set { opacity: 0; pointer-events: none; transition: opacity .12s ease; }
+.job:hover .actions > a, .job:hover .states .set,
+.job:focus-within .actions > a, .job:focus-within .states .set { opacity: 1; pointer-events: auto; }
+
+.filed { display: none; text-transform: capitalize; }
+/* Out of the flow: the control beside it is hidden with opacity and still takes its width. */
+.job .filed { display: inline-flex; position: absolute; right: 0; top: 50%; transform: translateY(-50%); }
+.job:hover .filed, .job:focus-within .filed { display: none; }
 
 /* Saved / applied / dismissed as one segmented control, so the current state is visible and
    any of the three can be chosen again. */
-.states { display: inline-flex; }
-.states button { height: 30px; padding: 0 10px; font-size: var(--fs-sm); border-radius: 0; margin-left: -1px; }
+.states, .states .set { display: inline-flex; }
+.states button { height: 28px; padding: 0 10px; font-size: var(--fs-sm); border-radius: 0; margin-left: -1px; }
 .states button:first-child { border-radius: var(--radius) 0 0 var(--radius); margin-left: 0; }
 .states button:last-child { border-radius: 0 var(--radius) var(--radius) 0; }
 .states button[aria-pressed=true] { background: var(--primary); color: var(--primary-fg);
@@ -306,14 +395,16 @@ form.inline { display: inline; }
 
 /* ---------- Editions ---------- */
 /* Recommendations are published one day at a time. This is how a reader moves between days;
-   the middle select carries the whole run of them so navigating back years is not 700 clicks. */
-.editions { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3);
-            padding: var(--space-3) 0; margin-bottom: var(--space-3);
-            border-bottom: 1px solid var(--border); }
-.editions select { flex: 1; max-width: 26rem; }
-.editions .muted { color: var(--fg-muted); }
-/* The age of the advert, not of the edition: the two differ and the card has to say so. */
-.age { white-space: nowrap; }
+   the middle select carries the whole run of them so navigating back years is not 700 clicks.
+   One cluster, not three things spread across 1400px: pushed to the page's edges the arrows
+   and the day they belong to were 700px apart and read as an unfinished toolbar. */
+.editions { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-4); }
+.editions select { flex: 0 1 26rem; font-weight: 500; }
+.step { display: inline-flex; align-items: center; height: var(--control); padding: 0 var(--space-3);
+        font-size: var(--fs-md); white-space: nowrap; text-decoration: none; color: var(--fg);
+        border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+a.step:hover { background: var(--surface-2); border-color: var(--fg-muted); color: var(--fg); }
+.step.disabled { color: var(--fg-muted); background: var(--surface-2); }
 
 /* ---------- Login ---------- */
 .login { max-width: 24rem; margin: 12vh auto var(--space-7); display: grid; gap: var(--space-4); padding: var(--space-6);
@@ -322,19 +413,43 @@ form.inline { display: inline; }
 .login .logo { height: 2.5rem; }
 .login .actions { margin-top: var(--space-4); }
 
+/* ---------- Toast ---------- */
+.toast { position: fixed; left: 50%; bottom: var(--space-5); transform: translateX(-50%);
+         z-index: 40; max-width: min(34rem, calc(100vw - 2 * var(--space-4)));
+         padding: var(--space-3) var(--space-4); border-radius: var(--radius);
+         font-size: var(--fs-md); background: var(--bad-soft); color: var(--bad);
+         box-shadow: 0 6px 20px rgb(0 0 0 / .13); }
+.toast[hidden] { display: none; }
+
 /* ---------- Misc ---------- */
 .htmx-request { opacity: .55; transition: opacity .1s; }
 @media (prefers-reduced-motion: reduce) {
   .pill.live::before { animation: none; }
   * { transition: none !important; }
 }
-@media (max-width: 640px) {
-  .topbar { padding: 0 var(--space-4); gap: var(--space-3); }
-  .brand { padding: var(--space-2) 0; }
-  .nav { order: 1; flex-basis: 100%; overflow-x: auto; padding-bottom: var(--space-2); }
-  main { padding: var(--space-4) var(--space-4) var(--space-6); }
+/* Both halves of the pointer test are needed: a headless browser reports `hover: none` with
+   no pointer at all, so every screenshot would measure the touch layout. */
+@media (hover: none) and (pointer: coarse), (max-width: 900px) {
   .job { flex-wrap: wrap; }
-  .job .actions { flex-basis: 100%; justify-content: flex-start; }
+  .job-main { padding-right: 0; }
+  .job .actions { position: static; flex: 1 0 100%; flex-wrap: wrap;
+                  justify-content: flex-start; margin-top: var(--space-3); }
+  /* Undone on the children, which is where the opacity lives. */
+  .job .actions > a, .job .states .set { opacity: 1; pointer-events: auto; }
+  .job .filed { display: none; }
+}
+@media (max-width: 640px) {
+  .topbar, .banner, .foot { padding-left: var(--space-4); padding-right: var(--space-4); }
+  .band { gap: var(--space-3); }
+  .brand { padding: var(--space-2) 0; }
+  /* Wraps rather than scrolling: `overflow-x: auto` painted a scrollbar across the navy bar. */
+  .nav { order: 1; flex-basis: 100%; flex-wrap: wrap; row-gap: 0;
+         padding-bottom: var(--space-2); }
+  .menu > summary .name { display: none; }
+  main { padding: var(--space-4) var(--space-4) var(--space-6); }
+  .banner .band { text-align: left; }
+  .editions { flex-wrap: wrap; }
+  .editions select { order: -1; flex: 1 0 100%; }
   /* A wide table scrolls inside its section here; anywhere wider the page has room for it. */
   .section { overflow-x: auto; }
 }

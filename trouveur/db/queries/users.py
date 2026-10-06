@@ -284,19 +284,6 @@ async def today_spend(conn: AsyncConnection, user_id: int) -> sa.Row | None:
     ).one_or_none()
 
 
-async def month_to_date_spend(conn: AsyncConnection, user_id: int) -> Decimal:
-    """This calendar month's spend, summed from the daily rows rather than metered separately:
-    two meters for one fact eventually disagree."""
-    return (
-        await conn.execute(
-            sa.select(sa.func.coalesce(sa.func.sum(user_llm_spend.c.cost_usd), 0)).where(
-                user_llm_spend.c.user_id == user_id,
-                user_llm_spend.c.period_day >= clock.today().replace(day=1),
-            )
-        )
-    ).scalar_one()
-
-
 async def add_spend(
     conn: AsyncConnection,
     user_id: int,

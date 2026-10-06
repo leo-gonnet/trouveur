@@ -1,4 +1,4 @@
-<!doctype html>
+{% import "_macros.html" as m %}<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -9,58 +9,71 @@
 <link rel="icon" type="image/png" href="/static/favicon-dark.png" media="(prefers-color-scheme: dark)">
 <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
 <link rel="stylesheet" href="/static/app.css">
-<script src="https://unpkg.com/htmx.org@2.0.4"
-        integrity="sha384-HGfztofotfshcF7+8n44JQL2oJmowVChPTg48S+jvZoztPfvwD79OC/LTtG6dMp+"
-        crossorigin="anonymous"></script>
+{# Our own origin, not a CDN: see static/vendor/VENDOR.md. #}
+<script src="/static/vendor/htmx.min.js" defer></script>
+<script src="/static/app.js" defer></script>
 </head>
 <body>
 {% if request.state.session %}
 <header class="topbar">
+ <div class="band">
   <a href="/recommendations" class="brand"><img src="/static/logo-dark.png" alt="" class="logo">Trouveur</a>
   <nav class="nav">
     {% for href, key, name in [('/recommendations', 'recommendations', 'Recommendations'),
                                ('/search', 'search', 'Search'),
-                               ('/dashboard', 'dashboard', 'Dashboard'),
                                ('/profile', 'profile', 'Profile'),
                                ('/how-it-works', 'how_it_works', 'How it works')] %}
       <a href="{{ href }}" {% if active == key %}aria-current="page"{% endif %}>{{ name }}</a>
     {% endfor %}
   </nav>
   <span class="spacer"></span>
-  {# Credit is the one thing that silently stops scoring, so it is readable from every page.
-     An admin needs none, so they are shown none rather than a meaningless zero. #}
+  {# None only on a page with no session. #}
   {% if request.state.balance_usd is not none %}
     <span class="pill {{ 'bad' if request.state.balance_usd <= 0 else '' }}"
-          title="LLM credit remaining">${{ '%.2f' % request.state.balance_usd }}</span>
+          title="LLM credit remaining">{{ m.money(request.state.balance_usd) }}</span>
   {% endif %}
-  {# <details>, so the menu needs no JavaScript. It closes on the next navigation or on a second
-     click of the name; nothing here is worth a script to dismiss it on an outside click. #}
+  {# Escape and outside-click are in app.js; the element comes with neither. #}
   <details class="menu">
-    <summary>{{ request.state.display_name }}</summary>
+    <summary>
+      <span class="avatar" aria-hidden="true">{{ request.state.display_name[:1] }}</span>
+      <span class="name">{{ request.state.display_name }}</span>
+    </summary>
     <div class="menu-panel">
+      <div class="menu-who">
+        <span class="label">Signed in as</span>
+        <span>{{ request.state.email }}</span>
+      </div>
       <a href="/settings" {% if active == 'settings' %}aria-current="page"{% endif %}>Settings</a>
       {% if request.state.is_admin %}
-        <a href="/admin" {% if active == 'admin' %}aria-current="page"{% endif %}>Scans</a>
+        <span class="label menu-group">Admin</span>
+        <a href="/admin" {% if active == 'admin' %}aria-current="page"{% endif %}>Operations</a>
         <a href="/users" {% if active == 'users' %}aria-current="page"{% endif %}>Users</a>
       {% endif %}
       <form method="post" action="/logout"><button type="submit" class="ghost">Log out</button></form>
     </div>
   </details>
+ </div>
 </header>
 {% if request.state.scoring_unconfigured %}
-<div class="banner warn">This installation has no <code>OPENROUTER_API_KEY</code>, so nothing is
-  scored and Recommendations stays empty. Search and the free stages still work.</div>
+<div class="banner warn"><div class="band">This installation has no
+  <code>OPENROUTER_API_KEY</code>, so nothing is scored and Recommendations stays empty. Search
+  and the free stages still work.</div></div>
 {% elif request.state.out_of_credit %}
-<div class="banner warn">Your credit is used up, so nothing new will be scored. Ask an
-  administrator to top it up. Search and the free stages still work.</div>
+{# "Ask an administrator" would be telling an admin to ask themselves. #}
+<div class="banner warn"><div class="band">Your credit is used up, so nothing new will be
+  scored. {% if request.state.is_admin %}Grant yourself more on
+  <a href="/users">Users</a>.{% else %}Ask an administrator to top it up.{% endif %}
+  Search and the free stages still work.</div></div>
 {% endif %}
 {% endif %}
 <main>{% block content %}{% endblock %}</main>
 <footer class="foot">
+ <div class="band">
   <span>Trouveur {{ version }}{% if commit %} &middot;
     {%- if commit_url %} <a href="{{ commit_url }}">{{ commit }}</a>
     {%- else %} {{ commit }}{% endif %}{% endif %}</span>
   <a href="{{ repo_url }}">Source</a>
+ </div>
 </footer>
 </body>
 </html>

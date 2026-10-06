@@ -186,3 +186,75 @@ def test_evalx_calls_production_functions_with_arguments_they_accept():
                     f"{path.name}:{node.lineno} {owner.id}.{node.func.attr}(): {exc}"
                 )
     assert not offenders, "evalx calls a production function wrongly: " + "; ".join(offenders)
+
+
+def test_a_filed_postings_marker_is_rendered_by_the_fragment_htmx_swaps():
+    """The resting "saved" tag has to come from _state.html, not from the card around it.
+
+    The row's controls are revealed on hover, so a filed posting shows a tag instead. That tag
+    states a value which changes under the reader: `hx-swap="outerHTML"` replaces only the
+    `.states` span, so a copy of it emitted by job_card would still read "saved" after they
+    pressed "dismissed", with nothing on the page to correct it until a reload. Rendering it
+    inside the swapped fragment is the whole of why it cannot go stale.
+    """
+    templates = ROOT / "trouveur" / "web" / "templates"
+    state = (templates / "_state.html").read_text()
+    card = (templates / "_macros.html").read_text()
+
+    assert "filed" in state, (
+        "_state.html must render the resting state tag; it is the fragment htmx replaces, so it "
+        "is the only place the tag cannot go stale"
+    )
+    assert "filed" not in card, (
+        "the resting state tag must not be emitted by job_card: the card is not re-rendered when "
+        "a state changes, so its copy would keep the state the reader just left"
+    )
+
+
+def test_no_template_or_stylesheet_reaches_an_external_origin():
+    """Every byte the browser loads comes from our own origin.
+
+    A CDN on the critical path of a page whose content is somebody's job search tells a third
+    party their IP, the page they were on and when, on every load -- and when it is slow, proxied
+    or down, htmx never arrives and every state button silently does nothing. Neither failure
+    shows up in a log an operator reads, which is why this is a test and not a convention.
+
+    Links a reader clicks are a different thing and are allowed; this is about subresources.
+    """
+    web = ROOT / "trouveur" / "web"
+    sources = list((web / "templates").glob("*.html")) + [web / "static" / "app.css"]
+    assert sources, "found nothing to check; the glob above is not actually checking"
+
+    # src=, href= on a <link>, and url() in CSS -- the three ways a subresource is named.
+    subresource = re.compile(
+        r"""(?:src\s*=\s*["']|<link[^>]*?href\s*=\s*["']|url\(\s*["']?)\s*(https?:)?//""",
+        re.I,
+    )
+    offenders = [
+        f"{path.relative_to(ROOT)}: {match.group(0).strip()}"
+        for path in sources
+        for match in subresource.finditer(path.read_text())
+    ]
+    assert not offenders, (
+        "subresources must be served from our own origin; vendor them into static/vendor "
+        f"instead: {offenders}"
+    )
+
+
+def test_an_htmx_request_is_sent_away_by_header_and_not_by_a_redirect():
+    """A lapsed session must not be swapped into the page as content.
+
+    htmx follows a 303 transparently, so the login page came back as a 200 and landed inside
+    whatever the button targeted -- a login form rendered into a 28px control. Only `HX-Redirect`
+    makes htmx navigate. The guard is on the middleware's three exits, because those are the ones
+    that can fire underneath a button rather than in answer to a click on a link.
+    """
+    source = (ROOT / "trouveur" / "web" / "app.py").read_text()
+    middleware = source[source.index("async def require_session") :]
+    middleware = middleware[: middleware.index("\n@app.get")]
+
+    assert "HX-Redirect" in source, "the auth redirect helper must set HX-Redirect for htmx"
+    assert "RedirectResponse(" not in middleware, (
+        "the session middleware must send callers away through the HX-Redirect helper, not with "
+        "a bare RedirectResponse: htmx follows that one and swaps the login page into the row"
+    )

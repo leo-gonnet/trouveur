@@ -17,7 +17,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from fastapi import FastAPI, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from jinja2 import StrictUndefined
@@ -213,8 +213,8 @@ PUBLIC_PREFIXES = ("/static/",)
 
 # Admin by prefix rather than per route, for the same reason the session check is middleware: a
 # per-route check is a line somebody forgets on the next route, and the route that leaks is always
-# the newest one. Scans owns the shared schedule and queues real sweeps, so it is not one reader's
-# to retime; Users creates accounts and grants credit.
+# the newest one. Operations owns the shared schedule and queues real sweeps, so it is not one
+# reader's to retime; Users creates accounts and grants credit.
 ADMIN_PREFIXES = ("/admin", "/users")
 
 
@@ -230,6 +230,22 @@ def _is_admin_only(path: str) -> bool:
     return path.startswith(ADMIN_PREFIXES)
 
 
+def _auth_redirect(request: Request, url: str) -> Response:
+    """Send an htmx caller to `url` as a browser NAVIGATION, not as content to swap in.
+
+    htmx follows a 303 transparently, so a session that lapsed between loading the page and
+    pressing a button came back 200 with the login page's HTML, and htmx pasted that into
+    whatever the button targeted -- a whole login form inside a 28px span, with the reader still
+    looking at a list they can no longer act on. `HX-Redirect` is the only answer htmx reads as
+    "leave this page". A plain form post is unaffected and still gets the 303.
+    """
+    if request.headers.get("HX-Request") == "true":
+        response = Response(status_code=204)
+        response.headers["HX-Redirect"] = url
+        return response
+    return RedirectResponse(url, status_code=303)
+
+
 @app.middleware("http")
 async def require_session(request: Request, call_next):
     """Enforce authentication before anything else looks at the request.
@@ -241,13 +257,14 @@ async def require_session(request: Request, call_next):
     request.state.session = session
     path = request.url.path
     if session is None and not _is_public(path):
-        return RedirectResponse("/login", status_code=303)
+        return _auth_redirect(request, "/login")
     # Set here, not per route: a route that forgot would hide the banner on exactly one page, and
     # the one page it hid it on would be the page that needed it.
     request.state.is_admin = False
     # Read from the row on every request rather than from the cookie, so renaming yourself changes
     # the topbar at once instead of at the next login a month later.
     request.state.display_name = ""
+    request.state.email = ""
     request.state.balance_usd = None
     request.state.out_of_credit = False
     request.state.scoring_unconfigured = False
@@ -259,18 +276,17 @@ async def require_session(request: Request, call_next):
             # holder of that cookie can still do -- for a month, while the Users page says
             # "cannot log in". Covers a deleted account's surviving cookie too.
             if user is None or not user.is_active:
-                revoked = RedirectResponse("/login", status_code=303)
+                revoked = _auth_redirect(request, "/login")
                 auth.clear_cookie(revoked)
                 return revoked
             request.state.is_admin = bool(user.is_admin)
             request.state.display_name = user.display_name
+            request.state.email = user.email
             if _is_admin_only(path) and not request.state.is_admin:
-                return RedirectResponse("/recommendations", status_code=303)
-            # An admin needs no credit, so they are shown no balance and no warning about one.
-            if not request.state.is_admin:
-                balance = Decimal((await users_q.credit(conn, session["uid"])).balance_usd)
-                request.state.balance_usd = balance
-                request.state.out_of_credit = balance <= 0
+                return _auth_redirect(request, "/recommendations")
+            balance = Decimal((await users_q.credit(conn, session["uid"])).balance_usd)
+            request.state.balance_usd = balance
+            request.state.out_of_credit = balance <= 0
         request.state.scoring_unconfigured = not get_settings().openrouter_api_key.strip()
     return await call_next(request)
 
@@ -489,18 +505,12 @@ async def profile_form(request: Request):
     async with connect() as conn:
         row = await users_q.get_profile(conn, session["uid"])
         profile = profile_from_row(row)
-        # Priced before the edit, not billed after it. An upper bound: what a re-score actually
-        # covers is whatever the NEW profile's queries retrieve, which needs the queries to run.
-        pending = await match_q.count_pending_rerank(
-            conn, profile, freshness.fresh_since(get_settings().retrieval_horizon_days)
-        )
     return templates.TemplateResponse(
         request,
         "profile.html",
         {
             "active": "profile",
             "profile": profile,
-            "rescore_estimate": pending,
             "country_names": COUNTRY_NAMES,
             "city_names": {
                 place.id: place.label for place in map(places.get, profile.city_ids) if place
@@ -577,7 +587,6 @@ async def settings_form(request: Request):
         credit = await users_q.credit(conn, session["uid"])
         grants = await users_q.credit_grants(conn, session["uid"])
         today = await users_q.today_spend(conn, session["uid"])
-        month = await users_q.month_to_date_spend(conn, session["uid"])
         history = await users_q.spend_history(conn, session["uid"])
     settings = get_settings()
     return templates.TemplateResponse(
@@ -593,7 +602,6 @@ async def settings_form(request: Request):
             "credit": credit,
             "grants": grants,
             "today": today,
-            "month_to_date": month,
             "history": history,
         },
     )
@@ -790,38 +798,6 @@ async def how_it_works(request: Request):
     )
 
 
-@app.get("/dashboard", response_class=HTMLResponse)
-async def dashboard(request: Request):
-    session = request.state.session
-    async with connect() as conn:
-        overview = await admin_q.corpus_overview(conn)
-        coverage = await admin_q.derived_coverage(
-            conn, freshness.fresh_since(get_settings().retrieval_horizon_days)
-        )
-        health = await admin_q.source_health(conn)
-        queues = await admin_q.queue_depth(conn)
-        countries = await admin_q.facet_breakdown(conn)
-        scopes = await admin_q.list_tenants(conn)
-        stats = await match_q.match_stats(conn, session["uid"])
-        spend = await users_q.today_spend(conn, session["uid"])
-    return templates.TemplateResponse(
-        request,
-        "dashboard.html",
-        {
-            "active": "dashboard",
-            "overview": overview,
-            "coverage": coverage,
-            "health": health,
-            "queues": queues,
-            "countries": countries,
-            "scopes": scopes,
-            "stats": stats,
-            "spend": spend,
-            "sources": sorted(NORMALIZERS),
-        },
-    )
-
-
 async def _run_status() -> dict:
     """Everything the live panel shows, from rows the runner writes as it goes.
 
@@ -868,10 +844,24 @@ async def _run_status() -> dict:
 
 @app.get("/admin", response_class=HTMLResponse)
 async def admin(request: Request):
+    """The operations console: what the pipeline is doing, and what it has produced.
+
+    One page rather than two. Everything on it answers the same question -- is the corpus being
+    collected properly -- and the operator who reads it is the only person who can act on any of
+    it, so splitting it meant checking two pages to answer one question.
+    """
     async with connect() as conn:
         schedule = await admin_q.get_schedule(conn)
         runs = await admin_q.recent_runs(conn)
         sweeps = await admin_q.recent_sweeps(conn)
+        overview = await admin_q.system_overview(
+            conn, freshness.fresh_since(get_settings().retrieval_horizon_days)
+        )
+        health = await admin_q.source_health(conn)
+        # NOT `queues`: _run_status() spreads one of its own, keyed by kind, into this context.
+        queue_ages = await admin_q.queue_depth(conn)
+        countries = await admin_q.facet_breakdown(conn)
+        tenants, tenant_totals = await admin_q.tenants_needing_attention(conn)
     return templates.TemplateResponse(
         request,
         "admin.html",
@@ -880,6 +870,12 @@ async def admin(request: Request):
             "schedule": schedule,
             "runs": runs,
             "sweeps": sweeps,
+            "overview": overview,
+            "health": health,
+            "queue_ages": queue_ages,
+            "countries": countries,
+            "tenants": tenants,
+            "tenant_totals": tenant_totals,
             "sources": sorted(NORMALIZERS),
             **await _run_status(),
         },
