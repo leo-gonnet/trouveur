@@ -1,7 +1,5 @@
 # Coding Agent Guidelines — Trouveur
 
-This document provides essential information for AI coding agents working on the Trouveur codebase.
-
 **IMPORTANT — READ FIRST**
 
 - **Act as a Senior Software Engineer and Software Architect.** Approach software development with:
@@ -18,9 +16,14 @@ This document provides essential information for AI coding agents working on the
 - **A test has to be able to fail for a reason a reviewer would care about**: see [Testing](#testing). More tests do not make a change safer. We don't care about coverage. We want meaning.
 - **Build and test only what you touched** rather than the whole repo.
 
+**This file is short on purpose, and editing it needs human approval.** It holds only rules that
+cross modules; a fact about one source, query or function is a comment at that code. This is a side
+project for a handful of users: where a rule reads as absolute, take it as "there was a reason, find
+it first" rather than as a safety interlock.
+
 ## The organizing principle
 
-**Everything derived is a pure function of something we stored, and every non-trivial function is
+**Everything derived is a pure function of something we stored, and every non-trivial stage is
 versioned.**
 
 ```
@@ -29,34 +32,238 @@ raw archive ──normalize(v)──> job ──derive(v)──> facets
      └── kept forever; the only input that cannot be recomputed
 ```
 
-This buys evolution. When the location parser is wrong — and it will be — we re-derive from the
-archived payload. If only the parsed value had been stored, that reading would be gone and no
-backfill could recover it, because a backfill re-derives from stored columns and those columns hold
-the wrong answer. The only repair would be re-fetching a million postings.
+Bump a version in `versions.py` and the queue refills with every row below it, so **upgrade and
+backfill are one code path** and the repair path stays tested.
 
-Bumping a version in `trouveur/versions.py` refills the work queue with every row below it, and the
-ordinary worker drains it. **Upgrade and backfill are therefore the same code path**, which is the
-only arrangement in which the repair path stays tested — it runs every day.
+- **Normalisation produces structure; derivation produces interpretation.** Archive what the source
+  wrote and parse it one stage later, so a parser fix is a re-derive and not a re-crawl.
+- **Never guess.** Every enum has `UNKNOWN`, every scalar is nullable; a wrong facet looks like data
+  while poisoning every filter that reads it. And **never re-derive downstream** — a matcher or
+  template that parses a location again is a second answer to one question, and they will diverge.
 
-**The runner does that refill itself when it starts** (`runner.refill_below_current`), for derive
-and dedup. It used to wait for somebody to run `trouveur refill` by hand, and #27 shipped a
-`DERIVE_VERSION` bump without it: the city filter matched nothing for days. Embed is deliberately
-not refilled at start -- it would queue postings still waiting for their description, and a model
-change is hours of CPU that an operator starts on purpose.
+## Project overview
 
-Three rules follow, and none of them are negotiable:
+Job recommendation with excellent recall and good precision: a periodic pipeline plus a rich but
+simple web UI. A few users, self-hosted, under construction. **Python 3.12**, FastAPI + Jinja2 +
+HTMX, PostgreSQL 16 + pgvector, SQLAlchemy Core + asyncpg, Alembic, Docker Compose behind Caddy.
+**`uv` is required** — `python3 -m venv` fails on the target host, and there is no passwordless
+sudo, so anything needing root belongs in a script the user runs themselves.
 
-- **Normalisation produces structure; derivation produces interpretation.** A location arrives as
-  the source wrote it and is parsed one stage later. That split is what makes a parser fix a
-  re-derive rather than a re-crawl.
-- **Never guess.** Every enum has UNKNOWN and every scalar is nullable. A wrong facet is worse than
-  a missing one: it silently poisons every filter and ranking that reads it while looking like data.
-  The corollary is that a *missing* facet is equally silent, so anything that derives to nothing
-  needs a vocabulary wide enough to cover how sources actually spell things -- `OESTERREICH` cost
-  4.3% of a live sample its country before the evaluation caught it.
-- **Never re-derive downstream.** If the matcher or a template parses a location again, there are
-  two answers to one question and they will diverge — which surfaces as a filter and a score
-  disagreeing about the same posting, and is close to undebuggable from the symptom.
+**The `runner` service is the only thing that sweeps or drains queues.** web enqueues and reads,
+never fetches; they share nothing but the database, so either can be down alone.
+
+| Path | Responsibility |
+|---|---|
+| `sources/<name>/` | `client.py` is network only; `normalize.py` is pure and versioned. |
+| `sources/` | `{board,feed}.py` are the two shared sweeps; `registry.py` is the **only** dispatch. |
+| `ingest/` | `persist` (the single write path), `derive` (facets, pure), `vocab`, `places`, `embed`. |
+| `match/` | Expansion, hybrid retrieval, RRF, reranking. `work/queue.py` is the one queue. |
+| `db/` | **All SQL.** No SQL text outside this package. |
+| `web/` | Routes, auth, templates. Reads the DB; never fetches, never sweeps. |
+| `runner/` | Schedules runs and drains queues. The only caller of `ingest.run`. `eval/` scores it. |
+
+## Ingestion is user-agnostic; selection is per user
+
+```
+INGEST  sweep ──> raw archive ──> job ──> facets ──> vector ──> lifecycle
+MATCH   profile ──> queries ──> location filter ──> dense+lexical ──> RRF ──> rerank ──> edition
+```
+
+- **Never put a user's keywords in a CORPUS query.** Sources sweep by their own structure; users
+  select over the corpus — V1 queried sources with the user's own words, capping recall at what the
+  user thought to type. Keywords **are** fine in a DISCOVERY query, whose output is a lead
+  (`docs/tasks/02`).
+- **Retention and the candidate window are different windows**, and conflating them loses postings:
+  `retrieval_horizon_days` is how long we keep a posting, `retrieve.NEW_ARRIVALS_HOURS` how far back
+  a scheduled run looks, a posting getting one chance on the day it arrives — a run the *user*
+  caused passes the whole horizon instead. **Age and arrival differ too**: staleness reads
+  `COALESCE(posted_at, first_seen_at)`, the candidate window `first_seen_at`. **A scheduled run
+  matches only once its sweep is prepared**, waiting only for work that could run now.
+
+## Critical code patterns
+
+- **Async everywhere in the pipeline**; `httpx.AsyncClient`, never `requests`, never block the loop.
+  CPU work goes through `asyncio.to_thread`, and **batch everything** — a per-row `await` or
+  mutation over a batch is a bug.
+- **Pydantic models are the contract.** `CanonicalJob` and `JobFacets` are shared verbatim by
+  adapters, the DB layer and the web views; never define a parallel dict shape for the same thing.
+- **Adapters yield, they do not write**, which keeps them testable with no database, and
+  **normalizers are pure** — no clock, no client, no connection — which is what lets a replay
+  reproduce the original result.
+- **Nothing downstream of normalisation may name a source.** If a change needs edits in the matcher
+  or the web layer as well as a source, the abstraction has leaked. Enforced by a test.
+- **Store UTC; convert at the edge, through `clock.py` and nowhere else.** `settings.timezone`
+  applies only where a person is involved — a displayed instant, or an hour somebody *chose*, which
+  is wall-clock and drifts with DST if resolved elsewhere. A stored `date` is not an instant.
+- **Specific exceptions with complete-sentence messages**; never `raise Exception(...)` or
+  `except Exception: pass`. Broad catches belong only where isolation is the point — per source, per
+  user, the runner's tick loop — and each must log and record.
+
+## Sources, access and the crawl set
+
+**Recall comes first.** `robots.txt` and a site's terms do not rule out a source, and private or
+undocumented endpoints are allowed. What rules a source out is that we cannot reach it without
+getting blocked, or without a credential we are not entitled to. Every source-specific fact — page
+caps, field names, silent-failure traps — is a comment in that source's `client.py` or
+`normalize.py`: **read the adapter first, and re-probe a live API before changing a constant**,
+since these fail silently rather than raising.
+
+- **Don't get blocked** — a block loses the source for days, which costs more than it was worth. Go
+  slow, back off at the first sign, and be polite **per _provider_, not per hostname** (~1 req/s via
+  `sources/http.py`, keyed on the registrable domain), since many platforms give every tenant a
+  subdomain. Record a host's `robots.txt` with its date as *block risk*, never as permission.
+- **Never use a personal account**, take keys from the environment only, and **don't take a source
+  we may not retain** — the archive is permanent, so one storable for days cannot work here.
+- **Isolate failures**: one dead source must not abort a run, and a source failing wholesale is
+  paused rather than charging each of its postings an attempt.
+
+- **Completeness is not success.** `closable_scopes` names the scopes whose *entire* live set the
+  sweep observed, per scope and never per source; a delta sweep returns none, closing on it would
+  retire the whole corpus. Be **delta-first**, **parse defensively** (a missing optional field is
+  `None`, one unreadable field must not discard the record), and **scope an external id by tenant**
+  unless the platform documents its ids as globally unique.
+- **The crawl set lives in the database** (`source_tenant`), not the repo, so **the corpus a commit
+  produces is not reproducible from that commit alone**. Changing it is a CLI action: a board costs
+  every user, an account only its credit. Keep configuration and observation in separate tables, and
+  validate a scope at the write — a malformed slug 404s nightly behind a rising failure count.
+- **Agents propose, humans merge**: an agent opens a PR or writes a row disabled, never enlarging
+  the crawl or the politeness budget on its own.
+
+## Privacy
+
+The repo is public. Users' career data is not, and must never enter it.
+
+- **Never commit** `.env`, database dumps, or anything holding a user's objectives, salary, watched
+  employers, address or password. **Fixtures are hand-written** — never a real payload.
+- **Profiles live in the database only**, edited through the web UI — there is deliberately no file
+  path in or out (the tenant registry is the exception).
+- **Secrets come from the environment only**: never read one from the repo, never log one, and show
+  a generated password once in the response that created it rather than in a URL.
+
+## LLM cost discipline
+
+One installation key, credit per user in dollars, metered against the balance of whoever the call
+was made for. Real spend is well under a cent a day, so this is about not being *surprising* rather
+than about money. `match/rerank.py` and `match/pipeline.py` comment how the scorer paces.
+
+- **Retrieval is free and must work with no key and no credit at all**, the deterministic query
+  expansion being the floor rather than a degraded fallback.
+- **Score a posting once per profile version, ever**, cached on `(content_hash, user,
+  profile_version)`. **Only bump `profile.version` for fields that change what a good match is**
+  (`SCORING_FIELDS`), and never re-stamp it from retrieval, or rows needing a re-score look current.
+- **Check the limits before the calls go out**, from the database rather than a snapshot, since runs
+  can overlap. Nobody is exempt, admins included, and scoring off means no paid call at all.
+  **Keep the provider pinned and reasoning disabled** — both installation settings — or price and
+  scores stop being reproducible and a reasoning model burns its budget on hidden thinking.
+
+## Web UI
+
+**The design system is the token block and component list at the top of `app.css`. Read that header
+first.** A template uses those classes and nothing else: no colour, radius or spacing in a template,
+and a new look is a new component there rather than a one-off. One word means one thing everywhere
+(`good`/`warn`/`bad`, `high`/`mid`/`low`), and repeated markup goes through `_macros.html`.
+
+- **One stylesheet, no build step, no Node, and nothing the browser loads comes from another
+  origin** (tested): htmx and the font are vendored with their licences, so a fresh clone works
+  offline and no CDN learns the reader's IP and page on every load of somebody's job search.
+- **Everything htmx does must be visible when it fails** — a failed swap raises a toast, and a
+  lapsed session leaves by `HX-Redirect` rather than a 303 it would paste into a button.
+- **Set anything every page needs in the session middleware, not per route** — admin-only included,
+  enforced by URL prefix. A per-handler check is the line somebody forgets on the next route.
+- **`places.tsv.gz` is committed vocabulary**, so derivation stays pure; rebuilding it moves every
+  facet and needs a `DERIVE_VERSION` bump.
+
+### The reader's pages
+
+- **`/recommendations` is retrieved and scored**, ordered by score. **`/search` shows every scraped
+  posting** whatever the filters said — unretrieved, unscored and closed included — being the only
+  view of what was actually collected, so keep score filters out of it.
+- **No score threshold, no run statistics and no dashboard on a reader's page**: it shows what was
+  paid for, ordered, and the reader draws their own line. Diagnostics belong on Operations.
+- **An edition is stored, not derived, and never rewritten.** It records what the reader was
+  *shown*, where `user_job_match` holds the current verdict — that duplication is the point. A closed
+  posting stays, a dismissed one leaves, a profile change publishes a second edition for the day,
+  and a posting reaches a user once per profile version. **Page by cursor, not OFFSET.**
+- **Location is the only hard filter**; everything else on Profile is a preference the reranker reads
+  as text. Don't add a second — a filter hides a posting with no way for the reader to learn it
+  existed, where a preference only moves it down the list. **Prefer losing precision to losing
+  recall**: a posting we could not place passes, and the reranker recovers precision where nothing
+  recovers one filtered out. See `_LOCATION` in `db/queries/match.py` and `ingest/derive.py`.
+
+### Operations and accounts
+
+- **Operations is one page, for an operator**, answering "is the corpus being collected properly".
+  **Surface what fails silently**: partition overflow, sweep completeness, queue depth, the gap
+  between stored and recommendable, more than one embedding version. **A run must be watchable while
+  it runs**, or a slow source and a wedged one look identical, and **estimate only from measured
+  history**. **Cancellation is a request, not a kill**: a sweep stops between sources, never inside.
+- **The first account is the admin**, there being provably nobody else it could be — so a test
+  fixture must set `is_admin` explicitly or it silently tests an admin's view of every page.
+- **The email is the login; the display name is what the UI shows**, resolved once and stored. The
+  address folds to lower case with the unique index on `lower(email)` — folding in the app alone
+  lets a case-variant duplicate in. Check `is_active` per request, a token outliving a disabling.
+
+## Database rules
+
+- **Every schema change is an Alembic migration**, no manual DDL, and **SQL lives only in
+  `db/queries/`** — a route, adapter or worker holding SQL is a bug. Both enforced by tests, as is
+  `schema.py` and the migration chain agreeing.
+- **Two identities, deliberately separate.** `job (source, external_id)` is *provenance* — the same
+  row from the same board. `job.dedup_group` is *semantic* — the same job in the world — and is a
+  **marker that must never merge or delete rows**. It keys on title and employer, not the place
+  (aggregators blank it), and must never be loosened to a fuzzy match.
+- **`job_embedding` holds open postings only**; closing a job deletes its row in the same statement,
+  keeping the table proportional to the live corpus with no flag to drift.
+- **The dense arm is exact, with no ANN index**, which would apply the filter after the graph walk.
+  See `_DENSE_SQL`; revisit only at millions of vectors, measured.
+- **Keep the two lexical paths in sync** — a `german` `tsvector` that stems and ranks, and a trigram
+  index over an `unaccent`-folded column for substrings inside German compounds. **asyncpg uses
+  `numeric_dollar` paramstyle, so `%` is NOT doubled**: `'%%'` silently breaks the trigram path.
+- **Backfills are chunked, resumable and idempotent**, paging by keyset rather than `OFFSET`.
+
+## Testing
+
+A test earns its place only if it can fail for a reason a reviewer would care about. **Write tests
+for** parsing, derivation, retrieval fusion, dedupe and upsert behaviour, query shape, cost controls,
+and every silent-failure trap a comment records. **Not for** getters, pydantic, SQLAlchemy, or
+mocks restating mocks.
+
+- **No network anywhere, ever**: synthetic fixtures and a stubbed transport. Probe a live API with
+  a throwaway shell command, never a test file.
+- **`tests/unit/` needs no database**; `tests/integration/` is skipped unless
+  `TROUVEUR_TEST_DATABASE_URL` is set. **Run integration before shipping a change to `db/queries/`,
+  the migration, or a template** — SQL that compiles is not SQL that runs.
+- **When you add a structural guard, check it can fail** by briefly introducing the violation.
+- **A rendering test must render a job card** — a page test over an empty list proves only that the
+  query returned. `StrictUndefined` is on, so a missing field raises rather than rendering blank.
+- **`tests/unit/golden/` pins the whole output of normalisation and derivation per source**, a change
+  to either moving every posting. Regenerate with `--update-goldens`, then **read the diff**.
+- **`trouveur eval` is not a test**: numbers against a baseline, never a merge gate. Needles planted
+  through the real ingest path make recall rigorous while **precision is not measurable** — an
+  unplanted posting ranking highly is unjudged, not wrong. Personas are fictional (public repo); it
+  needs a scratch database, the real model, and `TROUVEUR_EVAL_LLM_KEY`.
+
+## Commands
+
+```bash
+uv sync                                   # deps; --extra embeddings, --extra archive for the rest
+uv run pytest tests/unit -q               # the fast gate; `ruff check trouveur/` to lint
+uv run alembic upgrade head               # apply migrations; `revision -m "add X"` for a new one
+
+uv run trouveur sweep [--source greenhouse]   # fetch sources into the corpus
+uv run trouveur drain                     # work the deferred queues once
+uv run trouveur requeue|refill --kind X   # retry parked items; re-queue everything below a version
+uv run trouveur match --user 1            # retrieve, cut, rerank for one user
+uv run trouveur tenants list|add|import   # the crawl set; `add` takes a slug or a careers URL
+uv run trouveur create-user --email me@example.com   # the FIRST login becomes the admin
+uv run trouveur serve|runner              # dev server on 127.0.0.1:8080; scheduler + workers
+uv run trouveur eval --sweep|--rerank|--save-baseline   # needs TROUVEUR_EVAL_DATABASE_URL
+uv run --with geonamescache==3.0.2 python tools/build_places.py   # rebuild the city list
+```
+
+Prefer the narrowest command that proves your change, and never sweep a live source to test a parser.
+**Ask first** for anything you cannot take back: `sweep` and `eval --sweep` (live APIs), `match`
+(credit), `refill --kind embed` (hours of CPU), `test-notify` (a real inbox), `runner`, `git push`.
 
 ## Comments
 
@@ -68,1282 +275,12 @@ Write a comment only to record something a reader cannot see from the code:
 - A deliberate omission ("we do not send `pav`, it 400s").
 - Ordering or concurrency requirements.
 
-**Every trap in [Source adapter rules](#source-adapter-rules) is exactly this kind of constraint and
-MUST carry a comment at the site that depends on it.** If someone "cleans up" the umlaut handling
-because nothing explained it, we silently lose most German results.
+**Every silent-failure trap in an adapter is exactly this kind of constraint and MUST carry a comment
+at the site that depends on it.** If someone "cleans up" the umlaut handling because nothing
+explained it, we silently lose most German results.
 
 Do not write: restatements of the code, section banners, changelog notes, or TODOs without an owner.
 Leave existing comments alone unless the code they describe changed.
-
-## Project overview
-
-A comprehensive system for job recommendation, with excellent recall and good precision. A pipeline
-that runs periodically, plus a rich but simple web UI. Multi-user (for now, a few).
-
-- **Python 3.12**, FastAPI + Jinja2 + HTMX, PostgreSQL 16 + pgvector, SQLAlchemy Core + asyncpg,
-  Alembic.
-- **`uv` is required.** The system `venv` module is broken on the target host (no `ensurepip`), so
-  `python3 -m venv` fails. There is no passwordless sudo either: anything needing root belongs in a
-  reviewed script the user runs themselves, not in a command you attempt.
-- Deployed as Docker Compose (`compose.yaml`). The web UI is never published to the host; Caddy
-  reverse-proxies it and terminates TLS.
-- **The `runner` service is the only thing that sweeps sources or drains queues.** It owns the
-  schedule (a `pipeline_schedule` row, edited in the web UI) and the `pipeline_run` queue. The web
-  app enqueues rows and reads status; it never fetches and never runs a scan. web and runner share
-  nothing but the database, so either can be down without breaking the other.
-
-### Two windows, and they are not the same question
-
-- **`retrieval_horizon_days` is RETENTION**: how old an advert may be and how long `job_embedding`
-  keeps its vector. Seven days. Read by retrieval, the embed queue, the pruner and Operations,
-  which all have to agree.
-- **`retrieve.NEW_ARRIVALS_HOURS` is the CANDIDATE WINDOW**: how far back a run held after a sweep
-  looks. Twenty-five hours, so a run starting late cannot drop a sliver of the day. A posting gets
-  exactly one chance, on the day it arrives. It used to get seven, and since eligibility is a rank
-  cut, a quiet week promoted postings that two thousand others had beaten for six days running --
-  nothing about them had changed except the competition.
-- **A run the USER caused passes the whole retained horizon instead** (`whole_horizon=True`): a
-  profile change, credit granted, scoring switched back on. In each case nothing has been judged under
-  the terms that now apply. The runner already distinguishes these by `pipeline_run.match_user_id`.
-- **The staleness bound reads `COALESCE(posted_at, first_seen_at)` and the candidate window reads
-  `first_seen_at`.** One asks how old the ADVERT is, the other asks when WE got it, and folding
-  them together drops every posting a board dated before we discovered it -- on the one run that
-  could ever have offered it. Guarded by a test.
-- **A scheduled run matches only once its sweep is prepared** (`service.prepare_arrivals`): facets,
-  dedup and vector for every posting in the candidate window, up to `MATCH_WAIT_LIMIT`. It used to
-  match straight after the sweep, when none of that sweep's postings had facets or a vector yet,
-  and by the next night they had left the window -- Greenhouse, Ashby, Workday and Personio, swept
-  first, never reached a nightly edition. Only work that could run now is waited for, so an item
-  backing off, a paused source or a refill of the older corpus cannot hold the run.
-- **`pending_rerank` is bounded by what the run retrieved, not by an age rule of its own**, so
-  "how far back do we look" is answered in exactly one place. A posting the scorer stopped short of
-  is simply not retrieved tomorrow.
-
-### Ingestion is user-agnostic; selection is per user
-
-This is the central design decision and the one most easily undone by accident.
-
-```
-INGEST  (shared corpus, no user involved)
-  sweep ──> raw archive ──> job ──> facets ──> vector ──> lifecycle
-
-MATCH   (per user, cheap, re-runnable)
-  profile ──> expanded queries ──> location filter
-          ──> dense KNN ─┐
-          ──> BM25/FTS  ─┴─ RRF fusion ──> LLM rerank ──> edition + digest
-```
-
-V1 queried every source with the user's own keywords, which capped recall at whatever the user
-thought to type: a job they would have wanted but did not name was never fetched at all, so no
-amount of downstream ranking could recover it. **Never reintroduce a user's keywords into a source
-query.** Sources sweep by their own structure; users select over the corpus.
-
-### Module map
-
-| Path | Responsibility |
-|---|---|
-| `trouveur/sources/<name>/client.py` | Network only. Yields `RawDocument`. No parsing. |
-| `trouveur/sources/<name>/normalize.py` | Pure, versioned: archived payload → `CanonicalJob`. |
-| `trouveur/sources/registry.py` | The **only** place source-specific dispatch happens. |
-| `trouveur/sources/board.py` | Shared sweep for sources that return a tenant's complete board. |
-| `trouveur/sources/feed.py` | Shared sweep for global, newest-first, paged corpora. Delta-first. |
-| `trouveur/sources/parse.py` | Pure decoding shared by normalisers: timestamps, HTML to text. |
-| `trouveur/sources/scopes.py` | Tenant-identifier grammars. Each source names the one it uses. |
-| `trouveur/ingest/persist.py` | The single write path from archive to `job`. |
-| `trouveur/ingest/derive.py` | Deterministic interpretation → facets. Pure. |
-| `trouveur/ingest/vocab.py` | **Every** vocabulary, once. |
-| `trouveur/ingest/places.py` | The city list (GeoNames): every spelling of a town to one id. |
-| `trouveur/ingest/embed/` | Provider seam; local ONNX default. |
-| `trouveur/ingest/pipeline.py` | Sweep orchestration. No parsing, no SQL. |
-| `trouveur/work/queue.py` | The one versioned work queue. |
-| `trouveur/match/` | Query expansion, hybrid retrieval, RRF, reranking. |
-| `trouveur/db/` | **All SQL.** No SQL text outside this package. |
-| `trouveur/web/` | Routes, auth, templates. Reads the DB; never fetches, never sweeps. |
-| `trouveur/runner/` | Schedules runs and drains queues. The only caller of `ingest.run`. |
-| `trouveur/versions.py` | Every derived stage's version, in one file. |
-| `trouveur/eval/` | Retrieval evaluation: personas, planted needles, scorecard. |
-
-## Critical code patterns
-
-- **Async everywhere in the pipeline.** Sources are I/O-bound HTTP fan-out; use `httpx.AsyncClient`.
-  Never call `requests` or block the loop. Synchronous CPU work (embedding) goes through
-  `asyncio.to_thread`.
-- **Batch everything.** At tens of thousands of documents a sweep, the round trip is the
-  bottleneck, not the work. A per-row `await` inside a loop over a batch is a bug.
-- **Pydantic models are the contract.** `CanonicalJob` and `JobFacets` are shared verbatim by
-  adapters, the DB layer and the web views. Do not define a parallel dict shape for the same thing.
-- **Adapters yield, they do not write.** A source hands `RawDocument` batches to a sink; only the
-  pipeline persists. This keeps adapters testable with no database.
-- **Normalizers are pure.** No clock, no client, no connection. Purity is what makes replay over the
-  archive reproduce the original result.
-- **Nothing downstream of normalisation may name a source.** If a change needs edits in the matcher
-  or the web layer as well as in a source, the abstraction has leaked. Enforced by a test.
-- **Store UTC; convert at the edge, through `trouveur/clock.py` and nowhere else.** Every column
-  is `timestamptz`, the server runs `Etc/UTC` and asyncpg returns aware UTC datetimes -- none of
-  that changes. `settings.timezone` is what UTC becomes at the two edges that involve a person:
-  a displayed time (`| localtime`, never a bare `strftime` on an instant -- rendered raw, a scan
-  that ran at 09:00 in Vienna reads 07:00 and the page says nothing about why), and a day or an
-  hour somebody *chose*. `run_hour` is a wall-clock hour, so it is resolved in that zone or it
-  slides by one at every DST change, silently, on a form whose only label was "Hour". Dates that
-  are already stored as `date` are not instants and must not be converted. The archive export is
-  deliberately exempt: its partitions key on `fetched_at::date` in the database's UTC, and those
-  are storage partitions rather than a day a reader would name. One timezone per installation,
-  not per user -- the nightly scan is shared, so its hour needs a single answer; `clock.today()`
-  is the seam a per-user zone would plug into if that ever changes.
-- **An edition's day is decided once, at publish, and stored.** `clock.today()` in `_publish`,
-  never recomputed while rendering: the day is part of `user_edition_item`'s key and of the
-  constraint that stops a posting being recommended twice, so a day that moved with the viewer's
-  clock would make an immutable record viewer-dependent. Whatever decides it must be the same
-  call everywhere, or near midnight two parts of a run disagree about which day they are writing.
-- **Typed enums, not raw strings**, with an `UNKNOWN` member wherever a source could surprise us.
-- **Specific exceptions with complete-sentence messages.** Never `raise Exception(...)`, never
-  `except Exception: pass`. The sanctioned broad catches are per-source isolation in
-  `ingest/pipeline.py`, per-user isolation in `match/pipeline.py`, and the runner's tick loop —
-  each must log and record.
-
-## Source adapter rules
-
-**This is the highest-value section in this file.** Every behaviour below was verified by probing
-the live APIs on **2026-09-08**, and every one of them fails *silently* — zero rows, the entire
-corpus, or an HTTP 400 — never an exception. Re-probe before changing any of them; do not infer them
-from the shape of a URL. Each has a regression guard in `tests/test_arbeitsagentur.py` or
-`tests/test_greenhouse.py`.
-
-### Arbeitsagentur (`sources/arbeitsagentur/`)
-
-Base: `https://rest.arbeitsagentur.de/jobboerse/jobsuche-service/pc/`
-Headers: `X-API-Key: jobboerse-jobsuche` plus a browser-shaped `User-Agent` (the library default is
-rejected). `robots.txt` returns 403 and does not apply; this is a published JSON API for third-party
-use.
-
-- **The two endpoints are on different API versions. This is not a typo.**
-
-  | Purpose | Path | Works | Other versions |
-  |---|---|---|---|
-  | Search | `v6/jobs` | **v6** | `v4/jobs` → **403** |
-  | Detail | `v4/jobdetails/{base64(refnr)}` | **v4** | `v5`, `v6` → **403** |
-
-  Both directions were probed. Do not "harmonise" them.
-- **`veroeffentlichtseit` is NOT a number of days.** Only `{0, 1, 7, 14}` filter. Values `2, 3, 4,
-  5, 30, 100` are all accepted and all return the **entire ~1.0M corpus**. A "2-day catch-up" would
-  silently fetch a million rows and report success.
-- **`size` caps at 500.** `size=501` returns **HTTP 200 with an empty result list**, so raising the
-  page size "for throughput" collects nothing at all.
-- **`size × page` may not exceed 10 000**; beyond it, HTTP 400. Any partition with more matches than
-  that is unreachable — count and log the overflow, never silently keep the first 10 000.
-- **The result list key is `ergebnisliste`**, not `stellenangebote`. Older docs disagree.
-- **Search results carry no description.** `stellenangebotsBeschreibung` exists only on the detail
-  endpoint, so a description costs one extra request per posting.
-- **Broad sweeping needs no keyword.** An empty query returns the whole corpus (~1 015 000 live,
-  ~36 000 new/day). Partition by the `berufsfeld` facet: 136 partitions daily, largest ~2 500,
-  comfortably inside the result window. Read the facet from the API rather than hardcoding it.
-- **The berufsfeld facet does not sum to the total** (~0.4% carry none), so a partitioned sweep has a
-  small blind spot by construction. Record the shortfall; do not assume it is zero.
-- **Send umlauts literally.** Never transliterate a city name.
-- **Never send `pav`** (400), `homeoffice` (400) or `arbeitszeit=ho` (0 rows). There is no
-  server-side remote filter; remote comes from `homeofficemoeglich`.
-- Useful detail-only flags: `istArbeitnehmerUeberlassung`, `istPrivateArbeitsvermittlung`. Prefer
-  these over keyword-matching "Zeitarbeit" in prose. Absent a detail fetch the answer is **unknown**,
-  not False.
-
-### Greenhouse (`sources/greenhouse/`)
-
-`robots.txt` (`boards-api.greenhouse.io`, checked 2026-09-08): the only rule is `Disallow: /embed/`,
-so `/v1/boards/` is explicitly permitted. No authentication.
-
-- One request returns a tenant's **complete** live board (`meta.total`, no pagination), so the
-  response is itself the seen-set and closing is exact rather than inferred.
-- **`?content=true` includes the full description**, so there is no detail phase.
-- **`content` is HTML that has itself been HTML-escaped** (`&lt;div&gt;`). Unescape once, *then*
-  strip tags. Doing it the other way round leaves entity text in the description and feeds markup
-  to the embedder and the reranker.
-- **`location.name` is free text**, and multiple locations arrive semicolon-separated in one string
-  (`"Remote, Canada; Remote, US"`). Pass it through unparsed; interpreting it is derivation.
-- **There is no index of tenants anywhere.** The `source_tenant` table is the only list of boards
-  that exists. An unknown slug returns 404. Verify a slug with one request before adding it, or it
-  fails every day until someone reads the failure count.
-- Scope external ids by slug (`gitlab:8503792002`). Nothing documents Greenhouse ids as globally
-  unique, and a collision would silently merge two unrelated postings onto one row.
-
-### The board family (`sources/board.py`)
-
-Ashby, Lever, Breezy, Rippling, Greenhouse and Personio all publish a tenant's **complete** board
-in one request, and differ only in the URL and the response shape. They share `sweep_boards`; a new
-one of this kind is a URL template, an extractor and a normaliser. What makes them one family is
-exactly what `closable_scopes` depends on — the response *is* the live set. A source that pages,
-filters or windows its results is **not** in this family and must not be forced into it.
-
-Verified live on 2026-09-09. Each of these fails silently:
-
-- **Lever, Breezy and Rippling return a bare top-level array**, not an object with a `jobs` key.
-- **Lever names the title `text`.** There is no `title` key; reading one drops the whole board.
-- **Lever's `createdAt` is epoch milliseconds**, where Arbeitnow's `created_at` is seconds. Read as
-  the wrong unit a posting lands in 1970 or in the year 58 000 — use `sources/parse.py`.
-- **Ashby needs `?includeCompensation=true`**, or salary arrives only as a rendered string
-  (`"$211.4K – $290.6K • Offers Equity"`) that cannot be turned back into numbers.
-- **Ashby titles carry leading whitespace** on live boards, and the title is an identity input.
-- **An Ashby board name may be a domain** -- `mistral.ai` and `roadsurfer.com` are live boards. The
-  default slug grammar rejects a dot, so Ashby uses `scopes.dotted_slug_scope`; the permission is
-  deliberately not global, because for every other source a dotted slug is a pasted homepage.
-- **Breezy's `country` and `state` are objects, not strings.** Read as strings they put a dict repr
-  in the country column, which matches no vocabulary entry at all.
-- **Rippling's listing has no description, company or date** — it is the one board source that
-  genuinely needs a detail fetch. Its `description` is an object keyed by section, not a string.
-
-### Personio (`sources/personio/`)
-
-`robots.txt` (`jobs.personio.de`, checked 2026-09-09): empty, so no restriction is expressed. The
-XML feed is Personio's own syndication endpoint. Boards are per-tenant subdomains.
-
-- **An unknown tenant returns HTTP 429 with a Vercel "Security Checkpoint" HTML page, not 404.** A
-  valid board returns 200 even when polled fast, so 429 here is a bad slug, not throttling.
-  `PoliteClient` retries 429 by design, so without a content-type check a typo'd slug burns four
-  attempts and a backoff every sweep and reports itself as rate limiting for ever.
-- **The feed states no posting URL** — no href, link or url element exists. The canonical URL is
-  built from the tenant and the id, which is why the tenant must survive in the external id.
-- XML is decoded to a dict in the client, exactly as the Greenhouse client calls `response.json()`:
-  that is transport decoding. Reading its *fields* stays in the versioned normaliser.
-
-### Workday (`sources/workday/`)
-
-`robots.txt` is **checked per tenant host, not per platform** — boards are tenant-hosted and their
-rules differ. A representative host on 2026-09-09 disallowed only `/talentcommunity/` and
-`/refreshFacet/`. The sibling SuccessFactors platform serves `Disallow: /` on one tenant host and
-nothing on another, so a platform-wide verdict is not sound for this family.
-
-- **`limit` caps at exactly 20.** `limit=21`, `50` and `100` all return HTTP 400.
-- **`total` is unusable as a count or a terminator.** One query reported `total=2000` at offset 0,
-  `total=0` at offset 1980 and `total=2000` at offset 2000, while still returning rows past its own
-  stated total. The only reliable end of the walk is an empty `jobPostings` array.
-- **`postedOn` is relative prose** (`"Posted Today"`), not a date. Never parse it; the detail's
-  `startDate` is the only absolute date either payload states.
-- **`locationsText` is a count** (`"3 Locations"`), not a place. Used as a location it fills the
-  city column with "3 Locations" on every multi-site posting.
-- Search is a POST, and a board is three facts (`tenant:wdN:SiteName`) in which case is
-  load-bearing — the API 404s on a lowercased site name.
-
-### The global feeds (`sources/feed.py`)
-
-Workable's public board, Arbeitnow, Himalayas and Jobicy each serve one corpus, newest first, with
-no tenant. They are far too large to re-fetch daily — Workable alone is ~170 000 postings at a
-fixed 20 a page — so the ordinary run is a **delta** that stops once postings fall outside the
-window, and therefore **closes nothing**. Only a backfill that pages to the end may close.
-
-- **Workable's page size is fixed at 20 and cannot be raised.** `limit=100` returns HTTP 200 with
-  no `jobs` key and no cursor — an empty result indistinguishable from the end of the corpus. Send
-  no page-size parameter at all. Unknown query parameters are silently ignored, so a filter that
-  looks like it applied may not have.
-- **Workable's page cursor is READ as `nextPageToken` and SENT as `pageToken`.** The two names are
-  not the same and nothing says so. Sending the response's own name back is an unknown parameter,
-  and per the rule above it is ignored without a word — so every request returns page one, the
-  delta never exhausts its window, and the walk runs to `feed.MAX_PAGES`. That is 20 000 requests
-  at one provider; the sweep then fails on an HTTP 429 and the rate limit is the only symptom
-  anyone ever sees. Re-probed 2026-09-27.
-- **Workable is NOT newest-first**, although the other three feeds are. It leads with boosted
-  postings ordered by when the boost expires (an advert from four weeks ago in front of everything
-  published today), and only the unboosted tail is date-descending. Breaking on the first
-  out-of-window row — which is what `sweep_feed` does for every other feed — stops it after about
-  thirty postings.
-- **Arbeitnow pins a weeks-old posting above today's** (48 days old at the top of page one on
-  2026-09-29). Breaking on the first out-of-window row collected nothing that night and the sweep
-  still reported success, so `sweep_feed` skips an old row and ends the walk on the first PAGE
-  with nothing inside the window -- one page past the edge, never the years of history behind it.
-- **`day_range=N` is a real server-side date filter** and is how Workable's window is narrowed
-  instead (`sweep_feed(server_side_window=True)`). Unlike Arbeitsagentur's `veroeffentlichtseit`
-  it validates: a non-number and a negative are both HTTP 400. **`day_range=0` means no filter at
-  all** — the whole ~170 000-posting corpus — so it must never be reached by rounding a small
-  window down. Measured 2026-09-27: `1` → 1 247 postings, `7` → 19 958, `30` → 53 901.
-  The daily delta asks for **2**: seven days was ~1 000 requests and HTTP 429 every night.
-- **A page whose rows we already hold means the cursor is stuck**, whatever the cursor says, and
-  `sweep_feed` abandons the walk there. It is not an end of corpus and never makes a scope
-  closable — a stalled cursor that reads as "complete" would retire everything the feed holds.
-- **Workable states the location already structured** (`{city, subregion, countryName}`); do not
-  re-parse the rendered string.
-- **Himalayas has no `id` field** — `guid` is the identity. Its `locationRestrictions` say where a
-  candidate must be, not where an office is.
-- **Jobicy prefixes every field** (`jobTitle`, not `title`) and serves one capped page with no
-  cursor, so it passes `complete_on_backfill=False`: treating that page as the corpus would retire
-  every other Jobicy posting we hold.
-- A source that names its work location in words (`"Anywhere"`, `"Worldwide"`) needs those terms in
-  `vocab.REMOTE_TERMS`, or they are read as a city.
-
-### All adapters, without exception
-
-- **Failure isolation.** One dead source must never abort a run. `ingest/pipeline.py` wraps each
-  source and records the error in `source_sweep`.
-- **A source failing wholesale is paused, not its postings.** Detail work stops for a source after
-  `workers.SOURCE_BURST` failures in a row and every waiting item of that source is held back for
-  `SOURCE_PAUSE`, spending no attempt. On 2026-09-22 a 403 burst from Workday cost 1,500 postings
-  all five attempts each; they parked for good while most of them closed.
-- **Completeness is not success.** `SweepOutcome.closable_scopes` names the scopes whose *entire*
-  live set the sweep observed. A delta sweep returns none: seeing only what was published yesterday
-  says nothing about whether an older posting is still live, and closing on it would retire the
-  whole corpus on the first run. Report completeness per scope, not per source — one tenant's board
-  failing says nothing about another's.
-- **Delta-first.** Use the cheapest incremental mechanism the source offers. Never re-fetch the
-  whole corpus on a daily run.
-- **Be polite, per _provider_ rather than per hostname.** At most ~1 request/second, via
-  `sources/http.py`. The budget is keyed on the registrable domain because Personio, Breezy,
-  Teamtailor and Workday give every tenant its own subdomain: keyed on the hostname, 1 258 Personio
-  boards would be 1 258 independent budgets — up to 1 258 requests a second at one provider, with
-  every counter still reading as compliant. Over-grouping is the safe direction to be wrong in.
-- **Robots is checked per tenant host, not per platform**, for any source whose boards are
-  tenant-hosted, and the finding is recorded with its date.
-- **A host that serves no `robots.txt` expresses no restriction.** Record that as the finding;
-  silence is neither permission nor refusal, and it is not the same as an `Allow`.
-- **Never reach a source through a reverse-engineered private endpoint or a hardcoded credential**,
-  however freely other projects do it.
-- **Never accept a source whose terms forbid retention.** The raw archive is kept forever, so a
-  source permitting only 14 days of storage is incompatible by construction, not merely awkward.
-- **Parse defensively.** A missing optional field is `None`, not a `KeyError`. A field you cannot
-  parse must not discard the whole record.
-
-## The crawl set, and why it is two tables
-
-A per-tenant source needs a list of tenants, because some publish no index of their own. That list
-lives in the database (`source_tenant`), not in the repository, because it is written by more than
-one thing: an operator through the CLI today, a discovery pass later. A discovery pass proposing
-hundreds of candidates does not belong in a hand-edited file.
-
-The cost is real and was accepted deliberately: **the corpus a given commit produces is not
-reproducible from that commit alone.** Two installations on the same code crawl different companies.
-
-**Configuration and observation stay in separate tables.** `source_tenant` is the crawl set;
-`source_scope_health` is what happened when we asked. This is load-bearing and was learned the hard
-way — the table these replaced mixed an editable board list with health columns that nothing ever
-wrote, so half of it was permanently dead and the UI reported "last success: —" indefinitely, which
-reads as "not run yet" rather than "never recorded". If two kinds of writer own two halves of a
-table, one half will rot unnoticed.
-
-Rules that follow:
-
-- **Managing the crawl set is a CLI action, not a web one** (`trouveur tenants …`). It is shared by
-  every user, so enlarging it is an operator decision — exposing it per user means one person
-  adding five hundred boards and everyone paying the crawl cost. Operations shows it read-only.
-  Managing ACCOUNTS is the opposite and is a web action (`/users`), because the cost is bounded by
-  the credit that page grants: an account costs what it is given, a board costs everybody.
-- **A discovery pass inserts `enabled = false`, `origin = 'discovered'`.** It proposes; a human
-  promotes. Discovery must never be able to enlarge the crawl, the bill or the politeness budget on
-  its own.
-- **`tenants.local.toml` is a preload, not the crawl set** (`sources/seed.py`,
-  `trouveur tenants import`). A stopgap until discovery exists, because typing a board list one
-  `tenants add` at a time does not survive a database reset. It only ever **inserts**: deleting a
-  line removes nothing, and a board an operator disabled stays disabled across a re-import. It is
-  gitignored — committing one installation's board list would imply the corpus is reproducible
-  from the commit, and would make every installation crawl the same companies. `.example` is the
-  committed template, and a test pins that it parses and names only tenant-scoped sources.
-- **Validate a scope at the write** (`registry.clean_scope`, grammars in `sources/scopes.py`). One
-  grammar does not fit every source: a Greenhouse board is a path segment, a Workday board is
-  `tenant:wdN:SiteName` with load-bearing capitals. A malformed slug that reaches the table
-  404s on every sweep afterwards and surfaces only as a slowly growing failure count.
-- **A tenant-scoped source with no enabled tenants is dropped from the run**, not swept. Sweeping
-  it would make no requests, find nothing, and report a perfectly healthy empty sweep — which is
-  indistinguishable from a source that is working and finding nothing.
-
-## DON'T: robots.txt policy
-
-**Check `robots.txt` before adding any source, and record the finding in the adapter docstring
-with the date.**
-
-- **Never scrape willhaben.at.** Its robots.txt states automated access is *"expressively
-  forbidden"* and disallows `/jobs/webapi/`, `/rest/`, `/restapi/`.
-- **Never scrape StepStone search-result pages.** `stepstone.at` disallows `/5/ergebnisliste.html`
-  and `/?*`.
-- Do not "temporarily" add a disallowed source to test something.
-
-These four were surveyed on 2026-09-09 and are **refused**. They are listed because widely-copied
-open-source job scrapers use all of them, so without a record someone re-adds one citing those
-projects as precedent:
-
-| Source | Evidence, verbatim |
-|---|---|
-| **AMS Austria** | `jobs.ams.at`: `User-agent: *` gets `Allow: /public/emps/$` then `Disallow: /public/emps/` — the exact path only, nothing beneath it — while `LinkedInBot` gets a blanket exemption above it. `jobroom.ams.or.at` is `Disallow: /`. The AMS HR-API is a write-only channel for employers. Austria's national job service is not crawlable, and is **not** an equivalent of the German Arbeitsagentur. |
-| **SmartRecruiters** | `api.smartrecruiters.com`: `User-agent: LinkedInBot / Allow: /v1/companies/` then `User-agent: * / Disallow: /`. The posting API is functionally public but explicitly reserved to LinkedIn's crawler. |
-| **Recruitee** | `api.recruitee.com`: `User-agent: * / Disallow: /`. |
-| **Remotive** | `remotive.com`: `Disallow: /api/*` — its own documented public API is robots-disallowed. |
-
-Also refused, for reasons other than robots: **Adzuna** (terms bar storage beyond a 14-day
-evaluation, incompatible with a permanent archive), **Jooble** (500 requests *lifetime*),
-**monster.at** (bot-walled in practice), and **LinkedIn, Indeed, ZipRecruiter and Glassdoor**,
-which are reachable only through reverse-engineered private endpoints with hardcoded credentials.
-
-## DON'T: privacy policy
-
-The repo is public. Users' career data is not, and must never enter it.
-
-- **Never commit:** `.env`, database dumps, or anything holding a user's objectives, salary
-  expectations, employers watched, email address or password.
-- **Profiles live in the database only**, edited through the web UI. There is deliberately no
-  file-based path in or out for them; do not add one. This does **not** apply to the tenant
-  registry — see below.
-- **Test fixtures are hand-written and synthetic.** Never commit a captured page or a real scraped
-  payload — third-party content, repository bloat, and a fixture nobody wrote is a fixture nobody
-  understands when it starts failing.
-- **Secrets come from the environment only**, delivered by the Compose `env_file`. Never read a
-  secret from a file inside the repo, and never log one.
-- **No user secret is stored at all any more.** The LLM key is the installation's and lives only in
-  the environment, which is why `crypto.py` and `ENCRYPTION_KEY` are gone: an encryption seam kept
-  for one column nobody writes is a seam that rots. Never log the key and never render it to a
-  browser. A generated initial password is shown **once**, in the response that created the account,
-  and never travels in a URL — a URL is in the browser history, the proxy log and the Referer of
-  whatever the reader clicks next.
-
-Before any commit: `git status` must be clean of the above.
-
-## LLM cost discipline
-
-**One installation key, credit per user.** `OPENROUTER_API_KEY` in `.env` is the only LLM
-credential; users are granted CREDIT in dollars and every call is metered against the balance of
-whoever it was made for. Bring-your-own-key was the whole of onboarding -- a new user had to open
-and fund an OpenRouter account before they could be shown one recommendation -- and it bought
-nothing that credit does not: one user's empty balance still cannot touch another's.
-
-- **Retrieval runs first and is free; nothing caps the paid stage but the user's ceiling.**
-  There is deliberately no deterministic cut between the two: a rule that rejected a posting before
-  scoring hid it from the user with no way to find out it existed. Internships, working-student
-  roles and staffing agencies are the reranker's to penalise, in the system prompt. What bounds the
-  work is `retrieve.FUSED_LIMIT` -- how many candidates survive fusion -- and what bounds the spend
-  is the DAILY ceiling, in dollars, where the user set it, and the credit they hold. `RERANK_LIMIT` was neither: it kept the
-  bill small and, as a side effect, decided how long the Recommendations page was, so after a
-  profile change a user met their own corpus 150 postings a day for a fortnight.
-- **Always cache by `(content_hash, user, profile_version)`.** A posting is scored once per profile,
-  ever. Re-scoring an unchanged posting is a bug, not an inefficiency.
-- **Check both limits before the calls go out, not after, and price them for all of them.** Scoring
-  runs in waves of `rerank.CONCURRENCY`, issued together, so the test has to cover what the whole
-  wave can cost (`rerank.affordable`). A retry loop that empties somebody's credit is not something
-  to discover from them. Spend is metered in **USD**, the currency OpenRouter bills in — an EUR
-  column would put a stale exchange rate between the meter and the cap.
-- **A run that scored nothing and recorded an error is FAILED, and the error is on the run**
-  (`runner._match_verdict`, used by the scheduled path and the match-only path alike). The
-  scheduled path finished every run SUCCESS and left `MatchReport.errors` out of the report, so a
-  rejected `OPENROUTER_API_KEY` read as a healthy nightly scan that happened to score zero --
-  which is what a quiet night looks like too. The verdict is keyed on `scored` and never on
-  `retrieved`: retrieval is free, runs with no key at all, and returns hundreds of postings while
-  every paid call is being refused. One run carries every user's errors, so each message names its
-  user.
-- **There are two limits and a run must report WHICH one stopped it** (`stopped_on_ceiling`,
-  `stopped_on_credit`). They need different answers from the reader: a ceiling lifts at midnight,
-  an empty balance needs an admin. Collapsed into one flag, the page can only say "no more today",
-  which is a lie half the time.
-- **A balance is derived, never stored**: `SUM(user_credit_grant) - SUM(user_llm_spend)`. A balance
-  column would be a second record of a fact the spend meter already holds, and a run that died
-  between the call and the decrement would leave the two disagreeing with nothing to say which was
-  right. Grants are **append-only**, so a top-up keeps who gave it and when, and a mistaken grant is
-  corrected by a negative one rather than by an edit.
-- **Spend is metered per DAY** (`user_llm_spend.period_day`), because the ceiling is a day. Tested
-  against a running monthly total a daily ceiling would never lift.
-- **An admin holds credit exactly like everybody else.** There is no exemption and re-adding one
-  is a regression. `Spending.unlimited_credit` bought nothing a grant does not -- an admin tops
-  their own account up on the Users page in two clicks, and that top-up is recorded in the
-  append-only grant table rather than being an invisible permission -- while costing a branch
-  through the whole cost path and three more in the UI, each reachable by one account in the
-  installation and therefore exercised by nobody. The one consequence is real and intended: a
-  fresh installation scores nothing until its first admin grants themselves credit, which the
-  out-of-credit banner says on every page.
-- **Bump `profile.version` only for fields that change what a good match is** (`SCORING_FIELDS`). A
-  cost setting such as `scoring_enabled` must not invalidate a cache and bill a re-score.
-- **Text the reranker reads is multiplied by every posting scored; text expansion reads is not.** This
-  is why `profile.background` reaches the two stages differently: expansion sees the whole field,
-  because that call is billed once per profile version, while the reranker sees a distillation
-  derived by the same cached, versioned stage (`user_query_expansion.background_summary`).
-  `rerank.build_prompt` takes the summary as an **argument** and must never read
-  `profile.background` itself -- the two look identical in a diff, and the second one bills a
-  4,000-character CV once per posting scored -- thousands of times in a run -- out of that user's
-  credit, besides burying the objectives under it. Guarded by a test.
-- **Query expansion costs one call per profile version, not per job**, and is cached. The
-  deterministic expansion is the floor, not a degraded fallback: retrieval must work fully with no
-  key and no credit at all. **Only a full expansion is cached**, though: a run with nothing to spend,
-  or with scoring paused, produces the floor, and storing that would pin the profile version to it
-  for ever, so a top-up later would silently buy nothing.
-- **A malformed response leaves that posting unscored, never scored 0.** Scoring garbage as 0
-  caches a wrong verdict and hides good jobs permanently. It is billed and left pending, so the
-  next run asks again. One failed call must not end the stage either: at a few thousand calls a run
-  a single timeout would leave most of the corpus unscored, so only a wave that failed **entirely**
-  stops the run -- that is the key, the credit or the provider rather than a blip.
-- **Always send `reasoning: {"enabled": false}`.** Without it a reasoning model spends the whole
-  `max_tokens` budget on hidden thinking and returns empty content — batch lost *and* billed.
-- **Always pin a provider.** Unpinned, OpenRouter spreads one model across many backends at a wide
-  price spread and differing quantisation, so neither cost nor scores are reproducible. Pinning also
-  lets `data_collection: "deny"` keep profiles away from backends that may train on them.
-- Changing the default model is an eval question, not a taste question. **The model and the
-  provider pin are installation settings** (`default_llm_model`, `default_llm_provider`), never
-  a per-user field: a user-chosen model makes scores incomparable across users and lets the pin
-  be cleared. The Settings page shows them read-only. Every field left on Profile is a
-  `SCORING_FIELDS` member.
-- **The ceiling is the user's, is a DAY, and is theirs only while scoring is on.** It is a column on
-  `user_profile` beside `scoring_enabled` -- the two cost controls in one place -- defaulting to
-  **$0.25**, which is hardcoded and deliberately not a setting: an installation default would be a
-  second place the number lives, and the only value that matters is the one on the user's own row.
-  The form disables the input while the switch is off, and **a disabled input submits nothing**, so
-  an absent value means "keep it"; the route refuses a posted ceiling while scoring is off rather
-  than trusting the markup to have disabled it.
-- **Settings STATES the monthly worst case beside the daily ceiling and does not let anyone set
-  one.** The month is what a reader actually worries about, so it is arithmetic on the page
-  (`ceiling × 30`), not a second limit. Two numbers for one decision is how they come to disagree,
-  and a monthly cap sized for a quiet week stops a profile-change re-score half way through -- not
-  as an error, just as an edition that is quietly short.
-- **The user's two cost controls are the `scoring_enabled` switch and the ceiling it governs.**
-  The switch submits itself (`.switch`, not a tick box: one that needed a Save button would be a
-  tick box); the ceiling keeps a Save button. Retrieval depth is two constants,
-  `retrieve.PER_QUERY_DEPTH` (how deep one query goes) and `retrieve.FUSED_LIMIT` (a safety rail on
-  how many survive fusion); neither is a setting, because retrieval is free. Scoring depth is not a
-  number at all any more -- the scorer stops when the scores run out. `rerank_limit` was three things at once
-  — list length, bill and pause — and it read as a volume dial while being the only way to stop
-  spending. Off means **no paid call at all** runs for that user, expansion included, which is
-  why `run_for_user` withholds the `Spending` rather than gating the rerank alone. Its existence is
-  the gate, exactly as a stored credential's was.
-- **`digest_enabled` is the opt-out, and it is a switch rather than the absence of data.** A
-  missing email used to be the only way not to receive the digest, so opting out required having no
-  way to be reached at all; when every account gained an address that opt-out would have vanished
-  in silence. It lives beside `scoring_enabled` and is not a `SCORING_FIELD`: declining an email
-  must not bill a re-score.
-- **Recommendations shows no run statistics at all.** `retrieved`/`passed`/`scored` and the cost
-  of the last run are diagnostics; they live on Operations. The page is a reading list, and
-  "450 candidates" is not a sentence a reader can act on.
-- **An empty balance, or a missing installation key, is a full-width `.banner warn` on every
-  page**, set by the session middleware (`request.state.out_of_credit`,
-  `request.state.scoring_unconfigured`) so no route can forget it — a per-route check hides it on
-  exactly the one page that needed it. Each says what to do about it and who has to do it; the free
-  stages still run regardless. The balance itself is in the topbar on every page, because it is the
-  one number that decides whether tomorrow's scan scores anything.
-- **A scoring change erases nothing.** The version bump alone queues the re-score, because
-  retrieval **must not re-stamp** `user_job_match.profile_version` — that column records the
-  profile a posting was SCORED under, and retrieval runs first on every row it finds again, so
-  re-stamping made the rows most worth re-scoring look current and `profile_version < :current`
-  matched nothing. The repair for that used to be `reset_scores`, which nulled every score and
-  `scored_at` the user had — and since an edition was derived from `scored_at`, editing a profile
-  wiped the whole Recommendations history while the page promised the opposite. Guarded by a test.
-- **Matching is started by the scan, by a profile change and by a credit grant**, never by a button.
-  Each queues a match-only run (`pipeline_run.match_user_id`) that the runner executes like any
-  other: it sweeps nothing and sends no digest. One per user at a time — a second must not queue
-  another paid run. A button asking "match now" could not say whether it would do anything,
-  because with no backlog it retrieves, scores nothing, costs nothing and changes no pixel.
-
-## Web UI
-
-- **Recommendations and Search have deliberately different scope; do not blur them.**
-  `/recommendations` is retrieved AND scored, ordered by `llm_score` descending. `/search`
-  shows **every** scraped posting regardless of filter outcome, including unretrieved, unscored
-  and closed ones — that is the only view of what was actually collected. Adding a score filter
-  to `search_jobs` defeats its purpose; keep the distinction in
-  the query layer, not just the UI.
-- **There is no score threshold, and re-adding one is a regression.** It hid postings the user had
-  already paid to have scored, behind a number they had to guess — and guessing it low enough to
-  see them made it meaningless. The page is paged, fifty at a time, **by cursor and never by
-  OFFSET** — every posting in the edition stays reachable, which is the property a threshold broke.
-  The page shows what was paid for and the reader draws their own line, so **the ordering is the
-  product**:
-  `ORDER BY e.llm_score DESC` is load-bearing, not cosmetic. The digest is bounded the same way,
-  by count rather than by score.
-- **The score is the first thing on a row and it is coloured** (`score_pill`, `.score.high/.mid/
-  .low`). The band names in the macro and in `app.css` must match: they did not, and every score
-  of 65 and over rendered with no colour at all for as long as that went unnoticed.
-- **A row's actions are revealed on hover; a posting the reader FILED shows a tag, not the
-  control.** Four controls on every row, used on almost none of them, were a quarter of the
-  row's width of permanent furniture. They live in a gutter `.job-main` reserves whether they
-  are shown or not, so revealing them cannot reflow the list under the pointer, and
-  `pointer-events` rather than `visibility` is what stops an invisible button being clicked --
-  `visibility: hidden` would make them unfocusable and `:focus-within` could then never fire,
-  which is the whole keyboard path. Leaving the control on show for a saved or applied posting
-  was tried and is worse: four controls appearing on some rows and not others punch holes down
-  a list whose evenness is the point. So the resting state is one `.filed` tag, pulled out of
-  the flow to the right edge the control will occupy -- in flow it is pushed left by the width
-  of two things nobody can see. It is rendered by `_state.html` and never by `job_card`:
-  `hx-swap` replaces only that span, so a copy in the card would still read "saved" after the
-  reader pressed "dismissed". Guarded by a test.
-- **A touch layout is keyed on `(hover: none) and (pointer: coarse)`, never on `hover` alone.**
-  A headless browser reports `hover: none` with no pointer at all, so on the shorter query every
-  screenshot and every rendering check silently measures the touch layout instead of the one
-  people use -- and a hover-revealed control looks permanently broken in the only pictures anyone
-  takes of it.
-- **Profile list fields are picked, not typed.** `countries` is validated against what derivation
-  can produce (`COUNTRY_NAMES`, pinned to `vocab.COUNTRIES` by a test). Free text there once
-  saved `Remote` and then failed validation on every read: the Profile page and the match run
-  both 500ed for that user until someone edited the row. `profile_save` refuses an off-list value
-  with a 400. There is no "not stated" tick box any more, because there is no facet filter left
-  that would need one: a filter on an enum drops every posting whose facet is unstated the moment
-  it is set, and the control existed only to undo the filter the user had just set.
-- **Location is the only hard filter, and everything else on Profile is a preference.** The
-  reranker reads `min_salary_eur_year`, `languages`, `must_have` and the objectives as
-  prompt text; none of them narrows the query. Work mode, seniority, employment type and a salary
-  floor were filters once and each dropped every posting whose facet was unstated, which is why the
-  form had a "not stated" tick box beside three of them — a control whose only job was to undo the
-  filter the user had just set. Do not add a fifth: a filter here hides a posting with no way for
-  the reader to learn it existed, while a preference in the prompt only moves it down the list.
-- **`remote_anywhere` belongs to the location filter, and unticked it means NO fully remote role.**
-  Ticked, a fully remote role passes wherever it was posted: a role with no office is in no country,
-  so the one it names cannot reject it. Unticked, none passes, whatever country it lists -- "remote
-  in Albania, Andorra, Austria, ..." named the reader's country and was 21 of 50 postings shown to
-  a reader in Vienna who had declined remote work. Only a posting DERIVED remote is kept out:
-  hybrid, on site and unstated all pass. Onsite and hybrid are not distinguished anywhere on
-  purpose — both mean "you go there", which the country already says.
-- **A posting that states no location passes.** Not an escape clause on one arm of the filter but
-  how the filter works: a posting nobody parsed a country out of is not a posting somewhere else,
-  and dropping it would cost recall for a derivation gap. A posting derived REMOTE passes only for
-  a reader who ticked `remote_anywhere`, with or without a country.
-- **A posting whose source named no place AT ALL is judged by its twins.** When `location_text` is
-  empty and an open posting in the same `dedup_group` has location facets, it passes only if one
-  of those twins does: it is a copy of a role its origin board places. Only when the source said
-  nothing -- an unresolvable town beside a twin elsewhere ("Sobernheim" and "Coburg") is the same
-  role in another place, and judging it by the twin would hide it from the reader who lives there.
-- **The reranker is told the whole location wish** -- circles with their radius, countries, and
-  whether fully remote roles are wanted -- because it is the only judge of what the filter cannot
-  see. Told only the city names, and that remote satisfies them, it put a remote role requiring
-  relocation to San Francisco first for a reader in Vienna who had declined remote work. Where a
-  role is *later* ("relocate within a year") lives in the description, never in a facet.
-- **Cities are filtered by GeoNames id, never by name.** Cities as the source spelled them
-  (`job_facet.cities`) are for display only: `Wien` and `Vienna` coexist there, and a
-  `f.cities && :cities` clause would silently lose one of them, plus every suburb. Derivation
-  resolves each town to one id (`place_ids`) through `ingest/places.py`, the profile stores ids
-  picked from the same list (`city_ids`) with one `radius_km`, and the match run turns the circles
-  into the set of ids inside them. Both sides read the one list, so they cannot disagree.
-- **Countries and cities add up; they never narrow each other.** A posting passes if it is in one
-  of the user's countries OR inside one of their circles. Nothing picked at all means everywhere
-  -- but cities alone must not read as "no countries, so everywhere".
-- **A town that cannot be resolved falls back to its country, and is never guessed.** A name
-  several towns share resolves only when one is ten times bigger than the rest (`Frankfurt` yes,
-  `Neustadt` no). With the posting's country that is decided within the country; a posting that
-  names a bare town and nothing else (`London`, `Bielefeld`) is decided against the whole world,
-  which is why the city list is worldwide -- against Europe alone every "Vienna" would be Wien,
-  because Vienna, Virginia would not be there to compete. A location with a part we cannot read
-  (`Vienna, VA`) is never looked up worldwide: that part is what says which Vienna it is.
-- **A posting with no country passes every location filter, so the vocabulary names every
-  country.** A bare `China` derived to nothing, and a user who picked only Vienna was shown jobs
-  in China and London. The rule stays -- 43% of open postings had no country, mostly from a
-  derivation gap, and dropping them would cost that much recall -- so the gap is closed at
-  derivation instead. `Georgia` is deliberately absent: it is a US state far more often.
-  An unresolved town's country goes to `unplaced_countries`, and the filter keeps that posting
-  whenever the country is one the user's circles reach into -- "Germany" alone might be Lörrach,
-  inside a circle around Basel. A wrong id would put a posting in the wrong circle and hide it;
-  an unresolved one only costs precision, which the reranker recovers.
-- **A location we cannot parse is read for every place it mentions, and a namesake is never
-  chosen** (`derive._mentioned`). "Stating no location" had come to mean "written untidily":
-  `Berlin Office`, `Munich, Bavaria`, `Hamburg or Berlin` and a bare `Geneva` all passed every
-  filter, and 47 of the 50 postings in one Vienna reader's edition were in Berlin, Munich and
-  Paris. So words that name no place (`vocab.LOCATION_NOISE`) are dropped, `;`, `|` and `or`
-  separate places, and whatever is still unread is scanned. A town several places share adds
-  EVERY country it could be in to `unplaced_countries` and leaves `countries` empty -- `Geneva` is
-  Switzerland-or-the-US, which keeps it from Vienna without guessing which -- so the filter judges
-  a posting as unstated only when it has neither. Two rules keep the scan from costing recall,
-  each set by replaying the whole corpus: a word inside unread text is evidence of a town only if
-  some town of that name has 100 000 people (`From`, `Market`, `Store` and `Fully` are all towns),
-  and a smaller one may ADD countries beside other evidence but never be the only reason a
-  posting is placed -- `Media Markt, Fulda` must keep Germany although only Médéa is big enough.
-  A stated country we cannot read is never scanned past: it may be what names the town.
-- **`places.tsv.gz` is vocabulary, and the one generated file we commit.** Built by
-  `tools/build_places.py` from GeoNames (CC BY 4.0) via the `geonamescache` wheel, because
-  download.geonames.org is not reachable from every build environment. Committing it keeps
-  derivation pure and reproducible from the commit. Rebuilding it changes derived output for
-  every posting, so it comes with a `DERIVE_VERSION` bump, exactly like an edit to `vocab.py`.
-- **An edition is paged by cursor, and the order it pages by must be TOTAL.** `(llm_score,
-  job_id)`, tiebroken on `job_id` because it is part of the key and therefore unique within an
-  edition -- `posted_at` is nullable and repeats, so a page built on it can repeat or skip a row.
-  Higher `job_id` is later ingestion, so among equal scores it still reads newest first.
-- **An edition is stored, not derived, and never rewritten** (`user_edition_item`). It holds the
-  score, reason and flags the reader was SHOWN; `user_job_match` holds the current verdict. That
-  duplication is the feature. Derived by grouping `scored_at::date`, a posting re-scored later
-  left the day it was published in and yesterday's page silently lost a row — and a closed
-  posting dropped out of a day whose count still counted it. So: a closed posting **stays** in
-  its edition with the card's `closed` tag, and only a posting the reader **dismissed** leaves,
-  from the list and the count together (`_NOT_DISMISSED`, shared by both queries so they cannot
-  disagree).
-- **No edition is ever replaced, including today's, and there is no confirm step.** An edition is
-  a (day, profile version) pair -- `profile_version` is part of the key -- so a profile change
-  publishes a SECOND edition for the day beside the one already there and the dropdown lists both.
-  Replacing used to be the single exception to "an edition is never rewritten", and the confirm
-  page existed only because a save destroyed something. Removing the exception removed the page
-  with it; do not reintroduce either. The version is named in the dropdown only when it is not the
-  one currently in force, because silence means "this is you".
-- **A posting reaches a user once per profile version, ever.** Only a profile change can bring it
-  back, and the database enforces it (`uq_edition_item_once_per_version`) rather than trusting
-  `pending_rerank`'s WHERE clause — a posting silently recommended twice reads as the system
-  repeating itself.
-- **Recommendations has no heading, no status line and no button.** The nav says which page it
-  is, and the edition dropdown carries the only two facts the page needs: which day (today's says
-  `Today`, not a date the reader has to check against a calendar) and whether it was read under a
-  profile since changed. A current-profile edition says nothing extra — silence means "this is
-  you". Everything else that was there was pipeline vocabulary.
-- **Templates never re-derive.** Read stored facets. A template that parses a location or infers a
-  work mode is a second implementation of a question `derive.py` already answered.
-- **Operations must surface what fails silently**: partition overflow, sweep completeness, the
-  gap between stored and recommendable, queue depth, and more than one embedding version present.
-- **More than one embedding version is an ALARM, not a measurement.** One vector space is the
-  only correct answer, so stating it every day was a row of noise; it is shown only when it is
-  wrong. It can only be wrong DURING a model change, and that is exactly when it matters:
-  `_DENSE_SQL` does **not** filter on `embedding_version`, so it orders every row in
-  `job_embedding` by distance to a query vector from the NEW model, and the rows still holding
-  the old one are compared across two spaces and rank by nothing at all. A re-embed is hours of
-  CPU, so that is hours of nightly editions quietly polluted with no other symptom anywhere.
-- **A run must be watchable while it runs, not only once it is over.** The runner writes
-  `sources_total`/`sources_done`/`current_source` on `pipeline_run` as it goes, and the sweep sink
-  updates `source_sweep.documents_seen` per batch. Without those a long source and a wedged one
-  look identical — which is exactly how a Workday sweep sat for an hour before anyone noticed.
-- **Estimate only from measured history, and say so when there is none.** The remaining time on
-  the Operations page is the sum of each pending source's median duration over its own last
-  sweeps.
-  Averaging *across* sources would be fiction: a board is seconds and Arbeitsagentur is half an
-  hour. A source with no history contributes nothing and the page says it cannot estimate yet.
-- **Cancellation is a request, not a kill** (`pipeline_run.cancel_requested`). A queued run ends
-  at once; a running one is stopped **between sources**, never inside one. A sweep torn down
-  mid-source has seen part of its live set, and `closable_scopes` is read straight off it — so an
-  interrupted source that reached the closing step could retire postings that are still live. A
-  cancelled run also stops before matching, so it never spends a user's LLM credit.
-- **The footer names the deployed commit, and `TROUVEUR_TAG` is where it comes from.** deploy.yml
-  rewrites that value in the host's `.env` and compose resolves the image tag from the same
-  variable, so the footer cannot drift from the running code -- a wrong commit there means a
-  wrong container, not a wrong template. Do not add a build arg or bake a file for this: the
-  value already exists and a second source could disagree with the first. The package version
-  is static and says nothing about a deploy. A tag that is not a commit is shown unlinked.
-- **The nav is the reader's pages; the account menu is everything else.** Recommendations, Search,
-  Profile and How it works sit on the left; Settings, and for an admin Operations and Users, sit
-  in a `<details class="menu">` under the username on the right, with the credit balance as a
-  `pill` beside it. `<details>` because the PANEL needs no script: it opens, closes on a second
-  click and closes on the next navigation by itself. **Escape and an outside click are handled in
-  `app.js`**, because the element comes with neither and anything that behaves like a menu is
-  expected to have both -- left open it sits there behind whatever the reader does next, which no
-  other menu on the web does. Both are a handful of lines in a file that already loads on every
-  page for the htmx error toast. Escape returns focus to the trigger, or focus is left on an
-  element that has just been hidden; the outside-click handler tests `menu.contains`, which is
-  what stops it fighting the element's own toggle.
-- **The account trigger is a control and is drawn as one**: a monogram from the display name, the
-  name, and a caret that turns, over a surface that appears on hover and is HELD while the panel
-  is open -- the only thing on screen tying an open panel to what opened it. Plain text with a
-  caret read as a label that happened to be clickable, with no hit area beyond the glyphs. The
-  monogram is derived and never uploaded: an avatar nobody can set is a thing to store, moderate
-  and serve, and the initial already separates the accounts one installation holds. Surfaces
-  drawn on the bar are `--on-primary-soft`/`--on-primary-softer`, translucent so they track the
-  bar instead of being a second colour to keep in step with it.
-- **There is no reader dashboard, and adding one back is a regression.** Everything that was on
-  it was operator diagnostics -- partition overflow, embed queue depth, vector spaces in use, the
-  whole crawl set -- none of which a reader can do anything about, and the two figures that were
-  theirs are already elsewhere: the balance in the topbar on every page, the day's spend on
-  Settings beside the ceiling it is measured against. `retrieved`/`scored` are run statistics and
-  are banned from a reader's page for the same reason they are banned from Recommendations.
-  `/dashboard` is gone outright, not redirected. A landing page would also put a screen in front
-  of the one thing anybody comes for: `/` redirects to Recommendations, and the only question a
-  home page could answer -- is there anything new today -- is already answered in context by the
-  edition dropdown.
-- **Admin-only is enforced by PREFIX in the session middleware** (`ADMIN_PREFIXES`), never per
-  route, for the same reason the session check is: a per-handler check is the line somebody forgets
-  on the next route, and the route that leaks is always the newest one. Operations owns the shared
-  schedule and queues real sweeps, so it is not one reader's to retime; Users creates accounts and
-  grants credit.
-- **Operations is ONE page, not a Scans page and a Dashboard.** Everything on it answers the same
-  question -- is the corpus being collected properly -- and only an operator can act on any of it,
-  so two pages meant reading both to answer once.
-- **A diagnostic figure must be worth what it costs to produce.** `corpus_overview` carried
-  `count(DISTINCT company)`, which nobody acted on: a seq scan plus a sort of every row of a table
-  that is over 2 GB in production. Measured on 400k postings it was 3.6s cold, spilling a 13 MB
-  external merge sort onto the disk the runner and the sweeps are using, on every load of a page
-  any user could open; the whole page was 1,363ms of serial database work and is now 83ms. Every
-  count on the page is served by an index, and the one that cannot be -- "ever collected" -- is
-  `pg_class.reltuples`, shown as an approximation, and **NULL rather than 0 when ANALYZE has
-  never run**: reltuples is -1 for "unknown", and clamping that to zero reports an empty archive
-  with total confidence.
-- **Tenant health lists the boards needing a DECISION, never the crawl set.** There is no index
-  of tenants anywhere, so a board can 404 every night for ever with no symptom but an integer
-  going up, and nothing retires it automatically because a streak is as likely to be a provider
-  outage. So the page shows what is failing and what a discovery pass has proposed, worst first,
-  capped, with a count of the rest; `trouveur tenants list` is where the whole set is read.
-  Rendering all of it was measured at 10,000 tenants: 1.9 MiB of HTML and 10,769 table rows in a
-  page that otherwise weighs 39 KB, with the ~680 failing boards buried among them -- the same
-  failure `list_tenants`'s ordering was written to fix, two orders of magnitude worse.
-- **An admin account is the FIRST account**, decided in `users_q.create_user` when the table is
-  empty, because at that moment there is provably nobody else it could be. Every later account is
-  created by an admin and is not one. A test fixture must pass `is_admin` explicitly or it silently
-  tests an admin's view of every page.
-- **The email is the login and the display name is what the UI shows; they are not the same
-  field.** One identifier, not two -- the address already existed, the digest already needed it,
-  and an admin already typed it -- but an address is long and would otherwise sit in every
-  screenshot, so the name is its own column. It is not unique and nothing ever looks an account up
-  by it.
-- **The address is folded to lower case, and the unique index is on `lower(email)`.** Folding only
-  in the form leaves the database willing to hold `Leo@x.com` beside `leo@x.com`, and the second
-  account is invisible until its owner cannot sign in -- what they type matches a row, just not
-  theirs. `clean_email`, `create_user` and `get_user_by_email` all fold, which means a test can
-  pass with two of the three broken; the index is the guarantee, so it is guarded directly.
-- **Validating an address is deliberately shallow** (`auth.clean_email`): non-empty, one `@`, no
-  whitespace. A strict RFC parser is a dependency and rejects addresses that deliver. What has to
-  be caught is a NAME typed into the email box, which would create an account whose owner can
-  never sign in.
-- **The display name is resolved once, at creation or rename, and stored** (`display_name_for`,
-  falling back to the part before the `@`). Derived at every read it would change under the reader
-  the day they changed their address, and a name is not something an address should rewrite.
-- **The session cookie carries the id and nothing else.** It used to carry the name too, which
-  every page rendered -- and a name that can be edited cannot be cached in a token that lasts a
-  month, or the topbar keeps the old one until the next login. The middleware already loads the
-  row, so no route passes a name at all.
-- **A login failure logs the user id, never the address.** A log file is not the place to
-  accumulate people's email addresses, and the id is what anyone reading it would look up anyway.
-- **Styling lives in one file:** `web/static/app.css`, light only, **Inter**, the logo's navy on
-  white. The logo's red-orange is used in the logo and nowhere else, and there is still no
-  display font and no second face: that combination read as another product's theme. One text
-  face, self-hosted. `system-ui` was the rule until the page was looked at on three machines and
-  rendered in three typefaces -- SF, Segoe, and whatever the distribution shipped -- so nobody
-  could see what anybody else saw, and the weakest of the three was the one development happened
-  on. No inline `<style>` blocks beyond one-off layout tweaks.
-- **Nothing the browser loads comes from another origin.** htmx and the font are vendored into
-  `static/vendor/` with their licences and `VENDOR.md`. A CDN on the critical path tells a third
-  party the reader's IP, page and timing on every load of a product whose whole content is
-  somebody's job search -- and when it is slow, proxied or down, htmx never arrives and every
-  state button silently does nothing. Neither failure appears in a log anyone reads, so it is a
-  test (`test_no_template_or_stylesheet_reaches_an_external_origin`), not a convention. Links a
-  reader clicks are a different thing and are fine.
-- **A font is declared per unicode-range, so an ordinary page fetches one subset.** `latin-ext`
-  exists because the corpus is European and names arrive as their boards spell them -- without
-  it a Kraków or a Timișoara falls back to the system font mid-word.
-- **The topbar is sticky and every full-bleed band centres its contents in `.band`.** An edition
-  is ~2400px tall, so the nav, the balance and the account menu were otherwise reachable only
-  from the top. Sticky is not a scroll container, so the page is still the only thing that
-  scrolls. `main` caps at `--measure` and the bands' contents must cap at the same value or the
-  brand sits at x=24 while the first job title starts at x=576 on a wide screen, and the header
-  reads as a different layout stacked on the content. **`.band` is not `.bar`** -- that name was
-  already the progress bar.
-- **A failed htmx swap must say so** (`static/app.js`, `.toast`). htmx leaves the DOM alone and is
-  silent on an error, so pressing "saved" against a 500 or a dropped connection looked exactly
-  like pressing it successfully, and the reader believed they had filed something nothing
-  recorded.
-- **A lapsed session is sent away with `HX-Redirect`, never with a 303** (`_auth_redirect`).
-  htmx follows a redirect transparently, so the login page came back as a 200 and was swapped
-  into whatever the button targeted -- an entire login form inside a 28px control. Guarded by a
-  test, on the session middleware's three exits, because those are the ones that fire underneath
-  a button rather than in answer to a click on a link.
-- **The mobile nav wraps; it does not scroll sideways.** Scrolling clipped the last two
-  destinations with nothing to say they were there, and `overflow-x: auto` painted a scrollbar
-  track across the navy bar on every phone.
-- **`input` is `width: 100%`, so a control that must size itself needs `form.inline`.** The
-  grant form on Users carried `size="5"` and `size="12"` and the global rule ignored both: the
-  amount, the note and the button each filled the table cell and stacked, three rows of
-  furniture per account beside a one-line admin row. Nothing errors, and it only shows at the
-  one width the markup never anticipated.
-- **A hint that FOLLOWS something is a footnote to it and takes its margin above.** Listed per
-  preceding element (`table`, `form`, `.kpis`, `.bar`), because the default `.hint` margin is
-  below -- which is right for the lead paragraph of a section and wrong for every note after a
-  form, where it sat against the Save button it was not about.
-- **The account menu says WHICH account.** The summary shows the display name, because an
-  address would otherwise sit in every screenshot; the panel is shut until asked, so the login
-  itself belongs inside it -- the only place outside Settings that answers "who am I". Admin
-  destinations are named as a set rather than listed as more of the reader's own pages, and Log
-  out is ruled off: leaving is not another destination, and it sat a pixel from a link. Anything
-  added inside the panel must be given the page's colours back -- `.topbar .hint` and
-  `.topbar a` are `primary-fg`, so a hint dropped in there renders white on white.
-- **The design system is the token block and the component list at the top of `app.css`.** A
-  template uses those classes and nothing else: no colour, radius or spacing is written in a
-  template, and a new look is a new component in `app.css`, not a one-off. The vocabulary is
-  deliberately small and the same word means the same thing everywhere — `good`/`warn`/`bad`
-  on a `pill` or a `notice`, `high`/`mid`/`low` on a `score`. Repeated markup goes through a
-  macro in `_macros.html` (`kpi`, `score_pill`, `states`, `job_card`), because markup and CSS
-  drifted apart twice: KPI tiles emitted classes the stylesheet did not style, and a second
-  "v2" block at the end of the file redefined `.score.low` and `.pill.bad` with other colours.
-- **The page is full width and is the only thing that scrolls.** A results list or a description
-  never caps its own height; a nested scrollbar was tried and rejected. Dashboard-style pages
-  are boxed sections (`.section`); recommendations and search are a mail-style list of rows
-  (`.results` / `.job`), not cards.
-- No build step, no Node, on purpose — plain CSS and HTMX only. Vendored assets are committed
-  rather than fetched at build time for the same reason: a fresh clone works offline, and local
-  development loads exactly the bytes production serves.
-
-## Database rules
-
-- **Every schema change is an Alembic migration.** No exceptions, no manual `psql` DDL.
-- **SQL lives only in `trouveur/db/queries/`.** A route, adapter or worker containing SQL is a bug.
-  Enforced by a test.
-- **`schema.py` and the migration must declare the same tables.** Enforced by a test.
-- Uniqueness contracts:
-  - `job (source, external_id)` is **provenance identity** — "the same row from the same board".
-  - `job.dedup_group` is **semantic identity** — "the same job in the world". It is a **marker** and
-    must never merge or delete rows. It is keyed on title and employer and deliberately NOT on the
-    place: aggregators (Arbeitnow) re-publish company boards with the location blanked, and a key
-    containing the town could never match the copy to its origin. The employer is the board id when
-    the posting came from a board and the name otherwise, compared exactly as letters and digits:
-    Arbeitnow names employers by that id ("Ddome"), while the board's postings use the display name
-    ("DataDome"). Never loosen that to a fuzzy match -- two companies that sound alike are not one. The location filter reads it. V1 conflated the two in one UNIQUE constraint and silently
-    dropped every posting that arrived from a second source. Markers can be re-run; a merge cannot
-    be undone.
-- **`job_embedding` holds open postings only.** Closing a job deletes its row in the same statement,
-  which is what keeps the table proportional to the live corpus rather than to all history — with no
-  denormalised `is_open` flag to drift. This is an invariant, not an optimisation, and it matters
-  more now that the dense arm scans the table rather than walking an index: its size *is* the cost
-  of a query.
-- **There is deliberately no ANN index on `job_embedding`, and the dense arm is exact.** An HNSW
-  index applies a query's WHERE clause after the graph walk, so a filtered search silently returns
-  fewer rows than it asked for, and the narrower the filter the worse it gets — `ef_search` and
-  over-fetching widen that window without closing it, and neither can be tuned against a selectivity
-  that depends on whose profile is running. With no index the filter is applied first by
-  construction. Measured on the production join shape at 250,000 vectors: 14ms when the filter
-  qualifies 565 rows, 80ms unfiltered. The cost is linear in vectors inside the horizon, so this is
-  a decision about corpus size: reinstate an index only if that count reaches several million, and
-  measure before doing it.
-- **Keep the two search paths in sync.** Searchable text is indexed twice on purpose: a `german`
-  `tsvector` for stemming and weighting, and a `pg_trgm` index over an `unaccent`-folded column for
-  substring matching inside German compounds. Neither alone is sufficient — `german` alone misses
-  `Ingenieur` inside `Wirtschaftsingenieur`, and trigram alone misses umlaut folding and cannot
-  rank. If you change what is searchable, change both.
-- **asyncpg uses `numeric_dollar` paramstyle, so `%` is NOT doubled** in `LIKE` patterns. Writing
-  `'%%'` (as psycopg2 requires) leaves two literal percent signs and silently breaks the trigram
-  path.
-- **Batch every mutation.** `WHERE id = ANY($1)`, not a loop.
-- **Backfills are chunked, resumable and idempotent**, guarded with `IS DISTINCT FROM`, and use
-  keyset pagination — never `OFFSET`, which re-scans everything it already skipped.
-
-## Testing
-
-A test earns its place only if it can fail for a reason a reviewer would care about.
-
-**Write tests for:** parsing logic, derivation, retrieval fusion, dedupe/upsert
-behaviour, query shape, cost controls, and **every trap in this file**.
-**Do not write tests for:** getters, pydantic itself, SQLAlchemy itself, or mocks restating mocks.
-
-### Layout: split by whether a database is needed
-
-That split is the one with operational meaning — it decides what can gate a merge without a
-service container.
-
-| Path | Needs Postgres | Runs |
-|---|---|---|
-| `tests/unit/` | no | every push, under a second |
-| `tests/integration/` | yes | every push in CI, via a `pgvector` service |
-
-`tests/integration/` is skipped at collection unless `TROUVEUR_TEST_DATABASE_URL` is set, so a
-plain `uv run pytest` stays offline and instant.
-
-- **No network anywhere, ever.** Use synthetic fixtures and a stubbed transport. To check live API
-  behaviour while debugging, use a throwaway shell command, never a test file — and if what you
-  learn is durable, write it into this file.
-- **Run the integration suite before shipping any change to `db/queries/`, the migration, or a
-  template.** **SQL that compiles is not SQL that runs**, and a template only runs when rendered:
-
-  ```bash
-  podman run -d --rm --name pg -e POSTGRES_USER=trouveur -e POSTGRES_PASSWORD=x \
-      -e POSTGRES_DB=trouveur -p 55432:5432 pgvector/pgvector:pg16
-  export TROUVEUR_TEST_DATABASE_URL=postgresql+asyncpg://trouveur:x@127.0.0.1:55432/trouveur
-  DATABASE_URL=$TROUVEUR_TEST_DATABASE_URL uv run alembic upgrade head
-  uv run pytest
-  ```
-
-### Golden files
-
-`tests/unit/golden/` pins the **entire** output of normalisation and derivation per source. The
-core of this system is two pure functions, and a change to either moves every posting in the
-corpus, so example-based tests covering the fields somebody thought of are not enough.
-
-```bash
-uv run pytest tests/unit/test_golden.py --update-goldens   # then READ the diff
-```
-
-Never regenerate to turn a red test green without reading what moved. Each case records the
-versions it was generated at: a facet diff with an unchanged `derive_version` means production
-still holds the old readings and no re-derive has been scheduled.
-
-### Two mechanisms that make the above work
-
-- **`StrictUndefined` in Jinja.** The default renders an unknown attribute as an empty string, so
-  a template reading a field its query does not select produces a blank cell and a green suite.
-  Turning it on immediately found two: the job-card macro read `llm_reason` that `search_jobs`
-  never selected, and `closed_at` that `recommendations` never selected.
-- **Rendering tests must render a job card.** A page test over an empty list proves the query
-  returned and nothing else. The `seeded` fixture creates one scored, rule-passed match so the
-  card template is actually executed.
-- Name tests `test_<behaviour>_when_<condition>` or as a plain statement of the invariant.
-  Arrange/Act/Assert, no cleverness.
-- **When you add a structural guard, verify it can fail** by temporarily introducing the violation.
-- **Mandatory regression guards** (these protect against silent production failure):
-  - `veroeffentlichtseit` accepts only `{0,1,7,14}`; a sweep never uses another value.
-  - `size <= 500` and `size × page <= 10 000`.
-  - No `pc/v4` search URL and no `v5`/`v6` detail URL is ever constructed.
-  - A delta sweep reports no closable scope, and a failed board is never closable.
-  - Work mode is never decided by description prose (company boilerplate, benefits lists).
-  - `content_hash` is versioned and changes when a description arrives.
-  - `%%` never survives SQL compilation.
-  - `search_jobs` carries no score filter.
-  - German search finds `Wirtschaftsingenieur` when the user types `ingenieur`, and finds
-    `München` when the user types `munchen` (both need the integration test).
-  - Closing a posting deletes its embedding, and its detail and embed work items.
-  - **A source failing in a burst is paused**, and the postings it failed for keep their attempts.
-  - **Transliterated German country names resolve** (`OESTERREICH`, not only `Österreich`). The
-    API transliterates umlauts; a vocabulary keyed only on the umlauted form silently gave every
-    Austrian posting no country at all.
-  - **The politeness budget is shared across a provider's tenant subdomains**, not one per host.
-  - **An unknown Personio tenant is reported as a bad slug**, not retried as a 429.
-  - **Workday never requests more than 20 a page**, terminates on an empty page rather than on
-    `total`, never parses the relative `postedOn`, and never treats `locationsText` as a place.
-  - **Workable is never sent a page-size parameter**, since an unsupported one returns an empty
-    body that reads as the end of the corpus; it pages with `pageToken` and never with the
-    `nextPageToken` the response names; it narrows its window with `day_range` and reads past a
-    boosted out-of-window posting rather than stopping on it.
-  - **A feed whose cursor stops advancing is abandoned, not paged to `MAX_PAGES`**, and the stall
-    leaves the scope unclosable.
-  - **A pinned old posting above today's does not end a delta sweep**, and the walk stops one
-    page past the window rather than following the cursor on.
-  - **A delta sweep reports no closable scope**, and a capped single-page feed reports none even on
-    a backfill.
-  - **A bare top-level array board is read as the list itself** (Lever, Breezy, Rippling), and an
-    envelope appearing later shows up as an empty sweep rather than a TypeError.
-  - **An Ashby board may be named after a domain** (`mistral.ai`, `roadsurfer.com`), and the same
-    string is still rejected for every other source, where it means a pasted homepage.
-  - Every source package is registered; `schema.py` and the migration **chain** agree (every
-    `upgrade()` in revision order, not just the baseline); no SQL outside `db/queries/`; no
-    source name used as a value downstream.
-  - **Every route rejects an anonymous caller** (`tests/unit/test_web_auth.py`, parametrized over
-    the router, so a new route is covered the moment it exists).
-  - **Every query in `db/queries/` executes** against a real server, and adding one without an
-    execution entry fails.
-  - **Every Postgres enum has a Python counterpart and the members match** — Python ↔ `schema.py`
-    offline, `schema.py` ↔ server in integration.
-  - The installation's API key never appears in a rendered page.
-  - **A profile change leaves every published edition standing**, and re-scoring a posting does
-    not move it out of the day it was published in.
-  - **Retrieval never re-stamps the profile version a posting was scored under**, or the rows
-    most in need of a re-score look current and nothing is ever re-scored.
-  - **Location is the only hard filter**, a posting that states no location passes, and a fully
-    remote posting is admitted wherever it was posted for a reader who accepts fully remote roles
-    and never for one who does not, whatever country it lists.
-  - **A stated country we cannot read falls back to the raw text** (Workday's "United States of
-    America" beside "Las Vegas, NV, USA"), `UK - London` and `Berlin, Berlin` name one place, and
-    a US state implies the US only when the town before it is in the US (`Toronto, CA` is not).
-  - **Every spelling of a town resolves to one id** (`Wien`, `Vienna`, `Wien 10., Favoriten`), an
-    ambiguous town is left unresolved rather than guessed, a bare town (`London`) resolves
-    worldwide only when one place dominates and never when part of the location is unread
-    (`Vienna, VA`), a country name (`China`) is a country and never a town, and a posting whose
-    town is unresolved passes when its country is one the user's circles reach into.
-  - **A copy whose source named no place is judged by its placed twins**, a copy that names an
-    unresolvable town of its own never is, and a closed twin counts for nothing.
-  - **A town among words that name no place still resolves** (`Berlin Office`, `DE-Berlin`,
-    `Munich, Bavaria`), one string naming several towns places each, a bare town several places
-    share is judged by all their countries and passes only a reader in one of them, and a word
-    that is also a small town (`Fully`, `Erasmus`) never places a posting on its own.
-  - **The rerank prompt carries exactly one advert**, with the profile block before it — batching
-    moved scores by slot position, and profile-first is what a prompt-prefix cache reuses.
-  - **One failed scoring call does not lose the rest of its wave**, and both limits are tested
-    before a wave is issued rather than after it is billed.
-  - **A user with no credit makes no paid call at all**, expansion included, and retrieval still
-    runs. Asserted over the whole run, not over the scorer: gating the rerank alone still bills
-    three expansion calls per profile version to somebody who was granted nothing.
-  - **An admin with no credit makes no paid call**, exactly like any other account, and the run
-    reports which of the two limits stopped it. Asserted over `run_for_user`: the exemption used
-    to be decided in `_allowance`, so a test below that gate passes with it back in place.
-  - **A scheduled run whose key is rejected is FAILED with the reason on the run**, not SUCCESS
-    with `scored: 0`. Asserted over `_execute`, because the hole was in the runner and the
-    match pipeline had recorded the error correctly all along.
-  - **The nightly match waits for what the sweep brought in**, and an item backing off does not
-    hold it. **A profile with nothing to search for is skipped, not failed** -- it turned every
-    nightly run red while the real users had been matched.
-  - **A daily ceiling counts today only** — yesterday's spend cannot hold today's run back, or the
-    ceiling would never lift.
-  - **A balance is grants minus spend, and a second grant adds to the first** rather than replacing
-    it.
-  - **What is left of a limit is re-read from the database between blocks**, never decremented from
-    a snapshot: the expansion stage spends out of the same day, and a second runner draining a
-    match-only run is claimed with SKIP LOCKED precisely so it CAN proceed in parallel. Against a
-    process-local belief two runs each authorise a full day's ceiling.
-  - **Disabling an account revokes the session it already holds**, on every page. A session is a
-    signed token with a 30-day life, so checking `is_active` at login alone revokes nothing its
-    holder can already do.
-  - **A money field accepts no `nan`, `inf` or absurd exponent.** All three PARSE: `nan` raises from
-    the first comparison, `inf` is accepted as a ceiling and silently removes the cap, and
-    `1e999999999` is finite but fails at the driver.
-  - **Every admin route refuses an ordinary user**, parametrized over the prefix so a new admin
-    route is covered the moment it exists.
-  - **A generated password is shown exactly once**, in the response that created the account, and
-    never in a URL or on a reload.
-  - **Changing a password requires the current one**, so a borrowed session cannot lock the owner
-    out.
-  - **Settings states the monthly worst case and offers no monthly ceiling field.**
-  - **An address signs in whatever case it is typed in**, and the DATABASE refuses a case-variant
-    duplicate -- asserted against the index itself, because the three app-side foldings mean a
-    weaker test passes while two of them are broken.
-  - **A name typed into the email box is refused**, rather than creating an account whose owner can
-    never sign in.
-  - **A display name defaults to the part before the `@`, is editable, and reaches the topbar on
-    the next page** rather than at the next login -- it is read from the row, not from the cookie.
-  - **Declining the digest is a switch and bills no re-score.**
-  - **An edition is paged by cursor, never by OFFSET**, and the cursor's columns match the sort
-    exactly. The dismiss filter runs before the page is cut, so an offset moves under the reader:
-    dismissing what is on page one makes the "next" link they already have point one row too far,
-    and the posting that crossed the boundary is unreachable from any page. Nothing on screen
-    hints at it, because dismissing swaps only the one widget.
-  - **A daily run sees only the last sweep's additions**, a new arrival is dated by when WE got it
-    rather than when it was posted, and a match-only run looks over the whole retained horizon.
-  - **Scoring stops after two CONSECUTIVE weak blocks, not two in total**, and everything it did
-    score is published.
-  - **A posting cannot enter two editions under one profile version** — the constraint, not the
-    query, is what refuses it. Under two DIFFERENT versions it may, which is what versioned
-    editions are for.
-  - **Saving a profile destroys no edition and asks nothing**, and a day the profile changed on
-    lists two editions rather than one.
-  - **A closed posting stays in its edition** and the dropdown's count still matches the rows.
-  - **Recommendations carries no heading, no run statistics and no button.**
-  - **No template or stylesheet names an external origin for a subresource**, and the session
-    middleware sends an htmx caller away by header rather than by a redirect it would swap in.
-  - **A filed posting's resting tag is rendered by the fragment htmx swaps**, never by the card
-    around it, or it keeps saying "saved" after the reader pressed "dismissed".
-  - **The scan hour is a wall-clock hour and does not drift with DST** -- `run_hour = 7` is seven
-    in the morning in January and in July alike.
-  - **A posting's age is counted in calendar days, not elapsed hours**: measured as elapsed
-    time, something posted at 23:00 last night read "posted today" all through this morning.
-  - **An unknown `TIMEZONE` is refused at the first read**, never quietly treated as UTC -- a
-    fallback would cut every edition on the wrong day and nothing could tell it apart from a
-    correct installation.
-
-## Retrieval evaluation
-
-`trouveur eval` measures whether retrieval finds what it should. It is **not a test**: it produces
-numbers to compare against a baseline, and it never gates a merge.
-
-**Planted known items.** Labelling a corpus is the expensive part of evaluating search, so this
-does the opposite: a haystack of real postings that nobody labels, into which ~27 hand-written
-needles are planted whose relevance is known by construction.
-
-**What it can and cannot measure.** Recall is rigorous — a needle either came back or it did not.
-**Precision is not measurable**, because the haystack is real and an unplanted posting ranking
-highly is unjudged, not wrong. Reporting a precision number here would be inventing one. Planted
-negatives give the usable substitute: postings the hard filters must exclude, or that the
-reranker must rank below every positive, so "did anything that should have been kept out get
-through" is answerable without judging the haystack.
-
-**Record each needle's rank, not only whether it was found.** `found/total` at one depth
-saturates: at 29 of 30 needles found there is no headroom left and the number can only ever
-report a regression, while a needle sliding from rank 12 to rank 90 — a real loss, since the
-reranker's budget is far smaller than `k` — is invisible to it. `ranks` is what makes an
-improvement visible at all, and `regressions()` reports a slide past `RANK_SLIDE`.
-
-**Needles are tiered by which retriever should find them**, because one aggregate number cannot
-answer the question worth asking — whether the hybrid earns its cost:
-
-| Tier | Shape | Should be found by |
-|---|---|---|
-| `T1` | shares the persona's vocabulary | lexical alone |
-| `T2` | same role, **no shared vocabulary** | dense only |
-| `T3` | adjacent role, different title, sometimes another language | dense + query expansion |
-| `N` | must be excluded by hard filters, or outranked by every positive | nothing — it should never reach the top |
-
-The harness scores with the **deterministic** expansion only, so a run costs nothing and does not
-vary with a model. T3 is therefore currently measured without the LLM expansion its row names:
-what expansion adds is not yet a number this produces.
-
-**A T2 or T3 needle that shares a content word with its persona is worthless** — it silently
-becomes a T1 and the tier stops measuring dense recall. Four of twelve leaked a word on the first
-draft (`startup`, `maintenance`, `Auswertung`), so `tests/unit/test_eval_needles.py` enforces it.
-
-Other rules the harness depends on:
-
-- **Personas are fictional.** They must never be a real user's profile — this repo is public.
-- **Needles are planted through the real ingest path**, not inserted into `job`. A needle that
-  skipped normalisation and derivation would be a row the pipeline could never have produced.
-- **The haystack is every configured source**, because the objective is recall over the whole
-  corpus and a haystack drawn from one adapter measures that adapter. Arbeitsagentur is the single
-  exception: alone it contributes tens of thousands of postings a day and would drown the other
-  eleven, so it is narrowed to `HAYSTACK_PARTITIONS`.
-- **The haystack is real postings from occupational fields the personas plausibly compete in.**
-  Filling it with retail vacancies would let the hard filters remove most of it for free and
-  flatter every number.
-- **Drain details before scoring.** The needles carry descriptions; a haystack of title-only
-  postings is not the corpus production has, and the comparison would be between unlike things.
-  The sharper reason: `persist` does not queue a posting for embedding until its description
-  arrives, so postings with an outstanding detail fetch are **absent from `job_embedding`**, not
-  merely thin — the dense arm then competes against a fraction of what the lexical arm sees and
-  its recall is flattered by that gap. Only Arbeitsagentur, Workday and Rippling have a detail
-  phase, and for those a description costs one polite request per posting — so the drain is capped
-  at `DETAIL_BUDGET` and what it does not reach is reported as the scorecard's description
-  coverage rather than hidden.
-- **Run it with the real embedding model.** `EMBEDDING_PROVIDER=deterministic` makes every dense
-  number noise, so the harness warns rather than letting you read it as a result.
-- **`TROUVEUR_EVAL_DATABASE_URL` is required and must be a scratch database.** The harness plants
-  fake postings and overwrites personas' profiles.
-- **Check how much of the scratch corpus is *open* before believing a number from it.**
-  `job_embedding` holds open postings only, so a copy that has been narrowed -- the encoder-swap
-  rehearsal left one at 25,028 open postings against production's 240,000 -- retrieves over a
-  tenth of what production does, and reports it as a quality result rather than as a corpus
-  difference. `select count(*) from job where closed_at is null` is the check.
-- **Restoring such a copy is a chunked UPDATE, never one statement.** `job` is over 2 GB, and
-  `closed_at` is indexed so the update cannot be HOT: re-opening 215,000 rows in one statement
-  doubles the table before anything can be vacuumed, on a disk production shares. Chunk it and
-  `VACUUM` between chunks. Because `job_embedding` holds open postings only, that one table
-  carries both the vectors and the set of postings to re-open.
-
-### Scoring the reranker
-
-`--rerank` carries the planted-known-item idea one stage further: the needles are the only judged
-items in the corpus, so they -- and **only** they -- are sent to the real reranker. Scoring the
-whole retrieved shortlist would spend real money to produce numbers nobody can mark, for the same
-reason precision is not measurable at retrieval.
-
-- **Grade the order, not a cut-off.** There is no threshold to clear: the page shows everything
-  scored, sorted by score, so the question is whether a planted negative outranks a planted
-  positive — a bad posting the reader meets first. `inversions` counts those pairs and `margin`
-  is the distance between the worst positive and the best negative.
-- **The key comes from `TROUVEUR_EVAL_LLM_KEY`, which is deliberately NOT
-  `OPENROUTER_API_KEY`.** Grading is the operator's spend and must be visible as such: reaching for
-  the installation key would bill a quality experiment to the same account users' credit is drawn
-  against, with nothing on any page to show where the money went.
-- It reuses `rerank.score_one`, so the prompt, model and provider pin are the ones production
-  sends. A copy of the prompt here would grade something no user ever runs.
-- **Rerank numbers are noisier than retrieval numbers, and the noise has a cause.** Measured
-  2026-09-22 over 150 real postings per persona: at a fixed position a score moves 5 points
-  across five identical runs, but **slot 0 of a batch scores 8-15 points above slot 9**, and the
-  same posting scored beside nine weak ones rather than nine strong ones moves 8-39 points. Both
-  of the large effects are artifacts of putting ten postings in one prompt, and neither washes
-  out, because batches were filled in retrieval order. Batching was therefore a *quality* problem
-  and not only a cost one, and it is gone: scoring one posting per call measured +0.07 to +0.09
-  nDCG@20 against a judged reference set, for a third of a US cent more per run. **Do not put a
-  second advert back in that prompt** -- there is no batch size to set, and a test pins it. Treat a
-  single run as a signal, not a result. Evidence: `evalx/FINDINGS-RERANKER.md`.
-- **A judged reference set already exists; do not pay for relevance opinions twice.**
-  `evalx/reference.json` holds 792 postings graded 0-3 against the three personas, and
-  `evalx/rerank_lab.py` scores a configuration against it. Add to it rather than starting over.
-
-```bash
-export TROUVEUR_EVAL_DATABASE_URL=postgresql+asyncpg://trouveur:x@127.0.0.1:55433/trouveur
-DATABASE_URL=$TROUVEUR_EVAL_DATABASE_URL uv run alembic upgrade head
-uv run trouveur eval --sweep                 # fetch a haystack, then score
-uv run trouveur eval --rerank                # also score the needles with the real reranker
-uv run trouveur eval --save-baseline         # record the result for future comparison
-```
-
-## Commands
-
-```bash
-uv sync                                   # install/refresh dependencies
-uv sync --extra embeddings                # add the local ONNX embedding provider
-uv sync --extra archive                   # add the offsite corpus export (pyarrow)
-uv run pytest                             # unit only, unless TROUVEUR_TEST_DATABASE_URL is set
-uv run pytest tests/unit -q               # the fast gate
-uv run pytest tests/unit/test_golden.py --update-goldens   # regenerate, then read the diff
-uv run ruff check trouveur/               # lint
-uv run alembic upgrade head               # apply migrations
-uv run alembic revision -m "add X"        # new migration
-
-uv run trouveur sweep                     # fetch sources into the corpus
-uv run trouveur sweep --source greenhouse # one source
-uv run trouveur drain                     # work the deferred queues once
-uv run trouveur requeue --kind detail     # retry parked items once the cause is fixed
-uv run trouveur refill --kind derive      # re-queue everything below the current version
-uv run --with geonamescache==3.0.2 python tools/build_places.py   # rebuild the city list
-uv run trouveur match --user 1            # retrieve, cut, rerank for one user
-uv run trouveur tenants list             # the crawl set, with per-tenant health
-uv run trouveur tenants add greenhouse n26   # accepts a slug or a full careers URL
-uv run trouveur tenants import --dry-run  # preload from tenants.local.toml (gitignored)
-uv run trouveur create-user --email me@example.com   # the FIRST login; it becomes the admin
-uv run trouveur serve                     # dev server on 127.0.0.1:8080
-uv run trouveur runner                    # scheduler + queue workers
-```
-
-Prefer the narrowest command that proves your change. Do not run a sweep against live sources to
-test a parser — use a fixture.
-
-**Run freely:** `pytest`, `ruff check`, `alembic upgrade head` (against a throwaway database).
-
-**Ask first** — each of these has a side effect you cannot take back:
-
-| Command | Why |
-|---|---|
-| `trouveur sweep` | hits live APIs and writes |
-| `trouveur match` | spends a user's credit on the installation's key |
-| `trouveur refill --kind embed` | re-embeds the corpus; hours of CPU |
-| `trouveur test-notify` | reaches a real inbox |
-| `trouveur runner` | long-running; starts real scans on a schedule |
-| `trouveur eval --sweep` | hits live APIs to build a haystack |
-| `git push`, `gh` commands that create or comment | public and hard to undo |
 
 ## Commit style
 
@@ -1360,8 +297,3 @@ evidence, not a diff summary. Never commit generated files or secrets. Two thing
 deliberately committed and neither is generated by us: `places.tsv.gz`, which is vocabulary, and
 `web/static/vendor/`, which is third-party code and fonts we serve from our own origin -- both
 explained in Web UI, the second with its provenance and licences in `vendor/VENDOR.md`.
-
-## Keeping this file updated
-
-If you fix a bug that existed because a rule was unwritten, write the rule here. If a rule here no
-longer matches the code, delete it. A stale instruction file is worse than none.

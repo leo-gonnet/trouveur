@@ -13,35 +13,24 @@ worse than none.
 - Never use a personal account.
 - A user's keywords are allowed in **discovery** queries (leads). They stay forbidden in
   **corpus** queries.
-- Keep the facts in the refused table. The endpoints and traps found there are still true, and
-  now useful.
 - The privacy rules about users' data don't change.
 
 **Done when.**
 - No rule refuses a source for robots.txt or terms.
-- The facts from the old refused table are kept, as notes for future adapters.
 - Tests that pinned the old policy are updated or removed.
+
+**Done, 2026-10-06, and wider than drafted.** The refused table was deleted rather than kept:
+under recall-first its purpose was gone, since it existed to stop someone re-adding those sources
+and re-adding them is now the plan. Every one of them is re-probed by tasks 07–12 anyway, and the
+findings were a month old. No test pinned the old policy — it lived only in prose.
+
+The same pass cut AGENTS.md from 1,367 lines to 299. Source-specific facts are not repeated
+there: each lives in a comment beside the code that depends on it, which is where every one of them
+already was. **AGENTS.md now holds only rules that cross modules, and editing it needs human
+approval.** A later task that learns something about a source writes it into that adapter.
 
 **Prompt**
 
 ```
-Read AGENTS.md and docs/tasks/README.md. Trouveur now puts recall first: robots.txt and
-terms of service no longer rule out a source. Rewrite the parts of AGENTS.md that say
-otherwise: "DON'T: robots.txt policy", the refused sources table, "Never reach a source
-through a reverse-engineered private endpoint", and "Never reintroduce a user's keywords
-into a source query".
-
-Keep:
-- the speed limit per provider, with a new reason: avoid blocks;
-- "never use a personal account";
-- the privacy rules about users' data.
-
-Allow user keywords in discovery queries only (leads, see docs/tasks/02), never in corpus
-queries.
-
-Keep every fact from the refused table (endpoints, robots findings, dates) as notes for
-future adapters.
-
-Find the tests that pin the old policy and update them. Keep AGENTS.md's style: short, only
-rules and facts. One PR.
+Done. Kept for the record; see "Done" above for what was actually changed.
 ```

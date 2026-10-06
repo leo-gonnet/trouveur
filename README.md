@@ -7,7 +7,7 @@
 
 # Trouveur
 
-**A job radar.** It collects the job market into one corpus every day, then ranks that corpus against one profile. More than a million postings archived so far.
+**A job radar.** It collects the job market into one corpus every day, then ranks that corpus against your profile. More than a million postings archived so far.
 
 </div>
 
@@ -100,12 +100,15 @@ credit in dollars against it, and the first account created is the admin who gra
 **Trouveur is provided for educational purposes and personal, non-commercial use only.** It is a
 learning project, not a product.
 
-- **You are responsible for how you use it.** Before enabling any source, check that site's
-  `robots.txt` and Terms of Service, and only scrape what they permit. If a site's terms forbid
-  automated access, do not enable a source for it.
-- **Respect rate limits and be polite.** The defaults apply a per-host delay and identify the
+- **Which sources you enable is entirely your decision, and entirely your risk.** Trouveur ships
+  no judgement about whether a given site may be fetched. Deciding that — against that site's
+  `robots.txt`, its Terms of Service, and whatever law applies where you are — is yours to do
+  before you enable anything, every time, and the author neither does it for you nor warrants
+  that any shipped adapter is lawful for you to run.
+- **Respect rate limits and be polite.** The defaults apply a per-provider delay and identify the
   client via a `User-Agent`. Do not remove or shorten these. Do not run the pipeline in tight
-  loops against live sources.
+  loops against live sources. Getting yourself blocked, rate-limited, or sued is a consequence
+  you own.
 - **Fetched content belongs to its publishers.** Job listings, company data and page HTML are
   third-party content. Trouveur stores it locally for your own filtering; redistributing it may
   infringe copyright or database rights.
@@ -114,8 +117,8 @@ learning project, not a product.
 - Use of this software is governed by the [LICENSE](./LICENSE); using it does not grant you any
   rights to the data it retrieves.
 
-By running Trouveur you accept that compliance with applicable laws and third-party terms is your
-responsibility, not the author's.
+**By running Trouveur you accept that compliance with applicable laws and third-party terms is
+your responsibility alone, not the author's.** If that is not acceptable to you, do not run it.
 
 ## License
 

@@ -2,7 +2,7 @@
 
    Tokens are the only place a value is written; components below read them. A feature never
    sets a colour, a radius or a spacing of its own — add a token or a component here instead.
-   The logo's navy on off-white, one system sans-serif, no display font. The logo's red-orange
+   The logo's navy on off-white, one self-hosted face (Inter), no display font. The logo's red-orange
    is used in the logo and nowhere else. The page is full width and is the only thing that
    scrolls.
 
