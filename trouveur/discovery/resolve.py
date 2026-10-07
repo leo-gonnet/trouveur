@@ -150,12 +150,26 @@ class Resolution:
 
 
 def resolve(url: str | None) -> Resolution:
-    """The board a link addresses, or why it names none."""
-    parts = urlsplit((url or "").strip())
-    if parts.scheme not in {"http", "https"} or not parts.hostname:
+    """The board a link addresses, or why it names none.
+
+    An unparsable link is NO_URL and never an exception. Splitting a URL whose netloc holds a
+    bracket raises `ValueError: Invalid IPv6 URL` -- from `urlsplit` itself on 3.12+, from
+    `.hostname` on older versions, which is why both are inside the `try`. A bracket reaches here
+    from ordinary prose: a German advert writes "Mehr Infos: [https://karriere.acme.de]". Raising
+    would abort the whole mining batch, which shares its transaction with `record_mined`, so the
+    batch would stay below MINE_VERSION and the identical rows would be re-read and fail on every
+    later tick: archive mining stops for good, and because the runner isolates and logs per queue,
+    nothing says why.
+    """
+    try:
+        parts = urlsplit((url or "").strip())
+        hostname = parts.hostname
+    except ValueError:
+        return Resolution(LeadResult.NO_URL)
+    if parts.scheme not in {"http", "https"} or not hostname:
         return Resolution(LeadResult.NO_URL)
 
-    host = parts.hostname.removeprefix("www.")
+    host = hostname.removeprefix("www.")
     if host in NO_BOARD_HOSTS:
         return Resolution(LeadResult.UNKNOWN_HOST, host=host)
 

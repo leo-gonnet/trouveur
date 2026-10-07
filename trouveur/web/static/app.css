@@ -161,7 +161,19 @@ main { flex: 1; width: 100%; max-width: var(--measure); margin: 0 auto; padding:
    because the pair no longer matched across it. A page-level component therefore never sets
    a bottom margin to space itself from the next one; a block that must sit flush against the
    one above belongs INSIDE it, the way .pager sits inside .results. */
-main > * + * { margin-top: var(--space-5); }
+/* `.stack` is the same rule reaching through a wrapper that exists only so htmx has something to
+   swap into. The blocks inside one are still the page's blocks, but they are grandchildren of
+   `main`, so the first selector never saw them: Operations' coverage report is four cards in one
+   swap target and they stacked edge to edge with no gap at all.
+   It is a CLASS and not `div:not([class])`, which is what this was first written as and does not
+   work: htmx puts `htmx-request` on its target for the length of a request and takes it off
+   again, which leaves `class=""` behind for ever, and an empty class attribute is still a class
+   attribute. Marking the wrapper is also what keeps this off the swap targets INSIDE a card
+   (`/admin/status`, `/admin/runs`), where the card owns the spacing and this gap is far too big.
+   A container stacking page blocks that forgets `.stack` is caught by the test that reads the
+   rendered pages, not by anybody noticing. */
+main > * + *,
+.stack > * + * { margin-top: var(--space-5); }
 .foot { padding: var(--space-4) var(--space-6); border-top: 1px solid var(--border);
         font-size: var(--fs-sm); color: var(--fg-muted); }
 .foot .band { gap: var(--space-4); }
@@ -174,7 +186,10 @@ main > * + * { margin-top: var(--space-5); }
 .section { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-5); }
 .section-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3);
                 margin-bottom: var(--space-4); }
-.section > .hint { margin-bottom: var(--space-3); max-width: 80ch; }
+.section > .hint { max-width: 80ch; }
+/* Only when something follows it: as a card's LAST block the gap below is the card's own
+   padding, and a margin here lands on top of it. Same shape as `.kpis` below. */
+.section > .hint:not(:last-child) { margin-bottom: var(--space-3); }
 /* A hint that follows something takes its margin above, not below. */
 .section > table + .hint, .section > .bar + .hint, .section > form + .hint,
 .section > .kpis + .hint { margin: var(--space-3) 0 0; }
@@ -339,8 +354,14 @@ td form.inline button { padding: 0 var(--space-3); }
 .notice.bad  { background: var(--bad-soft);  color: var(--bad);  border-color: transparent; }
 .notice a { color: inherit; }
 .section > .notice { margin: var(--space-3) 0 0; }
+/* Standalone -- a whole page's "nothing here" -- the padding gives it presence, and there is no
+   card around it to provide any. */
 .empty { padding: var(--space-6) var(--space-5); color: var(--fg-muted); }
-.section > .empty { padding-left: 0; padding-right: 0; }
+/* Inside a card there IS one, and `.empty` draws no background, so every pixel of its own padding
+   reads as dead space under the text: an empty card sat 59px below its last line where a full one
+   sits 35. The horizontal half of this was already zeroed here and the vertical half was not,
+   which is the whole of the bug -- the card owns the gap to its edge, on all four sides. */
+.section > .empty { padding: 0; }
 
 /* ---------- Progress ---------- */
 .bar { height: 6px; border-radius: var(--radius); background: var(--surface-2); overflow: hidden; }

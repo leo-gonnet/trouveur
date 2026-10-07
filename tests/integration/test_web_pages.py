@@ -11,6 +11,8 @@ reaches the same code a browser would for a fraction of the maintenance.
 
 from __future__ import annotations
 
+import functools
+import pathlib
 import re
 from datetime import date
 from decimal import Decimal
@@ -1228,3 +1230,323 @@ async def test_the_coverage_fragment_renders_the_reported_links(admin, seeded):
     said = response.text
     assert "Found elsewhere" in said
     assert "we cannot read links on that site" in said
+
+
+@pytest.mark.parametrize("pasted", ["https://[::1", "https://karriere.beispiel.de]"])
+async def test_a_link_we_cannot_even_split_is_refused_and_not_a_500(client, pasted):
+    """A bracket in the netloc makes splitting raise, and the route answered 500.
+
+    The scheme was checked before the host was touched, so these got past the guard written to
+    turn them away -- `javascript:` never did, which is why the check looked complete. The
+    reader sees the page's own refusal, and nothing is stored.
+    """
+    from trouveur.db.queries import reports as reports_q
+
+    response = await client.post("/elsewhere", data={"url": pasted})
+    assert response.status_code == 303
+    assert response.headers["location"] == "/elsewhere?error=url"
+    async with connect() as conn:
+        assert await reports_q.pending(conn, chunk=10) == []
+
+
+# --- the gap under a card's last block -------------------------------------------------------
+#
+# A card owns the distance from its content to its own edge, on all four sides, through
+# `.section { padding }`. Anything a block adds UNDER itself lands on top of that padding and the
+# card reads as badly spaced -- which is the bug, four times over now, each time through a
+# different property, which is why this checks the MECHANISM and not a list of banned shapes.
+#
+# Only two things can add that space: a bottom margin, and vertical padding on a block that draws
+# no box, whose padding is therefore invisible and reads as dead air. `.notice` and `.pill` draw a
+# box, so their padding is INSIDE something the reader can see and is not this.
+#
+# It reads the real pages rather than the stylesheet, so the components it checks are the ones
+# actually used in a card -- a new one is covered the day it is used, with nothing to add here,
+# and the topbar's own padding is never dragged in.
+
+@functools.lru_cache(maxsize=1)
+def _css_rules() -> tuple[tuple[str, str], ...]:
+    path = pathlib.Path(__file__).resolve().parents[2] / "trouveur/web/static/app.css"
+    text = re.sub(r"/\*.*?\*/", "", path.read_text(), flags=re.S)
+    return tuple((s.strip(), b) for s, b in re.findall(r"([^{}]+)\{([^}]*)\}", text))
+
+
+def _is_zero(value: str) -> bool:
+    return value.strip() in {"0", "0px", "0rem", "0em"}
+
+
+def _bottom_space(body: str) -> dict[str, bool]:
+    """What this declaration block says about space UNDER the element it styles.
+
+    Returns the two properties that can make it, each True (adds space), False (explicitly none)
+    or absent (says nothing). Absent and False are different: `.section > .empty` zeroing only
+    `padding-left`/`padding-right` says NOTHING about the vertical padding, and reading that as
+    "cancelled" is how the bug this test exists for survived its first version.
+    """
+    said: dict[str, bool] = {}
+    if m := re.search(r"margin-bottom\s*:\s*([^;]+)", body):
+        said["margin"] = not _is_zero(m.group(1))
+    elif m := re.search(r"(?<![-\w])margin\s*:\s*([^;]+)", body):
+        parts = m.group(1).split()
+        said["margin"] = not _is_zero(parts[2] if len(parts) >= 3 else parts[0])
+    if m := re.search(r"padding-bottom\s*:\s*([^;]+)", body):
+        said["padding"] = not _is_zero(m.group(1))
+    elif m := re.search(r"(?<![-\w])padding\s*:\s*([^;]+)", body):
+        said["padding"] = not _is_zero(m.group(1).split()[0])
+    return said
+
+
+def _draws_a_box(css_class: str) -> bool:
+    """Padding inside something the reader can see is not dead space -- `.notice`, `.pill`."""
+    for selector, body in _css_rules():
+        if selector.startswith(f".{css_class}") and (
+            re.search(r"background(-color)?\s*:\s*(?!none|transparent)", body)
+            or re.search(r"border(-\w+)?\s*:\s*(?!none|0)", body)
+        ):
+            return True
+    return False
+
+
+def _offenders_for(css_class: str) -> str | None:
+    """Why `css_class` adds space under itself at the bottom of a card, or None if it does not.
+
+    A `.section > .x` rule beats the bare `.x` rule, but only for the property it actually names,
+    which is what lets `.empty` keep its standalone padding and still sit flush inside a card.
+    """
+    state: dict[str, bool] = {}
+    inside_a_card = rf"\.section\s*>\s*\.{re.escape(css_class)}"
+    for selector, body in _css_rules():
+        # `:not(:last-child)` is the fix for exactly this bug, so a rule carrying it can never be
+        # the cause of it: it is off precisely where the dead space would be.
+        if ":not(:last-child)" in selector.replace(" ", ""):
+            continue
+        if selector == f".{css_class}" or re.fullmatch(inside_a_card, selector):
+            state.update(_bottom_space(body))
+    if state.get("margin"):
+        return "a bottom margin"
+    if state.get("padding") and not _draws_a_box(css_class):
+        return "vertical padding while drawing no box, so it is invisible dead space"
+    return None
+
+
+def _bottom_chain_in_cards(html: str) -> list[tuple[str, str]]:
+    """(card heading, classes) for every element on the chain of LAST descendants of each card.
+
+    The whole chain, not just the card's own last child: the block that puts dead air under a
+    card is whatever sits lowest in it, and on Operations that is an `.empty` two wrappers deep
+    inside an htmx target. Checking only the direct child misses exactly the case that bit us.
+    """
+    from html.parser import HTMLParser
+
+    void = {"br", "hr", "img", "input", "link", "meta", "source", "col", "area", "embed", "wbr"}
+
+    class Walk(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.stack: list[dict] = []
+            self.found: list[tuple[str, str]] = []
+
+        def handle_starttag(self, tag, attrs):
+            classes = dict(attrs).get("class", "")
+            if self.stack:
+                self.stack[-1]["last"] = classes
+                self.stack[-1]["kids"] += 1
+            if tag not in void:
+                self.stack.append(
+                    {"section": "section" in classes.split(), "last": None,
+                     "classes": classes, "head": None, "kids": 0, "chain": []}
+                )
+
+        def handle_data(self, data):
+            for frame in self.stack:
+                if frame["section"] and frame["head"] is None and data.strip():
+                    frame["head"] = data.strip()[:40]
+
+        def handle_endtag(self, tag):
+            if tag in void or not self.stack:
+                return
+            frame = self.stack.pop()
+            if self.stack:
+                parent = self.stack[-1]
+                # this element just closed; if it is still the parent's last, carry its chain up
+                parent["pending"] = [frame["classes"], *frame.get("chain", [])]
+                parent["chain"] = parent["pending"]
+            if frame["section"]:
+                head = frame["head"] or "(untitled)"
+                for classes in frame.get("chain", []):
+                    if classes.strip():
+                        self.found.append((head, classes))
+
+    walker = Walk()
+    walker.feed(html)
+    return walker.found
+
+
+_SPACING_PAGES = ["/recommendations", "/search", "/profile", "/settings", "/how-it-works",
+                  "/elsewhere"]
+_SPACING_ADMIN = ["/admin", "/users", "/admin/coverage"]
+
+
+async def _assert_no_dead_space_under_cards(fetch, paths):
+    bad = []
+    for path in paths:
+        html = (await fetch(path)).text
+        for heading, classes in _bottom_chain_in_cards(html):
+            for css_class in classes.split():
+                reason = _offenders_for(css_class)
+                if reason:
+                    bad.append(f"{path} card {heading!r}: .{css_class} adds {reason}")
+    assert not bad, (
+        "a card's last block adds space under itself, on top of the card's own padding:\n  "
+        + "\n  ".join(sorted(set(bad)))
+        + "\n`.section { padding }` owns the gap to the card's edge. Scope the component's "
+          "spacing to `.section > .that` so it is flush inside a card, the way `.empty` is."
+    )
+
+
+async def test_no_card_has_dead_space_under_its_last_block(client):
+    await _assert_no_dead_space_under_cards(client.get, _SPACING_PAGES)
+
+
+async def test_no_admin_card_has_dead_space_under_its_last_block(admin):
+    await _assert_no_dead_space_under_cards(admin.get, _SPACING_ADMIN)
+
+
+# --- the gap BETWEEN stacked cards -------------------------------------------------------------
+#
+# `main > * + *` spaces a page's blocks, but only its DIRECT children. A fragment htmx swaps in
+# arrives wrapped in the swap target, so its cards are grandchildren of `main` and the rule never
+# reaches them: Operations' coverage report is four cards in one target and they stacked edge to
+# edge. `.stack` on the target is what carries the gap through, and this is what notices when a
+# target that needs it does not have it -- the page itself looks fine until the swap lands, which
+# is why no page test caught it.
+
+@functools.lru_cache(maxsize=1)
+def _containers_that_space_their_children() -> frozenset[str]:
+    """Classes whose own rule already puts a gap between their children.
+
+    Read out of the stylesheet rather than listed here: a grid or flex container with `gap`
+    spaces its children by a different mechanism than the owl, and both are correct. Listing them
+    by hand would mean the next container with a `gap` is reported as a bug -- `.doc` on How it
+    works was exactly that, the first time this test ran.
+    """
+    spacing = {"stack"}
+    for selector, body in _css_rules():
+        if re.search(r"display\s*:\s*(grid|flex)", body) and re.search(
+            r"(?<![-\w])(gap|row-gap)\s*:\s*(?!0)", body
+        ):
+            spacing.update(re.findall(r"\.([a-z][\w-]*)", selector))
+    return frozenset(spacing)
+
+
+def _sections_with_a_section_before_them(html: str) -> list[tuple[str, str]]:
+    """(parent tag, parent classes) for every card that directly follows another card."""
+    from html.parser import HTMLParser
+
+    void = {"br", "hr", "img", "input", "link", "meta", "source", "col", "area", "embed", "wbr"}
+
+    class Walk(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.stack: list[dict] = []
+            self.found: list[tuple[str, str]] = []
+
+        def handle_starttag(self, tag, attrs):
+            classes = dict(attrs).get("class", "")
+            is_card = "section" in classes.split()
+            if self.stack:
+                parent = self.stack[-1]
+                if is_card and parent["last_was_card"]:
+                    self.found.append((parent["tag"], parent["classes"]))
+                parent["last_was_card"] = is_card
+            if tag not in void:
+                self.stack.append(
+                    {"tag": tag, "classes": classes, "last_was_card": False}
+                )
+
+        def handle_endtag(self, tag):
+            if tag not in void and self.stack:
+                self.stack.pop()
+
+    walker = Walk()
+    walker.feed(html)
+    return walker.found
+
+
+def _swap_targets() -> dict[str, str]:
+    """Every htmx endpoint a template swaps in, mapped to the class of the element that RECEIVES
+    it -- which is often not the element carrying `hx-get`.
+
+    Any tag, not just `<div>`: `/search` is fetched by a `<form>` and the pager by an `<a>`. And
+    `hx-target="#id"` sends the response somewhere else entirely, so the class that matters
+    belongs to that element, in whichever template holds it. Reading the class off the `hx-get`
+    element instead would check the form and pass while the thing receiving cards had nothing.
+    """
+    templates_dir = pathlib.Path(__file__).resolve().parents[2] / "trouveur/web/templates"
+    sources = {path: path.read_text() for path in templates_dir.glob("*.html")}
+
+    def class_of_id(wanted: str) -> str:
+        for text in sources.values():
+            for tag in re.findall(r"<[a-z]+[^>]*>", text):
+                if re.search(rf'id="{re.escape(wanted)}"', tag):
+                    found = re.search(r'class="([^"]*)"', tag)
+                    return found.group(1) if found else ""
+        return ""
+
+    targets: dict[str, str] = {}
+    for text in sources.values():
+        for tag in re.findall(r"<[a-z]+[^>]*hx-get=[^>]*>", text):
+            url = re.search(r'hx-get="([^"]+)"', tag)
+            if not url:
+                continue
+            target = re.search(r'hx-target="([^"]+)"', tag)
+            if target and target.group(1).startswith("#"):
+                classes = class_of_id(target.group(1)[1:])
+            else:
+                own = re.search(r'class="([^"]*)"', tag)
+                classes = own.group(1) if own else ""
+            targets[url.group(1)] = classes
+    return targets
+
+
+async def _assert_stacked_cards_are_spaced(fetch, paths):
+    bad = []
+    for path in paths:
+        for tag, classes in _sections_with_a_section_before_them((await fetch(path)).text):
+            spaced = tag == "main" or bool(
+                set(classes.split()) & _containers_that_space_their_children()
+            )
+            if not spaced:
+                bad.append(f"{path}: two cards stacked inside <{tag} class={classes!r}>")
+    assert not bad, (
+        "cards stacked with no gap between them:\n  "
+        + "\n  ".join(sorted(set(bad)))
+        + "\n`main > * + *` only reaches a page's DIRECT children. A container that stacks cards "
+          "anywhere else needs `class=\"stack\"`, which carries the same gap."
+    )
+
+
+async def test_stacked_cards_are_spaced_on_every_page(client):
+    await _assert_stacked_cards_are_spaced(client.get, _SPACING_PAGES)
+
+
+async def test_stacked_cards_are_spaced_on_admin_pages(admin):
+    await _assert_stacked_cards_are_spaced(admin.get, _SPACING_ADMIN)
+
+
+async def test_a_fragment_of_several_cards_is_swapped_into_a_stack(admin):
+    """The bug itself: a fragment returning more than one card, into a target that cannot space
+    them. The page is fine until the swap lands, so only looking at the fragment finds it."""
+    bad = []
+    for url, classes in _swap_targets().items():
+        response = await admin.get(url)
+        if response.status_code != 200:
+            continue
+        cards = len(_sections_with_a_section_before_them(f"<main>{response.text}</main>"))
+        if cards and "stack" not in classes.split():
+            bad.append(f"{url} returns stacked cards but its target has class={classes!r}")
+    assert not bad, (
+        "an htmx target receives several cards and gives them no gap:\n  "
+        + "\n  ".join(sorted(bad))
+        + '\nAdd class="stack" to the element that swaps it in.'
+    )

@@ -8,10 +8,10 @@
 <link rel="icon" type="image/png" href="/static/favicon.png">
 <link rel="icon" type="image/png" href="/static/favicon-dark.png" media="(prefers-color-scheme: dark)">
 <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
-<link rel="stylesheet" href="/static/app.css">
+<link rel="stylesheet" href="{{ asset('app.css') }}">
 {# Our own origin, not a CDN: see static/vendor/VENDOR.md. #}
 <script src="/static/vendor/htmx.min.js" defer></script>
-<script src="/static/app.js" defer></script>
+<script src="{{ asset('app.js') }}" defer></script>
 </head>
 <body>
 {% if request.state.session %}

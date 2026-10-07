@@ -10,6 +10,7 @@ from __future__ import annotations
 from trouveur.discovery import leads_from_posting, urls_in
 from trouveur.discovery.resolve import resolve
 from trouveur.models import LeadOrigin, LeadResult
+from trouveur.sources.base import GLOBAL_SCOPE
 
 
 def _mine(payload: str, *, source="arbeitsagentur", scope=None, url=None):
@@ -126,3 +127,49 @@ def test_an_absurdly_long_run_of_characters_is_not_a_url():
     """A tracking redirect chain or a base64 blob containing "http" is not a board link, and
     storing one would push a megabyte into a column nothing can read."""
     assert urls_in("https://x.de/" + "a" * 900) == []
+
+
+def test_a_whole_site_posting_does_not_file_a_lead_for_its_own_url():
+    """The self-link drop has to see through the two spellings of "the whole platform".
+
+    A whole-site source STORES `GLOBAL_SCOPE` on its postings while `resolve` reports no scope for
+    one, so comparing the raw pair made `("workable", None) == ("workable", "*")` false and every
+    posting from workable, arbeitnow, himalayas and jobicy filed a lead for its own URL. The
+    stored spelling is the one passed here on purpose: with `scope=None`, which is what
+    arbeitsagentur happens to store, the broken comparison passes this test.
+    """
+    url = "https://apply.workable.com/beispiel/j/ABC123/"
+    assert _mine("{}", source="workable", scope=GLOBAL_SCOPE, url=url) == []
+
+
+def test_a_link_wrapped_in_square_brackets_keeps_neither_bracket():
+    """A German advert writes "Mehr Infos: [https://karriere.acme.de]".
+
+    Carried into `resolve`, the trailing bracket raises Invalid IPv6 URL, which aborted the whole
+    mining batch; the batch shares its transaction with `record_mined`, so it stayed below
+    MINE_VERSION and failed identically for ever. The board itself is what the advert names, so
+    the bracket is dropped and the lead is kept rather than merely not crashing.
+    """
+    leads = _mine('{"description": "Mehr Infos: [https://karriere.beispiel-gmbh.de/stellen/1]"}')
+    assert [lead.url for lead in leads] == ["https://karriere.beispiel-gmbh.de/stellen/1"]
+
+
+def test_a_whatsapp_contact_link_is_not_a_job():
+    """`ats` is matched as a whole segment, not as a substring.
+
+    As a substring it is inside `whatsapp`, `stats` and `formats`, and a WhatsApp contact number
+    is in a great many German adverts -- so the one word meant to catch an ATS we have no rule
+    for was admitting exactly the page furniture the filter exists to drop.
+    """
+    payload = (
+        '{"description": "Fragen? https://api.whatsapp.com/send?phone=4917000 '
+        'Bild: https://beispiel.de/stats/pixel.gif"}'
+    )
+    assert _mine(payload) == []
+
+
+def test_an_unknown_ats_host_is_still_kept():
+    """The other half of the segment rule: `ats.firma.de` is why the word is in the list at all,
+    and narrowing the match must not lose the platform it was there to find."""
+    leads = _mine('{"externeURL": "https://ats.beispiel-gmbh.de/position/42"}')
+    assert [lead.url for lead in leads] == ["https://ats.beispiel-gmbh.de/position/42"]

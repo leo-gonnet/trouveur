@@ -275,3 +275,31 @@ async def test_two_postings_linking_one_board_do_not_break_the_batch(clean_db):
     }
     async with connect() as conn:
         assert await q.insert_leads(conn, [row, dict(row)]) == 1
+
+
+async def test_more_leads_than_one_statement_can_carry_are_all_written(clean_db):
+    """One multi-VALUES INSERT carries a bind parameter per column per row, and asyncpg refuses a
+    statement above 32767 of them -- at 14 columns about 2340 leads.
+
+    Mining bounds the POSTINGS it reads and nothing bounds the links inside one, so a page of
+    link-heavy descriptions reaches the cap; and `insert_leads` runs in the transaction that also
+    writes `record_mined`, so the raise rolled the batch back, left it below MINE_VERSION, and
+    failed identically on every later tick. The count here is deliberately past the cap.
+    """
+    from trouveur.db.queries import discovery as dq
+
+    rows = [
+        {
+            "origin": "archive", "url": f"https://karriere-{n:05d}.beispiel.de/stellen/1",
+            "host": f"karriere-{n:05d}.beispiel.de", "job_id": None,
+            "company": "Beispiel GmbH", "title": "Prozessingenieur", "location_text": "Wien",
+            "result": "unknown_host", "source": None, "scope": None,
+            "resolve_version": versions.RESOLVE_VERSION,
+        }
+        for n in range(3000)
+    ]
+    async with connect() as conn:
+        written = await dq.insert_leads(conn, rows)
+
+    assert written == 3000
+    assert len(await _leads()) == 3000

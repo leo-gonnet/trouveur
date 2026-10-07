@@ -254,9 +254,17 @@ def test_the_gap_between_a_pages_blocks_comes_from_one_rule():
     """
     css = (ROOT / "trouveur" / "web" / "static" / "app.css").read_text()
     # The rule itself, anchored at the start of a line, not the sentence about it in the header.
-    assert re.search(r"^main > \* \+ \*\s*{[^}]*margin-top", css, re.M), (
+    assert re.search(r"^main > \* \+ \*,?\s*$|^main > \* \+ \*\s*{[^}]*margin-top", css, re.M), (
         "the one rule that spaces a page's blocks is gone; without it every page relies on "
         "whatever margins its components happen to carry"
+    )
+    # The same rule reaching through an htmx swap target. Without it a fragment of several cards
+    # stacks them edge to edge, which no page test sees because the page is fine until the swap
+    # lands -- `test_a_fragment_of_several_cards_is_swapped_into_a_stack` checks the other half,
+    # that the targets which need the class actually carry it.
+    assert re.search(r"^\.stack > \* \+ \*\s*{[^}]*margin-top", css, re.M), (
+        "`.stack > * + *` is gone; a fragment htmx swaps in is a grandchild of <main>, so "
+        "`main > * + *` cannot reach its cards and they stack with no gap"
     )
 
     # The page-level components, i.e. the ones that appear as a direct child of <main>.

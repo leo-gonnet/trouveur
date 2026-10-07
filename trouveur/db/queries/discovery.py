@@ -63,6 +63,15 @@ async def record_mined(conn: AsyncConnection, job_ids: Sequence[int], version: i
     return result.rowcount or 0
 
 
+# One multi-VALUES INSERT carries a bind parameter per column per row, and asyncpg refuses a
+# statement above 32767 of them -- at 14 columns that is ~2340 leads in one call. Mining bounds
+# the POSTINGS it reads (MINE_BATCH) and nothing bounds the links inside one, so a page of
+# link-heavy descriptions reaches it; and it would raise inside the transaction that also writes
+# `record_mined`, so the batch would roll back, stay below MINE_VERSION, and fail identically for
+# ever. Chunked well under the cap rather than at it, so adding a column cannot bring it back.
+_INSERT_CHUNK = 500
+
+
 async def insert_leads(conn: AsyncConnection, rows: Sequence[dict]) -> int:
     """Add leads, ignoring any link this origin has already filed.
 
@@ -73,17 +82,28 @@ async def insert_leads(conn: AsyncConnection, rows: Sequence[dict]) -> int:
     index this conflict is about. Without it the statement is rejected at run time with "there is
     no unique or exclusion constraint matching the ON CONFLICT specification" -- the index is
     partial (see the migration), so nothing matches a bare `(origin, url)` specification.
+
+    It is `sa.text` and NOT `discovery_lead.c.url != ""`, which is the same predicate and reads
+    better. Written that way the `''` compiles to a BIND PARAMETER -- `WHERE url != $12` -- and
+    Postgres cannot match a partial index against a parameterised predicate, so the statement is
+    rejected with that same message. Whether SQLAlchemy inlines the empty string or binds it
+    depends on the compilation path, so the failure was intermittent: small statements passed and
+    the bigger ones mining produces did not, which is the worst possible version of this bug.
     """
+    rows = list(rows)
     if not rows:
         return 0
-    stmt = pg_insert(discovery_lead).values(list(rows))
-    result = await conn.execute(
-        stmt.on_conflict_do_nothing(
-            index_elements=[discovery_lead.c.origin, discovery_lead.c.url],
-            index_where=discovery_lead.c.url != "",
+    written = 0
+    for start in range(0, len(rows), _INSERT_CHUNK):
+        stmt = pg_insert(discovery_lead).values(rows[start : start + _INSERT_CHUNK])
+        result = await conn.execute(
+            stmt.on_conflict_do_nothing(
+                index_elements=[discovery_lead.c.origin, discovery_lead.c.url],
+                index_where=sa.text("url <> ''"),
+            )
         )
-    )
-    return result.rowcount or 0
+        written += result.rowcount or 0
+    return written
 
 
 _STALE_LEADS = """

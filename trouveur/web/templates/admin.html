@@ -92,7 +92,7 @@
 </section>
 
 {# Fetched after the page, not with it: one filtered pass over the open corpus per area. #}
-<div hx-get="/admin/coverage" hx-trigger="load" hx-swap="innerHTML">
+<div class="stack" hx-get="/admin/coverage" hx-trigger="load" hx-swap="innerHTML">
   <section class="section">
     <div class="section-head"><h2>Coverage by area</h2></div>
     <p class="empty">Counting what we hold for each reader's area&hellip;</p>

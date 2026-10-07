@@ -18,10 +18,18 @@ import re
 
 from trouveur.discovery.resolve import resolve
 from trouveur.models import Lead, LeadOrigin, LeadResult
+from trouveur.sources.base import GLOBAL_SCOPE
 
 # Absolute http(s) URLs in arbitrary text -- an href, a src, or a bare URL in a JSON string.
 # Stops at the first quote, bracket, backslash or whitespace, freehire's AbsURLRe.
-_ABSOLUTE_URL = re.compile(r"https?://[^\s\"'<>)\\]+")
+#
+# `[` and `]` are among them for a reason worth keeping: a German advert writes "Mehr Infos:
+# [https://karriere.acme.de]", and carrying the trailing one made `resolve` raise Invalid IPv6
+# URL on a link that is really a board. Stopping here recovers the board instead of filing the
+# broken spelling, which is the whole point of mining. A bracket is legal in a URL only in an
+# IPv6 literal, which is never a careers site -- the same trade this pattern already makes for
+# `)`, legal too and far more often the end of a parenthesis.
+_ABSOLUTE_URL = re.compile(r"https?://[^\s\"'<>()\[\]\\]+")
 
 # A URL at the end of a sentence in plain text takes the punctuation with it. Trimmed here
 # because the payload is JSON, so the markup-stopping characters above never see it.
@@ -42,9 +50,16 @@ _TRAILING = ".,;:!?"
 # platform that names itself with none of them would be invisible rather than merely unresolved.
 _JOB_WORDS = (
     "job", "jobs", "career", "careers", "vacanc", "apply", "application", "recruit", "hiring",
-    "hire", "ats", "stelle", "stellen", "bewerb", "karriere", "emploi", "empleo", "lavoro",
+    "hire", "stelle", "stellen", "bewerb", "karriere", "emploi", "empleo", "lavoro",
     "vacature", "praca",
 )
+
+# "ats" is matched as a whole segment rather than as a substring like the words above, which are
+# deliberately partial ("vacanc" has to catch both vacancy and vacancies). As a substring it hits
+# `stats`, `formats` and `api.whatsapp.com/send`, and a WhatsApp contact link is in a great many
+# German adverts -- so the one word meant to catch an unknown ATS was instead admitting the noise
+# this filter exists to keep out.
+_ATS_SEGMENT = re.compile(r"(?:\A|[^a-z])ats(?:\Z|[^a-z])")
 
 # Enough to carry any real board URL; past it a payload is quoting something else (a tracking
 # pixel's redirect chain, a base64 blob that happens to contain "http").
@@ -89,7 +104,15 @@ def leads_from_posting(
     leads = []
     for candidate in urls_in(url) + urls_in(payload):
         resolution = resolve(candidate)
-        if (resolution.source, resolution.scope) == (source, scope):
+        # The two spellings of "the whole platform" must compare equal. A whole-site source
+        # STORES `GLOBAL_SCOPE` on its postings (sources/feed.py) while `resolve` reports no
+        # scope for one at all, so comparing the raw pair let workable, arbeitnow, himalayas and
+        # jobicy file a lead for every posting's own URL -- the exact flood the docstring says
+        # this drop prevents. Arbeitsagentur hid it: it is whole-site too but does not sweep
+        # through feed.py, so its postings store no scope and the raw pair happened to match.
+        if resolution.source == source and (resolution.scope or GLOBAL_SCOPE) == (
+            scope or GLOBAL_SCOPE
+        ):
             continue
         if resolution.result is LeadResult.UNKNOWN_HOST and not _looks_like_work(candidate):
             continue
@@ -108,4 +131,4 @@ def leads_from_posting(
 
 def _looks_like_work(url: str) -> bool:
     folded = url.lower()
-    return any(word in folded for word in _JOB_WORDS)
+    return any(word in folded for word in _JOB_WORDS) or bool(_ATS_SEGMENT.search(folded))

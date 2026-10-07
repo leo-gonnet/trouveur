@@ -70,6 +70,28 @@ templates.env.globals["version"] = importlib.metadata.version("trouveur")
 templates.env.globals["timezone"] = get_settings().timezone
 templates.env.globals["min_password_chars"] = auth.MIN_PASSWORD_CHARS
 
+
+def _asset(name: str) -> str:
+    """A static file's URL, carrying its mtime, so an edit reaches the reader.
+
+    StaticFiles answers with an ETag, so a browser that ASKS gets the new bytes -- but nothing
+    makes it ask. The URL never changed, so Chrome kept serving a cached stylesheet and a CSS fix
+    looked like it had not been applied until somebody knew to hard-refresh. Changing the URL is
+    the one thing every browser honours.
+
+    Stat per render rather than read once at import: `--reload` watches Python files, so editing
+    only CSS does not restart the dev server, and a version frozen at import would be the stale
+    thing it is here to prevent. One stat per page is nothing at this size.
+    """
+    try:
+        stamp = int((BASE / "static" / name).stat().st_mtime)
+    except OSError:
+        return f"/static/{name}"
+    return f"/static/{name}?v={stamp}"
+
+
+templates.env.globals["asset"] = _asset
+
 REPO_URL = "https://github.com/leo-gonnet/trouveur"
 _SHA = re.compile(r"\A[0-9a-f]{7,40}\Z")
 
@@ -539,10 +561,17 @@ async def elsewhere_report(request: Request, url: str = Form("")):
     """
     session = request.state.session
     candidate = url.strip()
-    parsed = urlsplit(candidate)
+    # Splitting a URL whose netloc holds a bracket raises Invalid IPv6 URL, so a pasted
+    # `https://[::1` answered 500 instead of the refusal this check was written to give. An
+    # address we cannot even split is exactly the bad URL being rejected here.
+    try:
+        parsed = urlsplit(candidate)
+        hostname = parsed.hostname
+    except ValueError:
+        return RedirectResponse("/elsewhere?error=url", status_code=303)
     if (
         parsed.scheme not in {"http", "https"}
-        or not parsed.hostname
+        or not hostname
         or len(candidate) > MAX_REPORT_URL_CHARS
     ):
         return RedirectResponse("/elsewhere?error=url", status_code=303)

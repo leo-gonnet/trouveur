@@ -53,16 +53,31 @@ def url_variants(url: str) -> list[str]:
     found it on added. Comparing the pasted string alone would call almost every reported job
     missing, and canonicalising our own column instead would need the same rules in SQL.
     """
-    parts = urlsplit(url.strip())
-    if parts.scheme not in {"http", "https"} or not parts.hostname:
+    # A URL we cannot even split has no spellings, and must not raise: both this and `id_tokens`
+    # run per report inside one transaction, so one unsplittable stored URL would wedge the
+    # report queue for every reader behind it. A netloc holding a bracket is what does it
+    # (`ValueError: Invalid IPv6 URL`), and the route rejects those now -- rows filed before it
+    # did are still in the table.
+    try:
+        parts = urlsplit(url.strip())
+        hostname = parts.hostname
+    except ValueError:
         return []
+    if parts.scheme not in {"http", "https"} or not hostname:
+        return []
+    # The raw `name=value` pieces, not `parse_qs` output. Parsing DECODES the value and nothing
+    # puts it back the way it was: `%20` and `+` are both a space, so one spelling has to be
+    # chosen and the other then stops matching what we stored. Rebuilding from `parse_qs` turned
+    # `?title=Senior%20Engineer` into a literal space in every variant, and a reported job whose
+    # stored URL differed only by `www.` was answered "we never had it" -- the one mistake the
+    # module docstring calls expensive. Dropping a tracking parameter needs only its NAME, which
+    # is why none of this has to be decoded at all. Keeping the pieces also keeps their order.
     query = "&".join(
-        f"{name}={value}"
-        for name, values in parse_qs(parts.query, keep_blank_values=True).items()
-        if name.lower() not in _TRACKING
-        for value in values
+        piece
+        for piece in parts.query.split("&")
+        if piece and piece.partition("=")[0].lower() not in _TRACKING
     )
-    bare = parts.hostname.lower().removeprefix("www.")
+    bare = hostname.lower().removeprefix("www.")
     trimmed = parts.path.rstrip("/")
     # The link exactly as pasted comes first, so the plain case cannot depend on the rebuilding
     # below: a query string put back together is not always character for character the original.
@@ -85,7 +100,11 @@ def id_tokens(url: str, scope: str | None) -> list[str]:
     nothing else can be equal to it, so a handful of segments that are obviously not ids costs an
     array element and no precision at all.
     """
-    parts = urlsplit(url.strip())
+    # Unsplittable, so there is nothing in it that could be an id. See `url_variants`.
+    try:
+        parts = urlsplit(url.strip())
+    except ValueError:
+        return []
     found = [segment for segment in parts.path.split("/") if segment]
     found += [value for values in parse_qs(parts.query).values() for value in values]
     tokens = {token for token in found if len(token) in _ID_CHARS}

@@ -287,3 +287,15 @@ def test_every_rule_uses_a_mode_that_has_a_branch():
         assert isinstance(rule.mode, Mode)
         url = f"https://board.{rule.hosts[0]}.com/acme/jobs/1"
         resolve(url)  # must not raise, whatever the mode
+
+
+@pytest.mark.parametrize("url", ["https://[::1", "https://karriere.acme.de]", "https://a]b.de/x"])
+def test_an_unsplittable_link_is_no_url_rather_than_a_raise(url):
+    """A bracket in the netloc makes splitting raise `ValueError: Invalid IPv6 URL`.
+
+    It must be an answer, not an exception: `resolve` runs per candidate inside the mining
+    transaction that also writes `record_mined`, so one raise rolled the batch back, left it
+    below MINE_VERSION, and failed identically on every later tick -- archive mining stopped for
+    good and nothing said why.
+    """
+    assert resolve(url).result is LeadResult.NO_URL

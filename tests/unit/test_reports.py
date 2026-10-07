@@ -32,9 +32,31 @@ def test_a_parameter_that_is_the_job_itself_is_kept():
     assert all("gh_jid=42" in url for url in got)
 
 
-@pytest.mark.parametrize("url", ["", "not a link", "mailto:jobs@example.com", "/careers"])
+# `https://[::1` is the one that used to RAISE rather than return nothing: splitting a netloc
+# holding a bracket is a ValueError, and both of these run per report inside one transaction, so
+# one such row stored before the route rejected them wedged the queue for every reader.
+@pytest.mark.parametrize(
+    "url",
+    ["", "not a link", "mailto:jobs@example.com", "/careers", "https://[::1", "https://acme.de]"],
+)
 def test_a_link_we_cannot_parse_has_no_spellings(url):
     assert url_variants(url) == []
+    # `id_tokens` is loose by design and reads whatever the path held, so what is asserted of it
+    # here is only that it ANSWERS: a raise is what wedged the queue.
+    assert isinstance(id_tokens(url, "acme"), list)
+
+
+def test_an_encoded_parameter_is_not_rewritten_by_rebuilding():
+    """The rebuilt spellings must stay comparable to the URL we stored.
+
+    Rebuilding from `parse_qs` DECODED the value and no re-encoding puts it back: `%20` and `+`
+    are both a space, so whichever is written the other stops matching. A reported job whose
+    stored URL differed only by `www.` was then answered "we never had it" -- the mistake the
+    module docstring calls expensive.
+    """
+    got = url_variants("https://www.acme.com/jobs?title=Senior%20Engineer&utm_source=x")
+    assert all("title=Senior%20Engineer" in url for url in got)
+    assert not any("utm_source" in url for url in got[1:])
 
 
 def test_the_id_in_a_link_is_offered_both_bare_and_behind_its_board():
