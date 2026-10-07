@@ -4,10 +4,9 @@ Composed here rather than in `db/queries` because grouping profiles into areas i
 read by both Operations and `trouveur coverage` so the page and the command cannot drift apart.
 
 Later tasks add sections to it: one query in `db/queries/coverage.py`, one field on `Report`
-filled in `report()`, one block in `_admin_coverage.html`. Leads we already hold and the
-platforms we cannot resolve come from docs/tasks/02, "found it elsewhere" results from 03,
-blocked sources from 06, aggregator leads from 07. None of them emits an empty row here yet: a
-key that is always zero is one an agent reads as an answer.
+filled in `report()`, one block in `_admin_coverage.html`. "Found it elsewhere" results come from
+docs/tasks/03, blocked sources from 06, aggregator leads from 07. None of them emits an empty row
+here yet: a key that is always zero is one an agent reads as an answer.
 """
 
 from __future__ import annotations
@@ -17,7 +16,9 @@ from datetime import UTC, datetime
 
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from trouveur import versions
 from trouveur.db.queries import coverage as coverage_q
+from trouveur.db.queries import discovery as discovery_q
 from trouveur.db.queries import freshness
 from trouveur.ingest import places
 
@@ -106,11 +107,38 @@ class TenantCoverage:
 
 
 @dataclass(frozen=True)
+class UnreadHost:
+    """A host whose links we cannot read. The count is the case for writing a rule for it."""
+
+    host: str
+    leads: int
+
+
+@dataclass(frozen=True)
+class LeadCoverage:
+    """What discovery has found, and what each of its stages still has to get through.
+
+    The backlogs belong beside the counts: a panel reading zero leads means one thing when the
+    archive is mined and quite another when a hundred thousand postings are still waiting.
+    """
+
+    leads: int
+    resolved: int
+    unread: int
+    unread_host_count: int
+    unmined_jobs: int
+    awaiting_resolve: int
+    hosts: list[UnreadHost] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
 class Report:
     generated_at: datetime
     horizon_days: int
     areas: list[AreaCoverage]
     tenants: list[TenantCoverage]
+    # None until discovery has seen anything: an always-empty section reads as an answer.
+    leads: LeadCoverage | None = None
 
     def as_dict(self) -> dict:
         """The shape `trouveur coverage --json` prints. Plain types only, for an agent to read."""
@@ -134,6 +162,7 @@ class Report:
                 for entry in self.areas
             ],
             "tenants": [asdict(row) for row in self.tenants],
+            "leads": asdict(self.leads) if self.leads else None,
         }
 
 
@@ -191,6 +220,7 @@ async def report(conn: AsyncConnection, horizon_days: int) -> Report:
             )
         )
     return Report(
+        leads=await leads(conn),
         generated_at=datetime.now(UTC),
         horizon_days=horizon_days,
         areas=covered,
@@ -203,5 +233,28 @@ async def report(conn: AsyncConnection, horizon_days: int) -> Report:
                 dropped=int(row.dropped),
             )
             for row in await coverage_q.tenant_states(conn)
+        ],
+    )
+
+
+async def leads(conn: AsyncConnection) -> LeadCoverage | None:
+    """What discovery holds, or nothing at all when it has not run yet."""
+    counts = await discovery_q.totals(
+        conn,
+        resolve_version=versions.RESOLVE_VERSION,
+        mine_version=versions.MINE_VERSION,
+    )
+    if not counts["leads"] and not counts["unmined_jobs"]:
+        return None
+    return LeadCoverage(
+        leads=counts["leads"],
+        resolved=counts["resolved"],
+        unread=counts["unread"],
+        unread_host_count=counts["unread_hosts"],
+        unmined_jobs=counts["unmined_jobs"],
+        awaiting_resolve=counts["awaiting_resolve"],
+        hosts=[
+            UnreadHost(host=row.host, leads=int(row.leads))
+            for row in await discovery_q.unread_hosts(conn)
         ],
     )

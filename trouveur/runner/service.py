@@ -16,6 +16,7 @@ from trouveur import clock, versions
 from trouveur.config import Settings, get_settings
 from trouveur.db.engine import connect
 from trouveur.db.queries import admin as admin_q
+from trouveur.discovery import work as discovery
 from trouveur.ingest import pipeline as ingest
 from trouveur.ingest import workers
 from trouveur.match import pipeline as matching
@@ -96,11 +97,15 @@ async def drain_queues(settings: Settings) -> dict[str, int]:
     depends on the other two having landed -- and every stage takes its own connection, so the two
     halves never share one.
 
+    Discovery is a third half for the same reason the first two are split: it is a backfill over
+    the whole archive that nothing the nightly edition needs depends on, so it must neither hold
+    the chain up nor be stopped by it.
+
     The halves also fail independently. A detail fetch that raised took all four stages down with
     it for hours before anyone noticed, because one exception escaping here stops the whole tick.
     Isolating them means a broken source can no longer stop embedding.
     """
-    done = {"detail": 0, "derive": 0, "embed": 0, "dedup": 0}
+    done = {"detail": 0, "derive": 0, "embed": 0, "dedup": 0, "leads": 0}
 
     async with connect() as conn:
         tenants = await admin_q.enabled_tenants(conn)
@@ -121,10 +126,15 @@ async def drain_queues(settings: Settings) -> dict[str, int]:
         async with connect() as conn:
             done["embed"] = await workers.drain_embed(conn, limit=settings.embed_batch_size)
 
+    async def find_leads() -> None:
+        done["leads"] = (await discovery.run_once()).leads
+
     halves = await asyncio.gather(
-        fetch_details(), derive_and_embed(), return_exceptions=True
+        fetch_details(), derive_and_embed(), find_leads(), return_exceptions=True
     )
-    for name, outcome in zip(("detail", "derive/dedup/embed"), halves, strict=True):
+    for name, outcome in zip(
+        ("detail", "derive/dedup/embed", "discovery"), halves, strict=True
+    ):
         if isinstance(outcome, BaseException):
             log.error("queue half %r failed this tick", name, exc_info=outcome)
     return done
@@ -244,7 +254,9 @@ async def prepare_arrivals(settings: Settings) -> int:
     Only work that could run now counts, so an item backing off after an error, a paused source or
     a parked item cannot hold the run. A round that moves nothing ends the wait: nothing will move
     on the next one either, and a detail half that raised every round held a run for its whole
-    limit.
+    limit. Only the QUEUE kinds count as movement -- discovery drains in the same tick and walks
+    the whole archive, so reading it as progress would hold every run for the full limit while the
+    stages the match is actually waiting on had nothing left to do.
     """
     since = datetime.now(UTC) - timedelta(hours=retrieve.NEW_ARRIVALS_HOURS)
     deadline = datetime.now(UTC) + MATCH_WAIT_LIMIT
@@ -253,7 +265,10 @@ async def prepare_arrivals(settings: Settings) -> int:
             waiting = await waiting_since(conn, since)
         if not waiting:
             return 0
-        if datetime.now(UTC) >= deadline or not any((await drain_queues(settings)).values()):
+        drained = await drain_queues(settings)
+        if datetime.now(UTC) >= deadline or not any(
+            drained[kind.value] for kind in WorkKind
+        ):
             log.warning("matching with %d new posting(s) still unprepared", waiting)
             return waiting
 

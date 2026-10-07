@@ -74,3 +74,49 @@
       <code>trouveur tenants add</code>.</p>
   {% endif %}
 </section>
+
+{% if coverage.leads %}
+<section class="section">
+  <div class="section-head">
+    <h2>Discovery</h2>
+    <span class="hint">{{ '{:,}'.format(coverage.leads.leads) }} lead{{ '' if
+      coverage.leads.leads == 1 else 's' }} ·
+      {{ '{:,}'.format(coverage.leads.resolved) }} on a board we can sweep</span>
+  </div>
+  <p class="hint">
+    A <em>lead</em> is one job seen somewhere, with its link, found by reading the postings we
+    already hold. The link is read as a board, so one lead can bring that company's whole board
+    with it: a board we can sweep is added to the crawl set above as a candidate, switched off,
+    for you to promote with <code>trouveur tenants enable</code>.
+  </p>
+  {% if coverage.leads.unmined_jobs or coverage.leads.awaiting_resolve %}
+    <p class="notice">Still working through the archive:
+      {{ '{:,}'.format(coverage.leads.unmined_jobs) }} posting{{ '' if
+      coverage.leads.unmined_jobs == 1 else 's' }} not yet read for links,
+      {{ '{:,}'.format(coverage.leads.awaiting_resolve) }} lead{{ '' if
+      coverage.leads.awaiting_resolve == 1 else 's' }} waiting for the current URL rules.</p>
+  {% endif %}
+  <div class="section-head">
+    <h2>Links we cannot read</h2>
+    <span class="hint">{{ '{:,}'.format(coverage.leads.unread) }} link{{ '' if
+      coverage.leads.unread == 1 else 's' }} on
+      {{ '{:,}'.format(coverage.leads.unread_host_count) }} host{{ '' if
+      coverage.leads.unread_host_count == 1 else 's' }}</span>
+  </div>
+  <p class="hint">
+    We know a job is there and not which board holds it. A host that keeps coming back is usually a whole job platform — the rule for it can
+    be ported from freehire, see <code>trouveur/discovery/resolve.py</code> — and the long tail is
+    companies hosting their own careers page, which needs a different approach.
+  </p>
+  {% if coverage.leads.hosts %}
+  <table>
+    <tr><th>Host</th><th class="num">Leads</th></tr>
+    {% for row in coverage.leads.hosts %}
+    <tr><td>{{ row.host }}</td><td class="num">{{ '{:,}'.format(row.leads) }}</td></tr>
+    {% endfor %}
+  </table>
+  {% else %}
+    <p class="empty">Every link we have seen so far was readable.</p>
+  {% endif %}
+</section>
+{% endif %}

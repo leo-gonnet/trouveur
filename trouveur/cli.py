@@ -68,7 +68,12 @@ def match(user_id: int | None) -> None:
 @main.command()
 @click.option("--rounds", default=1, show_default=True, help="How many drain passes to make.")
 def drain(rounds: int) -> None:
-    """Work the deferred queues once: detail fetches, derivation, dedupe markers, embeddings."""
+    """Work the deferred stages once: detail fetches, derivation, dedupe markers, embeddings, and
+    one bounded pass of discovery.
+
+    Reading the whole archive for links takes many passes the first time; `--rounds` is how you
+    get it over with rather than waiting for the runner's ticks.
+    """
     from trouveur.runner import drain_queues
 
     settings = get_settings()
@@ -290,6 +295,22 @@ def coverage(as_json: bool) -> None:
             f"  {'all sources':<16}{entry.open_jobs:>8,}{entry.retrievable_jobs:>13,}"
             f"{entry.only_source:>11,}"
         )
+
+    if card.leads:
+        leads = card.leads
+        click.echo(
+            f"\nDiscovery  ({leads.leads:,} lead(s): {leads.resolved:,} on a board we can sweep, "
+            f"{leads.unread:,} on a link we cannot read)"
+        )
+        if leads.unmined_jobs or leads.awaiting_resolve:
+            click.echo(
+                f"  still working: {leads.unmined_jobs:,} posting(s) unread for links, "
+                f"{leads.awaiting_resolve:,} lead(s) below the current URL rules"
+            )
+        if leads.hosts:
+            click.echo(f"  Links we cannot read  ({leads.unread_host_count:,} host(s))")
+            for row in leads.hosts:
+                click.echo(f"  {row.host:<42}{row.leads:>9,}")
 
     click.echo("\nCrawl set by source")
     if not card.tenants:

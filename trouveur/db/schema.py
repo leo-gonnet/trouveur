@@ -26,6 +26,8 @@ employment_type = _enum(
 )
 work_kind = _enum("work_kind", "detail", "derive", "embed", "dedup")
 tenant_origin = _enum("tenant_origin", "manual", "discovered")
+lead_origin = _enum("lead_origin", "archive", "user_report")
+lead_result = _enum("lead_result", "resolved", "unknown_host", "no_url")
 user_state = _enum("user_state", "new", "saved", "applied", "dismissed")
 run_status = _enum("run_status", "queued", "running", "success", "failed", "cancelled")
 run_trigger = _enum("run_trigger", "scheduled", "manual")
@@ -88,6 +90,7 @@ job = sa.Table(
     sa.Column("closed_at", sa.DateTime(timezone=True)),
     sa.Column("dedup_group", BYTEA),
     sa.Column("dedup_version", sa.Integer, nullable=False, server_default="0"),
+    sa.Column("mined_version", sa.SmallInteger, nullable=False, server_default="0"),
     sa.UniqueConstraint("source", "external_id", name="job_provenance_uniq"),
 )
 
@@ -185,6 +188,38 @@ source_tenant = sa.Table(
     # does not propose the board again, and the reason lives in `note`.
     sa.Column("dropped_at", sa.DateTime(timezone=True)),
 )
+
+# One job seen somewhere, with its link and what the URL rules made of it. The lead sources write
+# here (archive mining, a reader's report, an aggregator search) and the resolver reads.
+#
+# `result`, `source` and `scope` are a pure function of `url` and `resolve_version`, which is what
+# lets a version bump recompute the whole table: when an adapter for a new platform ships, the
+# boards we have already seen for it resolve without one new request. Nothing here records what we
+# happen to hold besides -- whether a board is already swept is a join against `source_tenant`.
+discovery_lead = sa.Table(
+    "discovery_lead",
+    metadata,
+    sa.Column("id", sa.BigInteger, primary_key=True),
+    sa.Column("origin", lead_origin, nullable=False),
+    # What we actually saw, never a tidied version of it: the raw link is the input the resolver
+    # re-reads, so rewriting it would make a version bump unable to correct its own mistakes.
+    sa.Column("url", sa.Text, nullable=False, server_default=""),
+    sa.Column("host", sa.Text),
+    # The posting the link was found in, for an archive lead. Its raw documents are kept for ever,
+    # so a wider extractor can re-read them with no new request.
+    sa.Column("job_id", sa.BigInteger),
+    sa.Column("company", sa.Text),
+    sa.Column("title", sa.Text),
+    sa.Column("location_text", sa.Text),
+    sa.Column("result", lead_result, nullable=False),
+    sa.Column("source", sa.Text),
+    sa.Column("scope", sa.Text),
+    sa.Column("resolve_version", sa.Integer, nullable=False, server_default="0"),
+    sa.Column("first_seen_at", sa.DateTime(timezone=True), nullable=False,
+              server_default=sa.func.now()),
+    sa.Column("resolved_at", sa.DateTime(timezone=True)),
+)
+
 
 # Observation, not configuration: source_tenant is the crawl set, this is only what happened when
 # we asked. Their predecessor mixed the two and half of it rotted unnoticed.

@@ -21,6 +21,8 @@ from trouveur.db import schema
 from trouveur.models import (
     DocumentKind,
     EmploymentType,
+    LeadOrigin,
+    LeadResult,
     RunStatus,
     RunTrigger,
     SalaryPeriod,
@@ -40,6 +42,8 @@ BINDINGS: dict[str, type[StrEnum]] = {
     "employment_type": EmploymentType,
     "work_kind": WorkKind,
     "tenant_origin": TenantOrigin,
+    "lead_origin": LeadOrigin,
+    "lead_result": LeadResult,
     "user_state": UserState,
     "run_status": RunStatus,
     "run_trigger": RunTrigger,

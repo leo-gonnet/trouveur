@@ -997,3 +997,38 @@ async def test_the_database_itself_refuses_a_case_variant_address(seeded):
                 "INSERT INTO app_user (email, display_name, password_hash) VALUES ($1, $2, $3)",
                 (email.upper(), "shadow", "argon2$fake"),
             )
+
+
+async def test_the_coverage_fragment_renders_the_discovery_panels(admin, seeded):
+    """With rows in them, which is the only way `StrictUndefined` can catch a renamed field.
+
+    The fragment over an empty table proves the route answered and nothing else: the discovery
+    section is skipped entirely when there are no leads, so the markup would never run.
+    """
+    from trouveur.discovery import work as discovery
+    from trouveur.models import Lead, LeadOrigin
+
+    await discovery.record_leads(
+        [
+            Lead(
+                origin=LeadOrigin.ARCHIVE,
+                url="https://anderefirma.jobs.personio.de/job/1",
+                company="Andere Firma GmbH",
+                title="Prozessingenieur",
+            ),
+            Lead(
+                origin=LeadOrigin.USER_REPORT,
+                url="https://karriere.beispiel-gmbh.de/stellen/42",
+                company="Beispiel GmbH",
+            ),
+        ]
+    )
+
+    response = await admin.get("/admin/coverage")
+    assert response.status_code == 200
+    said = response.text
+    assert "Discovery" in said
+    assert "personio" in said, "the platform panel must list the platform a lead named"
+    assert "karriere.beispiel-gmbh.de" in said, (
+        "an unreadable host must be shown; the count is the whole case for writing a rule"
+    )

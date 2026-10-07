@@ -21,6 +21,23 @@ cross modules; a fact about one source, query or function is a comment at that c
 project for a handful of users: where a rule reads as absolute, take it as "there was a reason, find
 it first" rather than as a safety interlock.
 
+## Comments
+
+The default is **no comment**. Small functions with accurate names need no explanation.
+
+Write a comment only to record something a reader cannot see from the code:
+
+- A constraint imposed by an external system we do not control.
+- A deliberate omission ("we do not send `pav`, it 400s").
+- Ordering or concurrency requirements.
+
+**Every silent-failure trap in an adapter is exactly this kind of constraint and MUST carry a comment
+at the site that depends on it.** If someone "cleans up" the umlaut handling because nothing
+explained it, we silently lose most German results.
+
+Do not write: restatements of the code, section banners, changelog notes, or TODOs without an owner.
+Leave existing comments alone unless the code they describe changed.
+
 ## The organizing principle
 
 **Everything derived is a pure function of something we stored, and every non-trivial stage is
@@ -57,6 +74,7 @@ never fetches; they share nothing but the database, so either can be down alone.
 | `sources/<name>/` | `client.py` is network only; `normalize.py` is pure and versioned. |
 | `sources/` | `{board,feed}.py` are the two shared sweeps; `registry.py` is the **only** dispatch. |
 | `ingest/` | `persist` (the single write path), `derive` (facets, pure), `vocab`, `places`, `embed`. |
+| `discovery/` | `resolve.py` turns a link into a board (pure, versioned); `mine.py` reads our own archive for links. Upstream of normalisation, so it may name a source. |
 | `match/` | Expansion, hybrid retrieval, RRF, reranking. `work/queue.py` is the one queue. |
 | `db/` | **All SQL.** No SQL text outside this package. |
 | `web/` | Routes, auth, templates. Reads the DB; never fetches, never sweeps. |
@@ -266,23 +284,6 @@ uv run --with geonamescache==3.0.2 python tools/build_places.py   # rebuild the 
 Prefer the narrowest command that proves your change, and never sweep a live source to test a parser.
 **Ask first** for anything you cannot take back: `sweep` and `eval --sweep` (live APIs), `match`
 (credit), `refill --kind embed` (hours of CPU), `test-notify` (a real inbox), `runner`, `git push`.
-
-## Comments
-
-The default is **no comment**. Small functions with accurate names need no explanation.
-
-Write a comment only to record something a reader cannot see from the code:
-
-- A constraint imposed by an external system we do not control.
-- A deliberate omission ("we do not send `pav`, it 400s").
-- Ordering or concurrency requirements.
-
-**Every silent-failure trap in an adapter is exactly this kind of constraint and MUST carry a comment
-at the site that depends on it.** If someone "cleans up" the umlaut handling because nothing
-explained it, we silently lose most German results.
-
-Do not write: restatements of the code, section banners, changelog notes, or TODOs without an owner.
-Leave existing comments alone unless the code they describe changed.
 
 ## Commit style
 

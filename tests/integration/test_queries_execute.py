@@ -23,12 +23,21 @@ from decimal import Decimal
 import pytest
 
 from trouveur.db.engine import connect
-from trouveur.db.queries import admin, archive, coverage, ingest, jobs, match, users
+from trouveur.db.queries import (
+    admin,
+    archive,
+    coverage,
+    discovery,
+    ingest,
+    jobs,
+    match,
+    users,
+)
 from trouveur.models import DocumentKind, Expansion, RawDocument, RunStatus, RunTrigger
 
 MODULES = {
-    "admin": admin, "archive": archive, "coverage": coverage, "ingest": ingest, "jobs": jobs,
-    "match": match, "users": users,
+    "admin": admin, "archive": archive, "coverage": coverage, "discovery": discovery,
+    "ingest": ingest, "jobs": jobs, "match": match, "users": users,
 }
 
 
@@ -114,6 +123,15 @@ def _arguments(ctx: dict) -> dict[str, dict]:
         "coverage.areas": {},
         "coverage.tenant_states": {},
         "coverage.by_source": {"area": ctx["profile"], "fresh_since": _cutoff()},
+        # discovery -- the lead is inserted first so every read below has a row to touch.
+        "discovery.insert_leads": {"rows": [ctx["lead_row"]]},
+        "discovery.mining_batch": {"version": 99, "chunk": 10},
+        "discovery.record_mined": {"job_ids": [job_id], "version": 1},
+        "discovery.leads_to_resolve": {"version": 99, "chunk": 10},
+        "discovery.write_resolutions": {"rows": [ctx["resolution_row"]]},
+        "discovery.promote_candidates": {"sources": [source]},
+        "discovery.unread_hosts": {},
+        "discovery.totals": {"resolve_version": 1, "mine_version": 1},
         # ingest
         "ingest.archive_documents": {"documents": [document]},
         "ingest.latest_documents": {
@@ -258,6 +276,18 @@ async def context(seeded):
             "employment_type": "full_time", "salary_min_eur_year": None,
             "salary_max_eur_year": None, "salary_annualised": False, "language": "de",
             "is_agency": None, "skills": ["python"], "derived_at": None,
+        },
+        "lead_row": {
+            "origin": "archive", "url": "https://jobs.lever.co/probefirma/1",
+            "host": "jobs.lever.co", "job_id": row.id, "company": "Probe GmbH",
+            "title": "Probe", "location_text": "Berlin", "result": "resolved",
+            "source": "lever", "scope": "probefirma", "resolve_version": 1,
+        },
+        # The id is read back below rather than assumed: insert_leads runs first in the registry,
+        # but a bigserial is not a count.
+        "resolution_row": {
+            "lead_id": 1, "result": "unknown_host", "source": None, "scope": None,
+            "host": "jobs.lever.co", "resolve_version": 1,
         },
         "match_row": {
             "user_id": seeded["user_id"], "job_id": row.id, "profile_version": 1,
