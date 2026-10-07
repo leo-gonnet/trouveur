@@ -822,8 +822,48 @@ async def users_set_active(request: Request, user_id: int, is_active: str = Form
     return RedirectResponse("/users", status_code=303)
 
 
+@app.post("/users/{user_id}/delete", response_class=HTMLResponse)
+async def users_delete(request: Request, user_id: int, confirm_email: str = Form("")):
+    """Erase an account for good: the person, their profile, their scores and their editions.
+
+    Disabling is the reversible answer and stays the usual one. This is here for the other case --
+    somebody who is gone, whose career data we have no reason to keep -- because the repo is
+    public and the database is the only place that data ever lives, so there has to be a way to
+    take it out that is not a psql prompt.
+
+    Guarded by typing the address rather than by a dialog: a browser confirm() is a click away
+    from the button that opened it and reads the same on the right row as on the wrong one, and
+    the rows on this page differ only by a name. Nothing here is recoverable, so the check is
+    made on the server, where no missing script can skip it.
+    """
+    session = request.state.session
+    if user_id == session["uid"]:
+        # Said rather than silently ignored: a delete that answers with the page it was posted
+        # from, unchanged, reads exactly like a delete that worked.
+        return await _users_response(request, error="You cannot delete your own account.")
+    async with connect() as conn:
+        user = await users_q.get_user(conn, user_id)
+        if user is None:
+            return await _users_response(request, error="That account no longer exists.")
+        # Folded, not parsed: the stored address is already lower case, and what is being asked
+        # for here is a match with the row in front of the admin, not a valid address.
+        if confirm_email.strip().lower() != user.email:
+            return await _users_response(
+                request,
+                error=f"Type {user.email} exactly to delete that account. Nothing was deleted.",
+            )
+        await users_q.delete_user(conn, user_id)
+    # The id, not the address: the point of deleting an account is not to keep its email in a log.
+    log.warning("user %s deleted account %s", session["uid"], user_id)
+    return await _users_response(request, deleted=user.display_name)
+
+
 async def _users_response(
-    request: Request, *, error: str = "", new_login: tuple[str, str] | None = None
+    request: Request,
+    *,
+    error: str = "",
+    new_login: tuple[str, str] | None = None,
+    deleted: str = "",
 ) -> HTMLResponse:
     async with connect() as conn:
         users = await users_q.list_users_with_credit(conn)
@@ -836,6 +876,9 @@ async def _users_response(
             "error": error,
             # The generated password, shown exactly once: in this response and nowhere after it.
             "new_login": new_login,
+            # Who just went. The row is gone from the table below, so without this the page
+            # answers a delete by looking like nothing was asked.
+            "deleted": deleted,
             "user_id": request.state.session["uid"],
         },
     )

@@ -174,6 +174,20 @@ async def set_active(conn: AsyncConnection, user_id: int, *, is_active: bool) ->
     )
 
 
+async def delete_user(conn: AsyncConnection, user_id: int) -> None:
+    """Erase an account and everything it owns. One statement, because the database owns the list.
+
+    Every table keyed on a user references app_user(id) ON DELETE CASCADE -- profile, spend,
+    matches, editions, score cache, query expansions, credit grants, reports -- so deleting the
+    row here takes the whole person with it. Deleting them table by table from Python would be a
+    second copy of that list, and the table somebody adds next would be the one it forgets.
+
+    The grants this user HANDED OUT are the exception: `granted_by` is ON DELETE SET NULL, so
+    another reader's credit history survives the admin who paid for it.
+    """
+    await conn.execute(app_user.delete().where(app_user.c.id == user_id))
+
+
 _GRANTED = (
     sa.select(sa.func.coalesce(sa.func.sum(user_credit_grant.c.amount_usd), 0))
     .where(user_credit_grant.c.user_id == app_user.c.id)

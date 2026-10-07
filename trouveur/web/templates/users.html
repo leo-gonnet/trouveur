@@ -10,6 +10,7 @@
 </div>
 
 {% if error %}<p class="notice bad">{{ error }}</p>{% endif %}
+{% if deleted %}<p class="notice good">{{ deleted }} and everything they held is deleted.</p>{% endif %}
 {% if new_login %}
   <section class="section">
     <div class="section-head"><h2>New login</h2></div>
@@ -70,10 +71,12 @@
 
   <section class="section">
     <div class="section-head"><h2>Access</h2></div>
-    <p class="hint">A disabled account cannot log in and is skipped by every run. Your own account
-      is not listed here: nothing could re-enable it, because every route needs a session.</p>
+    <p class="hint">A disabled account cannot log in and is skipped by every run, and you can
+      turn it back on. Deleting cannot be undone: it removes the person, their profile, their
+      scores and every edition they were shown. Your own account is not listed here: nothing
+      could re-enable it, because every route needs a session.</p>
     <table>
-      <tr><th>User</th><th>Access</th></tr>
+      <tr><th>User</th><th>Access</th><th>Delete for good</th></tr>
       {% for row in users if row.id != user_id %}
         <tr>
           <td>{{ row.display_name }}</td>
@@ -86,9 +89,17 @@
               {% endif %}
             </form>
           </td>
+          <td>
+            <form method="post" action="/users/{{ row.id }}/delete" class="inline">
+              <input name="confirm_email" type="email" autocomplete="off" size="22"
+                     placeholder="{{ row.email }}" aria-label="Type {{ row.email }} to confirm">
+              <button class="danger" type="submit">Delete</button>
+            </form>
+          </td>
         </tr>
       {% endfor %}
     </table>
+    <p class="hint">To delete, type that account's own email beside it.</p>
   </section>
 </div>
 {% endblock %}

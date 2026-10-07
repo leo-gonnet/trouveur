@@ -233,6 +233,7 @@ def _arguments(ctx: dict) -> dict[str, dict]:
         "users.set_password": {"user_id": user_id, "password_hash": "argon2$probe"},
         "users.set_display_name": {"user_id": user_id, "display_name": "Probe"},
         "users.set_active": {"user_id": user_id, "is_active": True},
+        "users.delete_user": {"user_id": ctx["doomed_id"]},
         "users.credit": {"user_id": user_id},
         "users.list_users_with_credit": {},
         "users.grant_credit": {
@@ -270,6 +271,13 @@ async def context(seeded):
                 f"VALUES ({seeded['user_id']}, 'https://example.test/jobs/probe') RETURNING id"
             )
         ).scalar()
+        # An account that exists only to be deleted. Every call here commits, so pointing
+        # delete_user at the shared user would pull the rows out from under the users queries
+        # that run after it -- they sort later in the registry, and the inserts among them
+        # reference that id.
+        doomed_id = await users.create_user(
+            conn, "doomed@example.test", "argon2$probe", is_admin=False
+        )
 
     return {
         "user_id": seeded["user_id"],
@@ -283,6 +291,7 @@ async def context(seeded):
         "run_id": run_id,
         "sweep_id": sweep_id,
         "report_id": report_id,
+        "doomed_id": doomed_id,
         "scope_results": [ScopeResult(scope="probe-tenant", ok=True, documents=1)],
         "job_row": {
             "source": row.source, "external_id": row.external_id, "scope": None,

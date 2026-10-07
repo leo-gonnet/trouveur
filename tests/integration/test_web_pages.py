@@ -472,6 +472,109 @@ async def test_granting_credit_queues_a_match_so_a_new_user_sees_something(clien
     assert credit.balance_usd == Decimal("5.00")
 
 
+async def _rows_owned_by(user_id: int) -> dict[str, int]:
+    """How many rows each user-keyed table still holds for this person.
+
+    Counted from the tables rather than from a list in the delete code, because what is being
+    tested is that the DATABASE takes the whole person with the row -- every FK here is ON DELETE
+    CASCADE, and a table added later with a plain reference would leave a row behind and no error.
+    """
+    tables = [
+        "user_profile", "user_job_match", "user_edition_item", "llm_score_cache",
+        "user_query_expansion", "user_credit_grant", "user_llm_spend", "user_report",
+    ]
+    async with connect() as conn:
+        return {
+            name: (
+                await conn.execute(
+                    sa.text(f"SELECT count(*) FROM {name} WHERE user_id = :uid"), {"uid": user_id}
+                )
+            ).scalar_one()
+            for name in tables
+        }
+
+
+async def test_deleting_an_account_takes_everything_it_owned_with_it(admin, seeded):
+    """Disabling keeps the rows; deleting is the answer for data we have no reason to hold.
+
+    The counts are asserted non-empty first: a cascade test against tables that were already
+    empty passes by deleting nothing.
+    """
+    user_id = seeded["user_id"]
+    await _publish(user_id, await _all_match_ids(user_id), clock.today())
+    async with connect() as conn:
+        user = await users_q.get_user(conn, user_id)
+        await users_q.grant_credit(
+            conn, user_id, amount_usd=Decimal("5.00"), granted_by=user_id, note="probe"
+        )
+        await conn.execute(
+            sa.text("INSERT INTO user_report (user_id, url) VALUES (:uid, 'https://x.test/j')"),
+            {"uid": user_id},
+        )
+
+    before = await _rows_owned_by(user_id)
+    assert before["user_profile"] and before["user_job_match"], "nothing to cascade over"
+    assert before["user_edition_item"] and before["user_credit_grant"] and before["user_report"]
+
+    response = await admin.post(
+        f"/users/{user_id}/delete", data={"confirm_email": user.email}
+    )
+    assert response.status_code == 200
+
+    async with connect() as conn:
+        assert await users_q.get_user(conn, user_id) is None
+    assert all(count == 0 for count in (await _rows_owned_by(user_id)).values())
+
+
+async def test_a_mistyped_email_deletes_nothing(admin, seeded):
+    """The whole guard is this comparison: the rows on that page differ only by a name, and there
+    is nothing to undo the wrong one with."""
+    user_id = seeded["user_id"]
+    response = await admin.post(
+        f"/users/{user_id}/delete", data={"confirm_email": "someone.else@example.test"}
+    )
+    assert response.status_code == 200
+    assert "Nothing was deleted" in response.text
+    async with connect() as conn:
+        assert await users_q.get_user(conn, user_id) is not None
+
+
+async def test_an_empty_confirmation_deletes_nothing(admin, seeded):
+    """Pressing Delete with the box untouched must not be the same as confirming."""
+    response = await admin.post(f"/users/{seeded['user_id']}/delete", data={})
+    assert response.status_code == 200
+    async with connect() as conn:
+        assert await users_q.get_user(conn, seeded["user_id"]) is not None
+
+
+async def test_an_admin_cannot_delete_their_own_account(admin, seeded):
+    """There is no route without a session, so an admin deleting themselves would be the last
+    thing that account could ever do -- and on a one-admin installation, the last thing anyone
+    could do to the crawl set from the web."""
+    async with connect() as conn:
+        admin_id = (await users_q.get_user_by_email(conn, "overseer@example.test")).id
+    response = await admin.post(
+        f"/users/{admin_id}/delete", data={"confirm_email": "overseer@example.test"}
+    )
+    assert response.status_code == 200
+    assert "cannot delete your own account" in response.text
+    async with connect() as conn:
+        assert await users_q.get_user(conn, admin_id) is not None
+
+
+async def test_an_ordinary_user_cannot_delete_an_account(client, admin, seeded):
+    """Enforced by the /users prefix in the middleware, not by anything in the handler."""
+    async with connect() as conn:
+        admin_id = (await users_q.get_user_by_email(conn, "overseer@example.test")).id
+    response = await client.post(
+        f"/users/{admin_id}/delete", data={"confirm_email": "overseer@example.test"}
+    )
+    assert response.status_code == 303
+    assert response.headers["location"] == "/recommendations"
+    async with connect() as conn:
+        assert await users_q.get_user(conn, admin_id) is not None
+
+
 async def test_logout_clears_the_session(client):
     assert (await client.post("/logout")).status_code == 303
     response = await client.get("/recommendations")
