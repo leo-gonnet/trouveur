@@ -1,0 +1,76 @@
+<section class="section">
+  <div class="section-head">
+    <h2>Coverage by area</h2>
+    <span class="hint">{{ coverage.horizon_days }}-day retrieval horizon</span>
+  </div>
+  <p class="hint">
+    An area is the countries and town circles one or more readers picked, judged by the same
+    location filter a match run uses — so this is what those readers could be shown, not what the
+    corpus holds overall. <em>Retrievable</em> is the part inside the horizon that carries a
+    vector; the rest was collected but cannot reach a recommendation. <em>Only here</em> counts
+    postings no other source in this area also has: lose that source and those go with it.
+  </p>
+  {% if coverage.areas %}
+    {% for entry in coverage.areas %}
+      <div class="section-head">
+        <h2>{{ entry.area.label }}</h2>
+        <span class="hint">{{ entry.area.readers }}
+          reader{{ '' if entry.area.readers == 1 else 's' }}</span>
+      </div>
+      {% if entry.sources %}
+      <table>
+        <tr><th>Source</th><th class="num">Open</th><th class="num">Retrievable</th>
+            <th class="num">Only here</th></tr>
+        {% for row in entry.sources %}
+        <tr>
+          <td>{{ row.source }}</td>
+          <td class="num">{{ '{:,}'.format(row.open_jobs) }}</td>
+          <td class="num">{{ '{:,}'.format(row.retrievable_jobs) }}</td>
+          <td class="num">{{ '{:,}'.format(row.only_source) }}</td>
+        </tr>
+        {% endfor %}
+        <tr>
+          <td>all sources</td>
+          <td class="num">{{ '{:,}'.format(entry.open_jobs) }}</td>
+          <td class="num">{{ '{:,}'.format(entry.retrievable_jobs) }}</td>
+          <td class="num">{{ '{:,}'.format(entry.only_source) }}</td>
+        </tr>
+      </table>
+      {% else %}
+        <p class="notice bad">Nothing at all has been collected for this area. Every posting we
+          hold was filtered out of it, so this reader sees an empty page.</p>
+      {% endif %}
+    {% endfor %}
+  {% else %}
+    <p class="empty">No active reader has a profile yet, so there is no area to report on.</p>
+  {% endif %}
+</section>
+
+<section class="section">
+  <div class="section-head"><h2>Crawl set by source</h2></div>
+  <p class="hint">
+    Boards, not postings, and shared by every reader rather than belonging to an area. A
+    <em>candidate</em> is a discovery pass's proposal, waiting for somebody to promote it;
+    <em>dropped</em> is a board that was tried and decided against, kept so the next pass does not
+    propose it again. Change any of it with
+    <code>trouveur tenants enable|disable|drop|remove</code>.
+  </p>
+  {% if coverage.tenants %}
+  <table>
+    <tr><th>Source</th><th class="num">Sweeping</th><th class="num">Candidates</th>
+        <th class="num">Disabled</th><th class="num">Dropped</th></tr>
+    {% for row in coverage.tenants %}
+    <tr>
+      <td>{{ row.source }}</td>
+      <td class="num">{{ '{:,}'.format(row.sweeping) }}</td>
+      <td class="num">{{ '{:,}'.format(row.candidates) }}</td>
+      <td class="num">{{ '{:,}'.format(row.disabled) }}</td>
+      <td class="num">{{ '{:,}'.format(row.dropped) }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+    <p class="empty">No tenant-scoped source has a board registered. Add one with
+      <code>trouveur tenants add</code>.</p>
+  {% endif %}
+</section>

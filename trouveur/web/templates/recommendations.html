@@ -26,19 +26,22 @@
 {% endif %}
 
 {% if jobs %}
+  {# The pager is the card's footer, not a block beside it: its border-top is a divider inside
+     the card, and outside it draws a stray line on the page background. Search puts it here
+     too, through _results.html. #}
   <div class="results">
     {% for job in jobs %}{{ m.job_card(job) }}{% endfor %}
-  </div>
-  {% if next_cursor or prev_cursor %}
-  <div class="pager">
-    {% if prev_cursor %}
-      <a class="pill" href="{{ m.edition_href(edition, before=prev_cursor) }}">← previous</a>
+    {% if next_cursor or prev_cursor %}
+    <div class="pager">
+      {% if prev_cursor %}
+        <a class="pill" href="{{ m.edition_href(edition, before=prev_cursor) }}">← previous</a>
+      {% endif %}
+      {% if next_cursor %}
+        <a class="pill" href="{{ m.edition_href(edition, after=next_cursor) }}">next →</a>
+      {% endif %}
+    </div>
     {% endif %}
-    {% if next_cursor %}
-      <a class="pill" href="{{ m.edition_href(edition, after=next_cursor) }}">next →</a>
-    {% endif %}
   </div>
-  {% endif %}
 {% elif editions and paged %}
 <p class="empty">
   Nothing further in this edition.

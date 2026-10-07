@@ -23,11 +23,11 @@ from decimal import Decimal
 import pytest
 
 from trouveur.db.engine import connect
-from trouveur.db.queries import admin, archive, ingest, jobs, match, users
+from trouveur.db.queries import admin, archive, coverage, ingest, jobs, match, users
 from trouveur.models import DocumentKind, Expansion, RawDocument, RunStatus, RunTrigger
 
 MODULES = {
-    "admin": admin, "archive": archive, "ingest": ingest, "jobs": jobs,
+    "admin": admin, "archive": archive, "coverage": coverage, "ingest": ingest, "jobs": jobs,
     "match": match, "users": users,
 }
 
@@ -78,6 +78,7 @@ def _arguments(ctx: dict) -> dict[str, dict]:
         "admin.list_tenants": {"source": source},
         "admin.add_tenants": {"source": source, "scopes": ["probe-tenant"]},
         "admin.set_tenant_enabled": {"source": source, "scope": "probe-tenant", "enabled": False},
+        "admin.drop_tenant": {"source": source, "scope": "probe-tenant", "note": "probe"},
         "admin.record_scope_health": {"source": source, "results": ctx["scope_results"]},
         "admin.scope_health": {"failing_only": True},
         "admin.prune_scope_health": {"source": source, "known_scopes": ["probe-tenant"]},
@@ -108,6 +109,11 @@ def _arguments(ctx: dict) -> dict[str, dict]:
         "admin.fail_orphaned_runs": {},
         "admin.facet_breakdown": {},
         "admin.queue_depth": {},
+        # coverage -- the area carries the same four fields a profile does, so the location
+        # filter reads it directly.
+        "coverage.areas": {},
+        "coverage.tenant_states": {},
+        "coverage.by_source": {"area": ctx["profile"], "fresh_since": _cutoff()},
         # ingest
         "ingest.archive_documents": {"documents": [document]},
         "ingest.latest_documents": {

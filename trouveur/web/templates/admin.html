@@ -91,12 +91,21 @@
   {% endif %}
 </section>
 
+{# Fetched after the page, not with it: one filtered pass over the open corpus per area. #}
+<div hx-get="/admin/coverage" hx-trigger="load" hx-swap="innerHTML">
+  <section class="section">
+    <div class="section-head"><h2>Coverage by area</h2></div>
+    <p class="empty">Counting what we hold for each reader's area&hellip;</p>
+  </section>
+</div>
+
 <section class="section">
   <div class="section-head">
     <h2>Boards needing attention</h2>
     <span class="hint">
       {{ '{:,}'.format(tenant_totals.tenants) }} in the crawl set ·
-      {{ '{:,}'.format(tenant_totals.sweeping) }} sweeping
+      {{ '{:,}'.format(tenant_totals.sweeping) }} sweeping ·
+      {{ '{:,}'.format(tenant_totals.dropped) }} dropped
     </span>
   </div>
   <p class="hint">

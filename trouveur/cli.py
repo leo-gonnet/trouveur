@@ -248,6 +248,63 @@ def evaluate_retrieval(k: int, save_baseline: bool, sweep: bool, rerank: bool) -
         click.echo(f"\nbaseline written to {harness.BASELINE}")
 
 
+@main.command()
+@click.option(
+    "--json", "as_json", is_flag=True, help="Machine-readable, for agents and scripts."
+)
+def coverage(as_json: bool) -> None:
+    """What we have collected for the areas readers asked about, and the state of the crawl set.
+
+    The same report the Operations page shows, so a number here and a number there cannot
+    disagree. Areas come from profiles; nothing about them is configured in the repository.
+    """
+    import json
+
+    from trouveur.coverage import report
+    from trouveur.db.engine import connect
+
+    async def _run():
+        async with connect() as conn:
+            return await report(conn, get_settings().retrieval_horizon_days)
+
+    card = asyncio.run(_run())
+    if as_json:
+        click.echo(json.dumps(card.as_dict(), indent=2))
+        return
+
+    click.echo(f"Coverage by area  (retrievable = inside a {card.horizon_days}-day horizon)")
+    if not card.areas:
+        click.echo("No active reader has a profile yet, so there is no area to report on.")
+    for entry in card.areas:
+        click.echo(
+            f"\n{entry.area.label}  ({entry.area.readers} reader"
+            f"{'' if entry.area.readers == 1 else 's'})"
+        )
+        click.echo(f"  {'source':<16}{'open':>8}{'retrievable':>13}{'only here':>11}")
+        for row in entry.sources:
+            click.echo(
+                f"  {row.source:<16}{row.open_jobs:>8,}{row.retrievable_jobs:>13,}"
+                f"{row.only_source:>11,}"
+            )
+        click.echo(
+            f"  {'all sources':<16}{entry.open_jobs:>8,}{entry.retrievable_jobs:>13,}"
+            f"{entry.only_source:>11,}"
+        )
+
+    click.echo("\nCrawl set by source")
+    if not card.tenants:
+        click.echo("  No tenant-scoped source has any board registered.")
+    else:
+        click.echo(
+            f"  {'source':<16}{'sweeping':>10}{'candidates':>12}{'disabled':>10}{'dropped':>9}"
+        )
+        for row in card.tenants:
+            click.echo(
+                f"  {row.source:<16}{row.sweeping:>10,}{row.candidates:>12,}"
+                f"{row.disabled:>10,}{row.dropped:>9,}"
+            )
+
+
 @main.group()
 def tenants() -> None:
     """Manage the crawl set: which companies a per-tenant source sweeps.
@@ -273,10 +330,11 @@ def tenants_list(source: str | None, failing: bool) -> None:
     if not rows:
         click.echo("No failing tenants." if failing else "No tenants registered.")
         return
-    click.echo(f"{'source':<14}{'scope':<24}{'on':<4}{'origin':<11}{'docs':>7}  {'fails':>5}")
+    click.echo(f"{'source':<14}{'scope':<24}{'on':<6}{'origin':<11}{'docs':>7}  {'fails':>5}")
     for row in rows:
+        state = "yes" if row.enabled else ("drop" if row.dropped_at else "no")
         click.echo(
-            f"{row.source:<14}{row.scope:<24}{'yes' if row.enabled else 'no':<4}"
+            f"{row.source:<14}{row.scope:<24}{state:<6}"
             f"{row.origin:<11}{row.last_documents or 0:>7}  {row.consecutive_failures or 0:>5}"
             + (f"  {row.last_error[:48]}" if row.last_error else "")
         )
@@ -383,6 +441,30 @@ def _set_enabled(source: str, scope: str, enabled: bool) -> None:
 
     asyncio.run(_run())
     click.echo(f"{source}/{scope} {'enabled' if enabled else 'disabled'}")
+
+
+@tenants.command("drop")
+@click.argument("source")
+@click.argument("scope")
+@click.option("--note", default=None, help="Why it was rejected. The only record of the reason.")
+def tenants_drop(source: str, scope: str, note: str | None) -> None:
+    """Stop sweeping a board and record that it was tried and decided against.
+
+    Unlike `remove`, the row stays, so the next discovery pass does not propose it again and the
+    coverage report can tell a board nobody tried from one that was tried and rejected. `enable`
+    undoes it.
+    """
+    from trouveur.db.engine import connect
+    from trouveur.db.queries import admin
+
+    async def _run() -> int:
+        async with connect() as conn:
+            return await admin.drop_tenant(conn, source, scope, note=note)
+
+    if asyncio.run(_run()):
+        click.echo(f"dropped {source}/{scope}")
+    else:
+        click.echo(f"{source}/{scope} is not registered.")
 
 
 @tenants.command("remove")

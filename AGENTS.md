@@ -254,7 +254,9 @@ uv run trouveur sweep [--source greenhouse]   # fetch sources into the corpus
 uv run trouveur drain                     # work the deferred queues once
 uv run trouveur requeue|refill --kind X   # retry parked items; re-queue everything below a version
 uv run trouveur match --user 1            # retrieve, cut, rerank for one user
+uv run trouveur coverage [--json]         # per reader area: jobs per source, and what only it has
 uv run trouveur tenants list|add|import   # the crawl set; `add` takes a slug or a careers URL
+uv run trouveur tenants drop <src> <scope>   # tried and decided against; keeps the row, not swept
 uv run trouveur create-user --email me@example.com   # the FIRST login becomes the admin
 uv run trouveur serve|runner              # dev server on 127.0.0.1:8080; scheduler + workers
 uv run trouveur eval --sweep|--rerank|--save-baseline   # needs TROUVEUR_EVAL_DATABASE_URL

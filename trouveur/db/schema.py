@@ -181,6 +181,9 @@ source_tenant = sa.Table(
     sa.Column("note", sa.Text),
     sa.Column("added_at", sa.DateTime(timezone=True), nullable=False,
               server_default=sa.func.now()),
+    # Tried and decided against, as opposed to never tried: the row stays so a discovery pass
+    # does not propose the board again, and the reason lives in `note`.
+    sa.Column("dropped_at", sa.DateTime(timezone=True)),
 )
 
 # Observation, not configuration: source_tenant is the crawl set, this is only what happened when

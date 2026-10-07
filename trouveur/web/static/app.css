@@ -6,6 +6,11 @@
    is used in the logo and nowhere else. The page is full width and is the only thing that
    scrolls.
 
+   Vertical rhythm: `main > * + *` sets the gap between a page's blocks, for every block, and is
+   the ONLY rule that may. Never space two page-level blocks by naming the pair
+   (`.section + .grid`) or by giving a component a bottom margin — both leave the next block
+   someone adds with no gap at all. A block meant to sit flush goes inside the one above it.
+
    Components: .topbar .nav .menu .banner .page-head .section .section-head .grid .kpis .kpi table .pill
    .score button/.btn(.primary .danger .ghost) label/input .field .tags .switch
    .notice .empty .bar .toast
@@ -149,23 +154,33 @@ code, kbd { font: .86em var(--mono); background: var(--surface-2); padding: 1px 
 .banner a { color: inherit; }
 
 main { flex: 1; width: 100%; max-width: var(--measure); margin: 0 auto; padding: var(--space-5) var(--space-6) var(--space-7); }
+/* The gap between the blocks of a page, owned here and nowhere else.
+   This was a list of the pairs allowed to touch (.section + .section, .grid + .kpis, ...),
+   and every page that introduced a block the list did not name -- an htmx wrapper around a
+   section, a notice above a form -- lost its gap, AND broke the gap for the block after it,
+   because the pair no longer matched across it. A page-level component therefore never sets
+   a bottom margin to space itself from the next one; a block that must sit flush against the
+   one above belongs INSIDE it, the way .pager sits inside .results. */
+main > * + * { margin-top: var(--space-5); }
 .foot { padding: var(--space-4) var(--space-6); border-top: 1px solid var(--border);
         font-size: var(--fs-sm); color: var(--fg-muted); }
 .foot .band { gap: var(--space-4); }
 .foot a { color: inherit; }
-.page-head { display: grid; gap: var(--space-2); justify-items: start; margin-bottom: var(--space-5);
+.page-head { display: grid; gap: var(--space-2); justify-items: start;
              padding-bottom: var(--space-4); border-bottom: 1px solid var(--border); }
 .page-head .hint { max-width: 70ch; }
 
 /* ---------- Sections ---------- */
 .section { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-5); }
-.section + .section, .grid + .section, .section + .grid { margin-top: var(--space-5); }
 .section-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3);
                 margin-bottom: var(--space-4); }
 .section > .hint { margin-bottom: var(--space-3); max-width: 80ch; }
 /* A hint that follows something takes its margin above, not below. */
 .section > table + .hint, .section > .bar + .hint, .section > form + .hint,
 .section > .kpis + .hint { margin: var(--space-3) 0 0; }
+/* A card holding several groups: every head but the first takes the gap above it. Stated
+   once, for whatever precedes it, rather than once per kind of thing that can. */
+.section > .section-head:not(:first-child) { margin-top: var(--space-5); }
 .grid { display: grid; gap: var(--space-5); align-items: start; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
 .grid > * { min-width: 0; }
 .grid .section { margin: 0; }
@@ -173,13 +188,13 @@ main { flex: 1; width: 100%; max-width: var(--measure); margin: 0 auto; padding:
 .grid > .actions { grid-column: 1 / -1; }
 
 /* ---------- KPIs ---------- */
-.kpis { display: grid; gap: var(--space-4); margin-bottom: var(--space-5);
+.kpis { display: grid; gap: var(--space-4);
         grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
-.section + .kpis, .grid + .kpis { margin-top: var(--space-5); }
 /* A section in a grid column is ~280px wide inside its padding, so the page-level 140px
    minimum fits one tile and stacks the rest. */
 .section > .kpis { grid-template-columns: repeat(auto-fit, minmax(104px, 1fr)); }
-.section > .kpis:last-child { margin-bottom: 0; }
+/* Inside a card the owl above does not reach, so tiles followed by anything space themselves. */
+.section > .kpis:not(:last-child) { margin-bottom: var(--space-5); }
 .kpi { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-3) var(--space-4); }
 .kpi .value { display: block; font-size: 28px; font-weight: 600; line-height: 1.2; margin-top: var(--space-1);
               font-variant-numeric: tabular-nums; }
@@ -289,8 +304,7 @@ td form.inline button { padding: 0 var(--space-3); }
 .tags-field .pill button { all: unset; cursor: pointer; line-height: 1; padding: 0 2px; color: var(--fg-muted); }
 .tags-field .pill button:hover { color: var(--bad); }
 
-.searchbar { display: flex; gap: var(--space-3); flex-wrap: wrap; align-items: center;
-             margin-bottom: var(--space-5); }
+.searchbar { display: flex; gap: var(--space-3); flex-wrap: wrap; align-items: center; }
 .searchbar input[name=q] { flex: 1 1 260px; }
 .searchbar select { width: auto; }
 .searchbar label { margin: 0; }
@@ -318,7 +332,7 @@ td form.inline button { padding: 0 var(--space-3); }
 
 /* ---------- Notices & empty states ---------- */
 .notice { padding: var(--space-3) var(--space-4); border-radius: var(--radius); font-size: var(--fs-md);
-          margin-bottom: var(--space-4); background: var(--surface); border: 1px solid var(--border); }
+          background: var(--surface); border: 1px solid var(--border); }
 .notice.good { background: var(--good-soft); color: var(--good); border-color: transparent; }
 .notice.warn { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
 .notice.bad  { background: var(--bad-soft);  color: var(--bad);  border-color: transparent; }
@@ -398,7 +412,7 @@ td form.inline button { padding: 0 var(--space-3); }
    the middle select carries the whole run of them so navigating back years is not 700 clicks.
    One cluster, not three things spread across 1400px: pushed to the page's edges the arrows
    and the day they belong to were 700px apart and read as an unfinished toolbar. */
-.editions { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-4); }
+.editions { display: flex; align-items: center; gap: var(--space-2); }
 .editions select { flex: 0 1 26rem; font-weight: 500; }
 .step { display: inline-flex; align-items: center; height: var(--control); padding: 0 var(--space-3);
         font-size: var(--fs-md); white-space: nowrap; text-decoration: none; color: var(--fg);

@@ -241,6 +241,45 @@ def test_no_template_or_stylesheet_reaches_an_external_origin():
     )
 
 
+def test_the_gap_between_a_pages_blocks_comes_from_one_rule():
+    """Page-level spacing must not go back to being a list of the pairs allowed to touch.
+
+    It was exactly that, and the failure repeated on four pages: a block the list did not name --
+    an htmx wrapper around a section, a notice above a form -- got no gap, and silently took the
+    gap away from the block after it too, because the pair no longer matched across it. The
+    replacement is one owl rule on `main`, so a new block is spaced without anybody editing CSS.
+
+    The two shapes banned here are how it grew back last time: naming a pair of page-level
+    components, and letting a component space itself with a bottom margin.
+    """
+    css = (ROOT / "trouveur" / "web" / "static" / "app.css").read_text()
+    # The rule itself, anchored at the start of a line, not the sentence about it in the header.
+    assert re.search(r"^main > \* \+ \*\s*{[^}]*margin-top", css, re.M), (
+        "the one rule that spaces a page's blocks is gone; without it every page relies on "
+        "whatever margins its components happen to carry"
+    )
+
+    # The page-level components, i.e. the ones that appear as a direct child of <main>.
+    blocks = r"\.(?:section|grid|kpis|page-head|results|pager|notice|empty|searchbar|editions|doc)"
+    paired = re.findall(rf"^\s*{blocks}\s*\+\s*{blocks}[^{{]*{{[^}}]*margin", css, re.M)
+    assert not paired, (
+        f"page-level blocks spaced by naming the pair: {paired}. Any block not in the pair gets "
+        "no gap; `main > * + *` already spaces every block, whatever it is."
+    )
+
+    # A bottom margin on a page-level component is the other half: it double-spaces where the
+    # owl already applies, and it is the thing people reach for instead of fixing the rule. Both
+    # spellings count -- `margin-bottom`, and a `margin` shorthand long enough to carry one.
+    # Only a selector that IS the component matches: `.section > .notice` is inside a card, where
+    # the owl does not reach and a margin is the right answer.
+    selfish = re.findall(rf"^{blocks}\s*{{[^}}]*margin-bottom", css, re.M)
+    selfish += re.findall(rf"^{blocks}\s*{{[^}}]*margin:\s*\S+\s+\S+\s+\S+", css, re.M)
+    assert not selfish, (
+        f"page-level components setting their own bottom margin: {selfish}. Spacing to the next "
+        "block is `main > * + *`'s job; scope the rule to inside a card if that is what it is for."
+    )
+
+
 def test_an_htmx_request_is_sent_away_by_header_and_not_by_a_redirect():
     """A lapsed session must not be swapped into the page as content.
 

@@ -22,7 +22,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from jinja2 import StrictUndefined
 
-from trouveur import clock
+from trouveur import clock, coverage
 from trouveur.config import get_settings
 from trouveur.db.engine import connect
 from trouveur.db.queries import admin as admin_q
@@ -925,6 +925,20 @@ async def admin_cancel_run(request: Request, run_id: int):
 @app.get("/admin/status", response_class=HTMLResponse)
 async def admin_status_fragment(request: Request):
     return templates.TemplateResponse(request, "_admin_status.html", await _run_status())
+
+
+@app.get("/admin/coverage", response_class=HTMLResponse)
+async def admin_coverage_fragment(request: Request):
+    """The coverage report, fetched after the page rather than with it.
+
+    One filtered pass over the open corpus per area, and the location filter is the most
+    expensive predicate the system has. Loaded as a fragment so a large corpus cannot make
+    Operations unreachable -- a run has to stay watchable while it runs, and everything above
+    this section answers that.
+    """
+    async with connect() as conn:
+        card = await coverage.report(conn, get_settings().retrieval_horizon_days)
+    return templates.TemplateResponse(request, "_admin_coverage.html", {"coverage": card})
 
 
 @app.get("/admin/runs", response_class=HTMLResponse)

@@ -55,6 +55,7 @@ async def list_tenants(
             source_tenant.c.origin,
             source_tenant.c.note,
             source_tenant.c.added_at,
+            source_tenant.c.dropped_at,
             source_scope_health.c.last_ok_at,
             source_scope_health.c.last_documents,
             source_scope_health.c.last_error,
@@ -106,8 +107,11 @@ async def tenants_needing_attention(
                 FROM source_tenant t
                 LEFT JOIN source_scope_health h
                        ON h.source = t.source AND h.scope = t.scope
-                WHERE coalesce(h.consecutive_failures, 0) > 0
-                   OR t.origin = 'discovered'
+                -- A dropped board is the one case that needs no decision: somebody already made
+                -- it. Its failure streak is frozen at whatever it was, so without this it would
+                -- sit at the top of the list for ever.
+                WHERE t.dropped_at IS NULL
+                  AND (coalesce(h.consecutive_failures, 0) > 0 OR t.origin = 'discovered')
                 ORDER BY coalesce(h.consecutive_failures, 0) DESC, t.source, t.scope
                 LIMIT :limit
                 """
@@ -122,8 +126,11 @@ async def tenants_needing_attention(
                 SELECT count(*) AS tenants,
                        count(*) FILTER (WHERE t.enabled) AS sweeping,
                        count(*) FILTER (
-                           WHERE coalesce(h.consecutive_failures, 0) > 0) AS failing,
-                       count(*) FILTER (WHERE t.origin = 'discovered') AS candidates
+                           WHERE t.dropped_at IS NULL
+                             AND coalesce(h.consecutive_failures, 0) > 0) AS failing,
+                       count(*) FILTER (
+                           WHERE t.dropped_at IS NULL AND t.origin = 'discovered') AS candidates,
+                       count(*) FILTER (WHERE t.dropped_at IS NOT NULL) AS dropped
                 FROM source_tenant t
                 LEFT JOIN source_scope_health h
                        ON h.source = t.source AND h.scope = t.scope
@@ -136,6 +143,7 @@ async def tenants_needing_attention(
         "sweeping": int(totals.sweeping or 0),
         "failing": int(totals.failing or 0),
         "candidates": int(totals.candidates or 0),
+        "dropped": int(totals.dropped or 0),
     }
 
 
@@ -174,11 +182,36 @@ async def add_tenants(
 async def set_tenant_enabled(
     conn: AsyncConnection, source: str, scope: str, enabled: bool
 ) -> None:
+    """Switch a tenant on or off. Switching one on also undoes a drop: a board being swept again
+    is not one we decided against, and leaving the mark would keep it counted as rejected."""
+    values: dict[str, Any] = {"enabled": enabled}
+    if enabled:
+        values["dropped_at"] = None
     await conn.execute(
         source_tenant.update()
         .where(source_tenant.c.source == source, source_tenant.c.scope == scope)
-        .values(enabled=enabled)
+        .values(**values)
     )
+
+
+async def drop_tenant(
+    conn: AsyncConnection, source: str, scope: str, *, note: str | None = None
+) -> int:
+    """Record that this board was tried and decided against, keeping the row.
+
+    Not a delete: a forgotten board is proposed again by the next discovery pass, tried again and
+    rejected again, and nothing anywhere says it already was. The reason goes in `note`, which is
+    the only place a later reader can learn why.
+    """
+    values: dict[str, Any] = {"enabled": False, "dropped_at": sa.func.now()}
+    if note is not None:
+        values["note"] = note
+    result = await conn.execute(
+        source_tenant.update()
+        .where(source_tenant.c.source == source, source_tenant.c.scope == scope)
+        .values(**values)
+    )
+    return result.rowcount or 0
 
 
 async def remove_tenant(conn: AsyncConnection, source: str, scope: str) -> None:
