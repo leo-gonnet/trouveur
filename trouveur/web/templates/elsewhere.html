@@ -1,0 +1,27 @@
+{% extends "base.html" %}{% block title %}Found elsewhere · Trouveur{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Found it elsewhere?</h1>
+  <p class="hint">
+    Paste the link to a job you found somewhere else. Trouveur answers whether it had that job,
+    and if it did not, it reads the link to learn the board behind it — so the company's other
+    jobs come in too. This is the only place that says what Trouveur is missing, so please use it
+    every time you find a job it did not show you.
+  </p>
+</div>
+
+{% if request.query_params.get('error') == 'url' %}
+  <p class="notice bad">That is not a link. Paste the whole web address, starting with
+    <code>https://</code>.</p>
+{% elif request.query_params.get('filed') %}
+  <p class="notice good">Saved. The answer appears below within a minute.</p>
+{% endif %}
+
+<form class="searchbar" method="post" action="/elsewhere">
+  <input name="url" type="url" inputmode="url" required autofocus
+         placeholder="https://… the link to the job you found">
+  <button class="primary" type="submit">Ask</button>
+</form>
+
+<div id="reports">{% include "_elsewhere_list.html" %}</div>
+{% endblock %}

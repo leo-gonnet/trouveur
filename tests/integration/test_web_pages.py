@@ -1032,3 +1032,96 @@ async def test_the_coverage_fragment_renders_the_discovery_panels(admin, seeded)
     assert "karriere.beispiel-gmbh.de" in said, (
         "an unreadable host must be shown; the count is the whole case for writing a rule"
     )
+
+
+async def _stored_url(job_id: int) -> str:
+    async with connect() as conn:
+        return (
+            await conn.execute(sa.select(job.c.url).where(job.c.id == job_id))
+        ).scalar()
+
+
+async def test_the_found_elsewhere_page_shows_an_answer_of_every_kind(client, seeded):
+    """Every branch of the answer cell, rendered. `StrictUndefined` is the point: the "we had
+    it" rows read a column the "we had not" rows do not, so a page test over one kind of row
+    proves nothing about the others."""
+    from trouveur.db.queries import reports as reports_q
+    from trouveur.discovery import reports as report_stage
+
+    async with connect() as conn:
+        held = (
+            await conn.execute(
+                sa.select(job.c.id)
+                .where(job.c.source == "greenhouse", job.c.id != seeded["job_id"])
+                .limit(1)
+            )
+        ).scalar()
+    stored = (
+        await _stored_url(seeded["job_id"]),
+        await _stored_url(held),
+        "https://job-boards.greenhouse.io/neuefirma/jobs/9101",
+        "https://jobs.smartrecruiters.com/AcmeGmbH/9102",
+        "https://www.arbeitsagentur.de/jobsuche/jobdetail/10000-9999999999-S",
+    )
+    async with connect() as conn:
+        for url in stored:
+            await reports_q.create(conn, user_id=seeded["user_id"], url=url)
+    await report_stage.answer_pending()
+    # One left unanswered, so the waiting row and the polling attribute render too.
+    async with connect() as conn:
+        await reports_q.create(
+            conn, user_id=seeded["user_id"], url="https://example.test/jobs/waiting"
+        )
+
+    response = await client.get("/elsewhere")
+    assert response.status_code == 200
+    said = response.text
+    assert "We had it and showed it to you." in said
+    assert "never put it in front of you" in said, "the reason a held job was not shown"
+    assert "new board" in said and "neuefirma" in said
+    assert "cannot read" in said
+    assert "that whole site" in said, "a source swept whole has no board to name"
+    assert 'hx-trigger="every 5s"' in said, "a waiting answer has to arrive without a reload"
+    # The reader is being told we hold the posting, so the link to it has to open.
+    ours = re.search(r'href="(/job/[^"]+)"', said)
+    assert ours is not None
+    assert (await client.get(ours.group(1))).status_code == 200
+
+
+async def test_reporting_a_link_stores_it_and_nothing_else(client, seeded):
+    """The web layer never fetches and never resolves: both belong to the runner, and resolving
+    in two places answers differently the day the URL rules change."""
+    response = await client.post(
+        "/elsewhere", data={"url": "  https://jobs.lever.co/neuefirma/abc-123  "}
+    )
+    assert response.status_code == 303
+    async with connect() as conn:
+        row = (await conn.execute(sa.text("SELECT * FROM user_report"))).one()
+    assert row.url == "https://jobs.lever.co/neuefirma/abc-123", "stored as pasted, trimmed"
+    assert (row.outcome, row.source, row.scope, row.job_id) == (None, None, None, None)
+
+
+async def test_a_pasted_thing_that_is_not_a_link_is_refused(client, seeded):
+    response = await client.post("/elsewhere", data={"url": "Senior Engineer at Beispiel"})
+    assert response.status_code == 303
+    assert response.headers["location"] == "/elsewhere?error=url"
+    async with connect() as conn:
+        count = (await conn.execute(sa.text("SELECT count(*) FROM user_report"))).scalar()
+    assert count == 0
+
+
+async def test_the_coverage_fragment_renders_the_reported_links(admin, seeded):
+    """Skipped entirely until a reader reports something, so the markup runs only here."""
+    from trouveur.db.queries import reports as reports_q
+    from trouveur.discovery import reports as report_stage
+
+    async with connect() as conn:
+        await reports_q.create(
+            conn, user_id=seeded["user_id"], url="https://jobs.smartrecruiters.com/Acme/1"
+        )
+    await report_stage.answer_pending()
+
+    response = await admin.get("/admin/coverage")
+    said = response.text
+    assert "Found elsewhere" in said
+    assert "we cannot read links on that site" in said

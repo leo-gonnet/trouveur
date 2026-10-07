@@ -91,8 +91,13 @@ PORTED: tuple[tuple[str, str | None, str | None], ...] = (
     ('https://acme.wd1.myworkdayjobs.com/job/Berlin/Engineer_R-1', None, None),
     ('https://acme.wd1.myworkdayjobs.com/details/Engineer_R-1', None, None),
     ('https://acme.wd1.myworkdayjobs.com/en-US/job/Berlin/Engineer_R-1', None, None),
-    ('https://apply.workable.com/j/EF5014296F/apply', None, None),
-    ('https://apply.workable.com/acme/j/EF5014296F/', 'workable', 'acme'),
+    ('https://apply.workable.com/j/EF5014296F/apply', 'workable', None),
+    ('https://apply.workable.com/acme/j/EF5014296F/', 'workable', None),
+    ('https://jobs.workable.com/view/abc123/software-engineer', 'workable', None),
+    ('https://www.arbeitsagentur.de/jobsuche/jobdetail/10000-1190443239-S', 'arbeitsagentur', None),
+    ('https://www.arbeitnow.com/jobs/companies/beispiel/werkstudent', 'arbeitnow', None),
+    ('https://himalayas.app/companies/beispiel-systems/jobs/pmm', 'himalayas', None),
+    ('https://jobicy.com/jobs/152943-content-marketing-manager', 'jobicy', None),
     ('https://jobs.ashbyhq.com', None, None),
     ('https://jobs.personio.com', None, None),
     ('http://app4.greenhouse.io/ai_opt_out_request/job_post/6178374004/ai_opt_out', None, None),
@@ -243,16 +248,33 @@ def test_a_subdomain_rule_declines_the_platforms_own_hosts():
 def test_the_table_holds_no_rule_for_a_platform_we_cannot_sweep():
     """The decision this file turns on, pinned so it cannot drift back by accident.
 
-    Rules for platforms with no adapter cost a row each and buy nothing: the link is counted by
-    host either way, and a lead keeps its raw URL, so porting the rule the day the adapter lands
-    re-reads every one of them for free. freehire has about ninety more if one is needed.
+    One rule per source we sweep and no others. Rules for platforms with no adapter cost a row
+    each and buy nothing: the link is counted by host either way, and a lead keeps its raw URL,
+    so porting the rule the day the adapter lands re-reads every one of them for free. freehire
+    has about ninety more if one is needed. Missing a source we DO sweep costs the opposite: its
+    links pile up in the unread-host panel as a platform to go and build, and a reader reporting
+    a job on it is told we cannot read the link.
     """
-    assert {rule.source for rule in RULES} == {
-        name for name, spec in registry.SOURCES.items() if spec.tenant_scoped
-    } | {"workable"}, (
-        "the rules must be exactly the tenant-scoped sources, plus Workable, whose whole corpus "
-        "we sweep globally and whose links would otherwise read as a platform to go and build"
+    assert {rule.source for rule in RULES} == set(registry.SOURCES), (
+        "the rules must be exactly the sources we sweep -- no more, and no fewer"
     )
+
+
+def test_a_whole_site_source_resolves_to_the_platform_and_no_board():
+    """A source that sweeps one global corpus has nothing to register, and must not pretend to.
+
+    A scope read out of such a URL is the posting, not a company: `jobsuche` is the path
+    Arbeitsagentur puts every advert under, and filed as a board it would be swept by nothing.
+    """
+    got = resolve("https://www.arbeitsagentur.de/jobsuche/jobdetail/10000-1190443239-S")
+    assert got.result is LeadResult.RESOLVED
+    assert (got.source, got.scope) == ("arbeitsagentur", None)
+    for rule in RULES:
+        global_source = not registry.SOURCES[rule.source].tenant_scoped
+        assert (rule.mode is Mode.WHOLE_SITE) == global_source, (
+            f"{rule.source} sweeps {'one global corpus' if global_source else 'boards'}, so its "
+            f"rule must {'not ' if global_source else ''}read a board out of the URL"
+        )
 
 
 def test_every_rule_uses_a_mode_that_has_a_branch():

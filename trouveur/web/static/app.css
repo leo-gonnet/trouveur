@@ -305,7 +305,8 @@ td form.inline button { padding: 0 var(--space-3); }
 .tags-field .pill button:hover { color: var(--bad); }
 
 .searchbar { display: flex; gap: var(--space-3); flex-wrap: wrap; align-items: center; }
-.searchbar input[name=q] { flex: 1 1 260px; }
+/* By type, not by name: the box on "Found it elsewhere" takes a URL. */
+.searchbar input[type=search], .searchbar input[type=url] { flex: 1 1 260px; }
 .searchbar select { width: auto; }
 .searchbar label { margin: 0; }
 

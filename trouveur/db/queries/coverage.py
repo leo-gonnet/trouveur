@@ -105,3 +105,29 @@ WHERE u.is_active
 async def areas(conn: AsyncConnection) -> list[sa.Row]:
     """Every active reader's area, one row each. The report names no city of its own."""
     return list(await conn.execute(sa.text(_AREAS)))
+
+
+# What readers reported finding elsewhere, by the answer they got. One row, over a table that
+# holds one row per link somebody went to the trouble of pasting, so nothing indexes it.
+#
+# The reasons are counted beside the outcomes rather than looked up separately: a dozen reports
+# saying "we had it and never showed it" says nothing until you know whether the filter, the
+# retrieval or the scoring stopped them.
+_REPORT_OUTCOMES = """
+SELECT count(*) AS reports,
+       count(*) FILTER (WHERE outcome IS NULL) AS waiting,
+       count(*) FILTER (WHERE outcome = 'had_and_recommended') AS recommended,
+       count(*) FILTER (WHERE outcome = 'had_not_recommended') AS not_recommended,
+       count(*) FILTER (WHERE outcome = 'missing_job') AS missing_job,
+       count(*) FILTER (WHERE outcome = 'missing_board') AS missing_board,
+       count(*) FILTER (WHERE outcome = 'unknown_platform') AS unknown_platform,
+       count(*) FILTER (WHERE reason = 'location') AS by_location,
+       count(*) FILTER (WHERE reason = 'not_retrieved') AS by_retrieval,
+       count(*) FILTER (WHERE reason = 'not_scored') AS by_scoring
+FROM user_report
+"""
+
+
+async def report_outcomes(conn: AsyncConnection) -> sa.Row:
+    """Every reported link by what we could tell the reader. The recall measure that counts."""
+    return (await conn.execute(sa.text(_REPORT_OUTCOMES))).one()

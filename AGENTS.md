@@ -74,7 +74,7 @@ never fetches; they share nothing but the database, so either can be down alone.
 | `sources/<name>/` | `client.py` is network only; `normalize.py` is pure and versioned. |
 | `sources/` | `{board,feed}.py` are the two shared sweeps; `registry.py` is the **only** dispatch. |
 | `ingest/` | `persist` (the single write path), `derive` (facets, pure), `vocab`, `places`, `embed`. |
-| `discovery/` | `resolve.py` turns a link into a board (pure, versioned); `mine.py` reads our own archive for links. Upstream of normalisation, so it may name a source. |
+| `discovery/` | `resolve.py` turns a link into a board (pure, versioned); `mine.py` reads our own archive for links; `reports.py` answers a link a reader reported. Upstream of normalisation, so it may name a source. |
 | `match/` | Expansion, hybrid retrieval, RRF, reranking. `work/queue.py` is the one queue. |
 | `db/` | **All SQL.** No SQL text outside this package. |
 | `web/` | Routes, auth, templates. Reads the DB; never fetches, never sweeps. |
@@ -202,6 +202,10 @@ and a new look is a new component there rather than a one-off. One word means on
   *shown*, where `user_job_match` holds the current verdict — that duplication is the point. A closed
   posting stays, a dismissed one leaves, a profile change publishes a second edition for the day,
   and a posting reaches a user once per profile version. **Page by cursor, not OFFSET.**
+- **A reported link is stored raw and answered once.** "Found it elsewhere" is the only measure of
+  recall on a job somebody wanted, so the route stores the URL and the runner does the rest: it
+  resolves, looks, and records ONE answer that is then never rewritten. Resolving in the route too
+  would answer differently the day the rules change, and both answers would be on the page.
 - **Location is the only hard filter**; everything else on Profile is a preference the reranker reads
   as text. Don't add a second — a filter hides a posting with no way for the reader to learn it
   existed, where a preference only moves it down the list. **Prefer losing precision to losing

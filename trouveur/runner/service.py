@@ -16,6 +16,7 @@ from trouveur import clock, versions
 from trouveur.config import Settings, get_settings
 from trouveur.db.engine import connect
 from trouveur.db.queries import admin as admin_q
+from trouveur.discovery import reports
 from trouveur.discovery import work as discovery
 from trouveur.ingest import pipeline as ingest
 from trouveur.ingest import workers
@@ -97,15 +98,15 @@ async def drain_queues(settings: Settings) -> dict[str, int]:
     depends on the other two having landed -- and every stage takes its own connection, so the two
     halves never share one.
 
-    Discovery is a third half for the same reason the first two are split: it is a backfill over
-    the whole archive that nothing the nightly edition needs depends on, so it must neither hold
-    the chain up nor be stopped by it.
+    Discovery is a third half for the same reason the first two are split: it answers the links
+    readers reported and then walks the archive, and nothing the nightly edition needs depends on
+    either, so it must neither hold the chain up nor be stopped by it.
 
     The halves also fail independently. A detail fetch that raised took all four stages down with
     it for hours before anyone noticed, because one exception escaping here stops the whole tick.
     Isolating them means a broken source can no longer stop embedding.
     """
-    done = {"detail": 0, "derive": 0, "embed": 0, "dedup": 0, "leads": 0}
+    done = {"detail": 0, "derive": 0, "embed": 0, "dedup": 0, "leads": 0, "reports": 0}
 
     async with connect() as conn:
         tenants = await admin_q.enabled_tenants(conn)
@@ -127,6 +128,9 @@ async def drain_queues(settings: Settings) -> dict[str, int]:
             done["embed"] = await workers.drain_embed(conn, limit=settings.embed_batch_size)
 
     async def find_leads() -> None:
+        # The readers' reported links first: a person is waiting on each of those, where mining
+        # the archive is a backfill that will still be there on the next tick.
+        done["reports"] = await reports.answer_pending()
         done["leads"] = (await discovery.run_once()).leads
 
     halves = await asyncio.gather(

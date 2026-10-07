@@ -16,12 +16,13 @@ Two rules shape everything here:
   crawl rejects. Which is why every scope goes through `registry.clean_scope` -- the source's own
   grammar -- rather than being trusted as extracted.
 
-**There is one rule per source we sweep, and no others.** freehire's table covers about ninety more
-platforms (SmartRecruiters, Teamtailor, Recruitee, BambooHR, Softgarden, UKG, ADP, iCIMS and so
-on), several with an extraction mode of their own; port the one you need when the adapter for it is
-written, and not before. A rule for a platform we cannot sweep buys nothing: the link is counted
-by host either way, every lead keeps its raw URL, and bumping RESOLVE_VERSION the day the rule
-lands re-reads all of them with no new request to anybody.
+**There is one rule per source we sweep, and no others** -- the sources that sweep a whole
+platform included, and those resolve to the platform with no board. freehire's table covers about
+ninety more platforms (SmartRecruiters, Teamtailor, Recruitee, BambooHR, Softgarden, UKG, ADP,
+iCIMS and so on), several with an extraction mode of their own; port the one you need when the
+adapter for it is written, and not before. A rule for a platform we cannot sweep buys nothing:
+the link is counted by host either way, every lead keeps its raw URL, and bumping RESOLVE_VERSION
+the day the rule lands re-reads all of them with no new request to anybody.
 """
 
 from __future__ import annotations
@@ -47,6 +48,9 @@ class Mode(StrEnum):
     SUBDOMAIN = "subdomain"
     # Host plus the first path segment: a Workday tenant is the host and the site is the segment.
     HOST_PATH = "hostpath"
+    # No part of the URL is a board, because the source sweeps the platform's whole corpus from
+    # one place. Ours, not freehire's: every source it resolves for is per-tenant.
+    WHOLE_SITE = "wholesite"
 
 
 @dataclass(frozen=True)
@@ -58,8 +62,8 @@ class Rule:
     # behind them; a path of nothing else is declined rather than turned into a false board.
     reserved: tuple[str, ...] = ()
     # Leading segments that mean the link carries NO board. Unlike `reserved` these are not
-    # skipped: behind Workable's "/j/" sits the JOB's id, and reading it as a company is worse
-    # than reading nothing.
+    # skipped: what follows one of these is the platform's own machinery, and reading that as a
+    # company is worse than reading nothing.
     no_board: tuple[str, ...] = ()
     # Where the board sits when the path holds only machinery: Greenhouse's embed script names it
     # in `?for=`, and that script is how most company careers pages mention their board at all.
@@ -102,9 +106,15 @@ RULES: tuple[Rule, ...] = (
     Rule(("breezy.hr",), "breezy", Mode.SUBDOMAIN),
     Rule(("jobs.personio.com", "jobs.personio.de"), "personio", Mode.SUBDOMAIN),
     Rule(("myworkdayjobs.com",), "workday", Mode.HOST_PATH),
-    # We sweep Workable's whole corpus from its public search, so a Workable link adds no board.
-    # It is listed anyway: counted as an unread host it would read as a platform to go and build.
-    Rule(("apply.workable.com",), "workable", Mode.PATH, no_board=("j",)),
+    # The rest sweep one global corpus, so their links name a platform and never a board. They
+    # are listed for two reasons: counted as an unread host they would read as a platform to go
+    # and build an adapter for, and a reader reporting a job on one of them has to be told we
+    # cover the site -- "we cannot read that link" would be false about our largest source.
+    Rule(("apply.workable.com", "jobs.workable.com"), "workable", Mode.WHOLE_SITE),
+    Rule(("arbeitsagentur.de",), "arbeitsagentur", Mode.WHOLE_SITE),
+    Rule(("arbeitnow.com",), "arbeitnow", Mode.WHOLE_SITE),
+    Rule(("himalayas.app",), "himalayas", Mode.WHOLE_SITE),
+    Rule(("jobicy.com",), "jobicy", Mode.WHOLE_SITE),
 )
 
 # Leftmost DNS labels a multi-tenant platform uses for its own product hosts rather than for a
@@ -127,18 +137,16 @@ _WORKDAY_NOT_A_SITE = frozenset({"job", "details"})
 
 @dataclass(frozen=True)
 class Resolution:
-    """What a link turned out to be. `source` and `scope` are set only once a board was read."""
+    """What a link turned out to be.
+
+    `source` is set once the link named a platform we sweep. `scope` only when that platform is
+    swept board by board: a source that sweeps a whole site has no board to name.
+    """
 
     result: LeadResult
     host: str | None = None
     source: str | None = None
     scope: str | None = None
-
-    @property
-    def board(self) -> tuple[str, str] | None:
-        if self.result is LeadResult.RESOLVED and self.source and self.scope:
-            return self.source, self.scope
-        return None
 
 
 def resolve(url: str | None) -> Resolution:
@@ -169,9 +177,10 @@ def _for_source(host: str, source: str, scope: str) -> Resolution:
     not a state to carry, and a test pins every rule's source to the registry.
     """
     if not registry.SOURCES[source].tenant_scoped:
-        # The source sweeps one global corpus, so there is no board to register. Still resolved:
-        # the platform is covered, which is a different answer from "we cannot read this link".
-        return Resolution(LeadResult.RESOLVED, host=host, source=source, scope=scope)
+        # The source sweeps one global corpus, so there is no board to register and no scope to
+        # keep: whatever the link says past the platform is the POSTING. Still resolved -- the
+        # platform is covered, which is a different answer from "we cannot read this link".
+        return Resolution(LeadResult.RESOLVED, host=host, source=source)
     try:
         cleaned = registry.clean_scope(source, scope)
     except SourceError:
@@ -205,6 +214,10 @@ def _rule_board(host: str, parts) -> tuple[str, str] | None:
     if matched is None:
         return None
     rule, apex = matched
+    if rule.mode is Mode.WHOLE_SITE:
+        # Nothing is read out of the URL at all; `_for_source` drops the empty scope.
+        return rule.source, ""
+
     segments = [segment for segment in parts.path.split("/") if segment]
 
     if rule.mode is Mode.SUBDOMAIN:

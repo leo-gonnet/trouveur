@@ -1,4 +1,10 @@
-from trouveur.models.discovery import Lead, LeadOrigin, LeadResult
+from trouveur.models.discovery import (
+    Lead,
+    LeadOrigin,
+    LeadResult,
+    ReportOutcome,
+    ReportReason,
+)
 from trouveur.models.facets import EmploymentType, JobFacets, Seniority, WorkMode
 from trouveur.models.job import (
     CanonicalJob,
@@ -33,6 +39,8 @@ __all__ = [
     "Lead",
     "LeadOrigin",
     "LeadResult",
+    "ReportOutcome",
+    "ReportReason",
     "LANGUAGES",
     "MAX_RADIUS_KM",
     "MIN_RADIUS_KM",

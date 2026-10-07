@@ -80,16 +80,16 @@ def leads_from_posting(
 ) -> list[Lead]:
     """The leads one posting yields: its own link, plus every link in its raw payload.
 
-    A link resolving to the posting's OWN board is dropped. Without that every posting on a board
-    we already sweep files a lead saying so -- one row per posting, for ever, all of them naming
+    A link resolving to where the posting ITSELF came from is dropped -- its own board, or, for a
+    source that sweeps a whole platform, that platform. Without it every posting on a board we
+    already sweep files a lead saying so -- one row per posting, for ever, all of them naming
     boards the crawl set already holds -- and the real leads sit among them. What is left is only
     the links that point somewhere else, which is the whole of what discovery is for.
     """
-    own = (source, scope) if scope else None
     leads = []
     for candidate in urls_in(url) + urls_in(payload):
         resolution = resolve(candidate)
-        if resolution.board is not None and resolution.board == own:
+        if (resolution.source, resolution.scope) == (source, scope):
             continue
         if resolution.result is LeadResult.UNKNOWN_HOST and not _looks_like_work(candidate):
             continue

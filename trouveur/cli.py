@@ -68,8 +68,8 @@ def match(user_id: int | None) -> None:
 @main.command()
 @click.option("--rounds", default=1, show_default=True, help="How many drain passes to make.")
 def drain(rounds: int) -> None:
-    """Work the deferred stages once: detail fetches, derivation, dedupe markers, embeddings, and
-    one bounded pass of discovery.
+    """Work the deferred stages once: detail fetches, derivation, dedupe markers, embeddings, the
+    links readers reported, and one bounded pass of discovery.
 
     Reading the whole archive for links takes many passes the first time; `--rounds` is how you
     get it over with rather than waiting for the runner's ticks.
@@ -311,6 +311,24 @@ def coverage(as_json: bool) -> None:
             click.echo(f"  Links we cannot read  ({leads.unread_host_count:,} host(s))")
             for row in leads.hosts:
                 click.echo(f"  {row.host:<42}{row.leads:>9,}")
+
+    if card.reports:
+        said = card.reports
+        click.echo(f"\nFound elsewhere  ({said.reports:,} link(s) reported by readers)")
+        for label, count in (
+            ("we had it and showed it", said.recommended),
+            ("we had it and did not show it", said.not_recommended),
+            ("we did not have the job, on a board we sweep", said.missing_job),
+            ("the board was new to us", said.missing_board),
+            ("we cannot read links on that site", said.unknown_platform),
+            ("not answered yet", said.waiting),
+        ):
+            click.echo(f"  {label:<46}{count:>9,}")
+        if said.not_recommended:
+            click.echo(
+                f"  of those not shown: {said.by_location:,} outside the area, "
+                f"{said.by_retrieval:,} not retrieved, {said.by_scoring:,} not scored"
+            )
 
     click.echo("\nCrawl set by source")
     if not card.tenants:

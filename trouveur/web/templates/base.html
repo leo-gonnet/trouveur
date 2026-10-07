@@ -21,6 +21,7 @@
   <nav class="nav">
     {% for href, key, name in [('/recommendations', 'recommendations', 'Recommendations'),
                                ('/search', 'search', 'Search'),
+                               ('/elsewhere', 'elsewhere', 'Found elsewhere'),
                                ('/profile', 'profile', 'Profile'),
                                ('/how-it-works', 'how_it_works', 'How it works')] %}
       <a href="{{ href }}" {% if active == key %}aria-current="page"{% endif %}>{{ name }}</a>

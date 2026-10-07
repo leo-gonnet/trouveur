@@ -1,0 +1,54 @@
+{# Polls only while an answer is owed: the runner picks a report up on its next tick, and a list
+   that polled for ever would keep asking for something nothing can change. #}
+<section class="section"
+  {% if waiting %}hx-get="/elsewhere" hx-trigger="every 5s" hx-target="#reports"{% endif %}>
+  <div class="section-head">
+    <h2>Your links</h2>
+    <span class="hint">{{ reports | length }} link{{ '' if reports | length == 1 else 's' }}</span>
+  </div>
+  {% if reports %}
+  <table>
+    <tr><th>Link</th><th>Answer</th><th class="num">Asked</th></tr>
+    {% for row in reports %}
+    <tr>
+      <td><a href="{{ row.url }}" target="_blank" rel="noopener noreferrer">
+        {{ row.url | truncate(64, true) }}</a></td>
+      <td>
+        {% if row.outcome is none %}
+          <span class="pill">waiting</span> Not looked at yet.
+        {% elif row.outcome == 'had_and_recommended' %}
+          <span class="pill good">shown</span>
+          We had it and showed it to you.
+          <a href="/job/{{ row.public_id }}">See our copy</a>.
+        {% elif row.outcome == 'had_not_recommended' %}
+          <span class="pill warn">not shown</span>
+          {% if row.reason == 'location' %}
+            We had it, and it is outside the area on your profile.
+          {% elif row.reason == 'not_retrieved' %}
+            We had it, and our own search never put it in front of you.
+          {% else %}
+            We had it, and it was never scored, so it reached no edition.
+          {% endif %}
+          <a href="/job/{{ row.public_id }}">See our copy</a>.
+        {% elif row.outcome == 'missing_job' %}
+          <span class="pill bad">missing</span>
+          We collect {% if row.scope %}that board{% else %}that whole site{% endif %} and did not
+          have this job.
+        {% elif row.outcome == 'missing_board' %}
+          <span class="pill warn">new board</span>
+          We did not have it. The link is a board we can collect
+          {% if row.scope %}(<code>{{ row.scope }}</code> on {{ row.source }}){% endif %}, and it
+          is now waiting to be switched on.
+        {% else %}
+          <span class="pill bad">cannot read</span>
+          We did not have it, and we cannot yet read links on that site.
+        {% endif %}
+      </td>
+      <td class="num">{{ row.created_at | localtime('%d %b') }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+    <p class="empty">No links yet. Paste one above the next time you find a job here first.</p>
+  {% endif %}
+</section>

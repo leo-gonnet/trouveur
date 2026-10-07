@@ -113,7 +113,8 @@ def test_an_employers_own_advert_on_an_aggregator_is_the_lead():
     assert len(leads) == 1
     assert leads[0].origin is LeadOrigin.ARCHIVE
     assert leads[0].company == "Beispiel GmbH"
-    assert resolve(leads[0].url).board == ("personio", "anderefirma")
+    got = resolve(leads[0].url)
+    assert (got.source, got.scope) == ("personio", "anderefirma")
 
 
 def test_a_payload_that_is_not_text_yields_nothing_rather_than_raising():

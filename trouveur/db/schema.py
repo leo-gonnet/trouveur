@@ -28,6 +28,11 @@ work_kind = _enum("work_kind", "detail", "derive", "embed", "dedup")
 tenant_origin = _enum("tenant_origin", "manual", "discovered")
 lead_origin = _enum("lead_origin", "archive", "user_report")
 lead_result = _enum("lead_result", "resolved", "unknown_host", "no_url")
+report_outcome = _enum(
+    "report_outcome", "had_and_recommended", "had_not_recommended", "missing_job",
+    "missing_board", "unknown_platform",
+)
+report_reason = _enum("report_reason", "location", "not_retrieved", "not_scored")
 user_state = _enum("user_state", "new", "saved", "applied", "dismissed")
 run_status = _enum("run_status", "queued", "running", "success", "failed", "cancelled")
 run_trigger = _enum("run_trigger", "scheduled", "manual")
@@ -220,6 +225,32 @@ discovery_lead = sa.Table(
     sa.Column("resolved_at", sa.DateTime(timezone=True)),
 )
 
+
+# One reader's "I found this job somewhere else", and the answer the runner worked out for it.
+#
+# Per reader, where a lead is per link: the same posting is inside one reader's area and outside
+# another's, so the answer belongs to the person who asked. `outcome` and `reason` are frozen at
+# the moment they are answered and never recomputed -- what a reader was told has to keep saying
+# what it said, exactly as a published edition does. A NULL outcome is the queue.
+user_report = sa.Table(
+    "user_report",
+    metadata,
+    sa.Column("id", sa.BigInteger, primary_key=True),
+    sa.Column("user_id", sa.BigInteger, nullable=False),
+    # As pasted. The resolver re-reads it, and it is what the reader recognises in the list.
+    sa.Column("url", sa.Text, nullable=False),
+    # Our copy of the posting, when the link turned out to name one we hold.
+    sa.Column("job_id", sa.BigInteger),
+    # What the link resolved to, kept with the answer: a later RESOLVE_VERSION can read the same
+    # link differently, and a row whose answer and whose board disagree is unreadable.
+    sa.Column("source", sa.Text),
+    sa.Column("scope", sa.Text),
+    sa.Column("outcome", report_outcome),
+    sa.Column("reason", report_reason),
+    sa.Column("created_at", sa.DateTime(timezone=True), nullable=False,
+              server_default=sa.func.now()),
+    sa.Column("answered_at", sa.DateTime(timezone=True)),
+)
 
 # Observation, not configuration: source_tenant is the crawl set, this is only what happened when
 # we asked. Their predecessor mixed the two and half of it rotted unnoticed.

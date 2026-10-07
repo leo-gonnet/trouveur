@@ -120,3 +120,42 @@
   {% endif %}
 </section>
 {% endif %}
+
+{% if coverage.reports %}
+{% set said = coverage.reports %}
+<section class="section">
+  <div class="section-head">
+    <h2>Found elsewhere</h2>
+    <span class="hint">{{ '{:,}'.format(said.reports) }} link{{ '' if said.reports == 1
+      else 's' }} reported by readers</span>
+  </div>
+  <p class="hint">
+    Jobs a reader found somewhere else and pasted in, with the answer each one got. The only
+    measure of recall on jobs somebody actually wanted — everything above compares the corpus
+    against itself. <em>We did not have the job</em> is the sharpest line here: the board was
+    already being swept, so a page cap, a closed posting or a filter in the adapter lost it.
+  </p>
+  <table>
+    <tr><th>Answer</th><th class="num">Links</th></tr>
+    <tr><td>we had it and showed it</td>
+        <td class="num">{{ '{:,}'.format(said.recommended) }}</td></tr>
+    <tr><td>we had it and did not show it</td>
+        <td class="num">{{ '{:,}'.format(said.not_recommended) }}</td></tr>
+    <tr><td>we did not have the job, on a board we sweep</td>
+        <td class="num">{{ '{:,}'.format(said.missing_job) }}</td></tr>
+    <tr><td>the board was new to us</td>
+        <td class="num">{{ '{:,}'.format(said.missing_board) }}</td></tr>
+    <tr><td>we cannot read links on that site</td>
+        <td class="num">{{ '{:,}'.format(said.unknown_platform) }}</td></tr>
+    {% if said.waiting %}
+      <tr><td>not answered yet</td><td class="num">{{ '{:,}'.format(said.waiting) }}</td></tr>
+    {% endif %}
+  </table>
+  {% if said.not_recommended %}
+    <p class="hint">Of the {{ '{:,}'.format(said.not_recommended) }} we held and did not show:
+      {{ '{:,}'.format(said.by_location) }} outside the reader's area,
+      {{ '{:,}'.format(said.by_retrieval) }} the retrieval never found,
+      {{ '{:,}'.format(said.by_scoring) }} never scored.</p>
+  {% endif %}
+</section>
+{% endif %}

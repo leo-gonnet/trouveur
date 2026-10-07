@@ -4,9 +4,9 @@ Composed here rather than in `db/queries` because grouping profiles into areas i
 read by both Operations and `trouveur coverage` so the page and the command cannot drift apart.
 
 Later tasks add sections to it: one query in `db/queries/coverage.py`, one field on `Report`
-filled in `report()`, one block in `_admin_coverage.html`. "Found it elsewhere" results come from
-docs/tasks/03, blocked sources from 06, aggregator leads from 07. None of them emits an empty row
-here yet: a key that is always zero is one an agent reads as an answer.
+filled in `report()`, one block in `_admin_coverage.html`. Blocked sources come from docs/tasks/06,
+aggregator leads from 07. None of them emits an empty row here yet: a key that is always zero is
+one an agent reads as an answer.
 """
 
 from __future__ import annotations
@@ -132,6 +132,29 @@ class LeadCoverage:
 
 
 @dataclass(frozen=True)
+class ReportCoverage:
+    """What readers said about jobs they found somewhere else, by the answer we gave them.
+
+    The only measure of recall on jobs people actually wanted: everything else in this report
+    compares the corpus against itself. `missing_job` is the sharpest number here -- a board we
+    already sweep that did not have a posting a reader found on it.
+    """
+
+    reports: int
+    # No answer yet: the runner works these off on its next tick.
+    waiting: int
+    recommended: int
+    not_recommended: int
+    missing_job: int
+    missing_board: int
+    unknown_platform: int
+    # Why the `not_recommended` ones were not shown. They add up to it.
+    by_location: int
+    by_retrieval: int
+    by_scoring: int
+
+
+@dataclass(frozen=True)
 class Report:
     generated_at: datetime
     horizon_days: int
@@ -139,6 +162,8 @@ class Report:
     tenants: list[TenantCoverage]
     # None until discovery has seen anything: an always-empty section reads as an answer.
     leads: LeadCoverage | None = None
+    # None until a reader has reported a link, for the same reason.
+    reports: ReportCoverage | None = None
 
     def as_dict(self) -> dict:
         """The shape `trouveur coverage --json` prints. Plain types only, for an agent to read."""
@@ -163,6 +188,7 @@ class Report:
             ],
             "tenants": [asdict(row) for row in self.tenants],
             "leads": asdict(self.leads) if self.leads else None,
+            "reports": asdict(self.reports) if self.reports else None,
         }
 
 
@@ -221,6 +247,7 @@ async def report(conn: AsyncConnection, horizon_days: int) -> Report:
         )
     return Report(
         leads=await leads(conn),
+        reports=await reports(conn),
         generated_at=datetime.now(UTC),
         horizon_days=horizon_days,
         areas=covered,
@@ -257,4 +284,23 @@ async def leads(conn: AsyncConnection) -> LeadCoverage | None:
             UnreadHost(host=row.host, leads=int(row.leads))
             for row in await discovery_q.unread_hosts(conn)
         ],
+    )
+
+
+async def reports(conn: AsyncConnection) -> ReportCoverage | None:
+    """What readers reported, or nothing at all while nobody has reported a link."""
+    row = await coverage_q.report_outcomes(conn)
+    if not row.reports:
+        return None
+    return ReportCoverage(
+        reports=int(row.reports),
+        waiting=int(row.waiting),
+        recommended=int(row.recommended),
+        not_recommended=int(row.not_recommended),
+        missing_job=int(row.missing_job),
+        missing_board=int(row.missing_board),
+        unknown_platform=int(row.unknown_platform),
+        by_location=int(row.by_location),
+        by_retrieval=int(row.by_retrieval),
+        by_scoring=int(row.by_scoring),
     )

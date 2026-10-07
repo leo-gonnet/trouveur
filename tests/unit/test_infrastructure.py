@@ -369,6 +369,10 @@ async def test_detail_fetches_run_alongside_embedding_rather_than_in_front_of_it
     )
     assert done["detail"] == 7
     assert done["embed"] == 11
+    # The third half, in the order it runs: a reader waiting for an answer about a link they
+    # pasted comes before a backfill that walks the whole archive.
+    assert done["reports"] == 1
+    assert done["leads"] == 2
 
 
 async def test_a_failing_detail_half_no_longer_stops_embedding():
@@ -422,6 +426,14 @@ async def _run_drain(service, *, detail, embed):
     async def fake_drain_dedup(conn):
         return 5
 
+    async def fake_answer_pending():
+        return 1
+
+    async def fake_discovery_pass():
+        from trouveur.discovery.work import DiscoveryReport
+
+        return DiscoveryReport(mined=4, leads=2)
+
     monkeypatch = _pytest.MonkeyPatch()
     try:
         monkeypatch.setattr(service, "connect", lambda: _Conn())
@@ -432,6 +444,10 @@ async def _run_drain(service, *, detail, embed):
         monkeypatch.setattr(service.workers, "drain_derive", fake_drain_derive)
         monkeypatch.setattr(service.workers, "drain_dedup", fake_drain_dedup)
         monkeypatch.setattr(service.workers, "drain_embed", embed)
+        # Stubbed like the rest: unstubbed these reach for a database, and a half that fails
+        # reports zero either way -- so the discovery half would look like it ran.
+        monkeypatch.setattr(service.reports, "answer_pending", fake_answer_pending)
+        monkeypatch.setattr(service.discovery, "run_once", fake_discovery_pass)
         return await service.drain_queues(SimpleNamespace(embed_batch_size=128))
     finally:
         monkeypatch.undo()

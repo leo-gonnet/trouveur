@@ -15,6 +15,7 @@ from collections.abc import Iterable
 from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
@@ -28,6 +29,7 @@ from trouveur.db.engine import connect
 from trouveur.db.queries import admin as admin_q
 from trouveur.db.queries import freshness
 from trouveur.db.queries import match as match_q
+from trouveur.db.queries import reports as reports_q
 from trouveur.db.queries import users as users_q
 from trouveur.ingest import places
 from trouveur.match.pipeline import profile_from_row
@@ -497,6 +499,56 @@ async def set_state(request: Request, job_id: int, state: str = Form(...)):
     return templates.TemplateResponse(
         request, "_state.html", {"job_id": job_id, "current": parsed.value}
     )
+
+
+# How many of a reader's own reported links are listed. Long enough that nobody loses one, short
+# enough to stay a list: this is a person pasting links by hand.
+REPORTS_SHOWN = 25
+# A URL nobody typed. Past this the box is being used for something that is not a link.
+MAX_REPORT_URL_CHARS = 2000
+
+
+@app.get("/elsewhere", response_class=HTMLResponse)
+async def elsewhere(request: Request):
+    """The reader's own reported links, and what we could tell them about each."""
+    session = request.state.session
+    async with connect() as conn:
+        rows = await reports_q.for_user(conn, session["uid"], chunk=REPORTS_SHOWN)
+    context = {
+        "active": "elsewhere",
+        "reports": rows,
+        # Only while something is unanswered: the list polls for the answer, and a page that
+        # polled for ever would ask for a list nothing can change.
+        "waiting": any(row.outcome is None for row in rows),
+    }
+    if request.headers.get("HX-Request"):
+        return templates.TemplateResponse(request, "_elsewhere_list.html", context)
+    return templates.TemplateResponse(request, "elsewhere.html", context)
+
+
+@app.post("/elsewhere", response_class=HTMLResponse)
+async def elsewhere_report(request: Request, url: str = Form("")):
+    """Store the link and nothing else.
+
+    No fetch and no resolving here. The web layer never goes to the network, and reading a link
+    as a board is versioned work that belongs in one place: done here as well it would answer
+    differently from the runner the day the rules change, and the reader would see both.
+
+    The scheme is checked because this value is later rendered as the href of a link the reader
+    presses, and `javascript:` is a scheme too.
+    """
+    session = request.state.session
+    candidate = url.strip()
+    parsed = urlsplit(candidate)
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.hostname
+        or len(candidate) > MAX_REPORT_URL_CHARS
+    ):
+        return RedirectResponse("/elsewhere?error=url", status_code=303)
+    async with connect() as conn:
+        await reports_q.create(conn, user_id=session["uid"], url=candidate)
+    return RedirectResponse("/elsewhere?filed=1", status_code=303)
 
 
 @app.get("/profile", response_class=HTMLResponse)

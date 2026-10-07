@@ -1,4 +1,5 @@
-"""Discovery: one job seen somewhere, and what its link turned out to be.
+"""Discovery: one job seen somewhere, what its link turned out to be, and what we could say about
+it when a reader asked.
 
 A lead is the unit every lead source writes -- archive mining, a reader's report, an aggregator
 search -- and the resolver reads. It is deliberately not a posting: we may never fetch it, and
@@ -55,3 +56,45 @@ class Lead(BaseModel):
     company: str | None = None
     title: str | None = None
     location_text: str | None = None
+
+
+class ReportOutcome(StrEnum):
+    """What we could tell a reader about the job they found somewhere else.
+
+    Recorded once, when the runner answers the report, and never recomputed: it is what the
+    reader was TOLD, the same reason an edition is stored rather than derived. The corpus moves
+    -- the board gets promoted, the posting arrives a week later -- and an answer silently
+    rewritten under the reader says we had something we did not have on the day they asked.
+    """
+
+    # We held the posting and it reached one of their editions.
+    HAD_AND_RECOMMENDED = "had_and_recommended"
+    # We held it and never showed it. `ReportReason` says what stopped it, which is the whole
+    # value of this box: it is the only place a reader tells us about a job they wanted.
+    HAD_NOT_RECOMMENDED = "had_not_recommended"
+    # We sweep the board (or the whole platform) and do not hold this posting. A gap in a sweep
+    # we already pay for: a page cap, a closed posting, or a filter in the adapter.
+    MISSING_JOB = "missing_job"
+    # The link named a board we can sweep and do not. The lead is filed and the board proposed,
+    # so this one answers itself once somebody promotes it.
+    MISSING_BOARD = "missing_board"
+    # No URL rule read the link. The lead keeps it, so the day a rule for that platform lands,
+    # every report like it resolves without asking anybody for anything.
+    UNKNOWN_PLATFORM = "unknown_platform"
+
+
+class ReportReason(StrEnum):
+    """Why a posting we held never reached the reader. Set only for HAD_NOT_RECOMMENDED.
+
+    One reason, in the order the pipeline would have stopped it, so it names the FIRST thing that
+    did: a posting outside the area is never retrieved either, and reporting the later stage
+    would send somebody to fix the wrong one.
+    """
+
+    # The location filter -- the only hard filter -- rejected it for this reader's area.
+    LOCATION = "location"
+    # It passed the filter and retrieval never found it: the recall bug worth hearing about.
+    NOT_RETRIEVED = "not_retrieved"
+    # Retrieved, and no score ever reached an edition: scoring off, no credit, or the daily
+    # ceiling. Costs nothing to fix and is invisible from the reader's side.
+    NOT_SCORED = "not_scored"

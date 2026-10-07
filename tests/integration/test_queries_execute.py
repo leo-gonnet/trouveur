@@ -31,13 +31,14 @@ from trouveur.db.queries import (
     ingest,
     jobs,
     match,
+    reports,
     users,
 )
 from trouveur.models import DocumentKind, Expansion, RawDocument, RunStatus, RunTrigger
 
 MODULES = {
     "admin": admin, "archive": archive, "coverage": coverage, "discovery": discovery,
-    "ingest": ingest, "jobs": jobs, "match": match, "users": users,
+    "ingest": ingest, "jobs": jobs, "match": match, "reports": reports, "users": users,
 }
 
 
@@ -122,6 +123,7 @@ def _arguments(ctx: dict) -> dict[str, dict]:
         # filter reads it directly.
         "coverage.areas": {},
         "coverage.tenant_states": {},
+        "coverage.report_outcomes": {},
         "coverage.by_source": {"area": ctx["profile"], "fresh_since": _cutoff()},
         # discovery -- the lead is inserted first so every read below has a row to touch.
         "discovery.insert_leads": {"rows": [ctx["lead_row"]]},
@@ -131,6 +133,20 @@ def _arguments(ctx: dict) -> dict[str, dict]:
         "discovery.write_resolutions": {"rows": [ctx["resolution_row"]]},
         "discovery.promote_candidates": {"sources": [source]},
         "discovery.unread_hosts": {},
+        # reports -- a reader's "found it elsewhere". The lookup runs both of its statements:
+        # a source and ids for the indexed one, urls for the scan it falls back to.
+        "reports.create": {"user_id": user_id, "url": "https://example.test/jobs/1"},
+        "reports.pending": {"chunk": 10},
+        "reports.find_job": {
+            "urls": ["https://example.test/jobs/1"], "source": source,
+            "scope": "beispiel", "ids": ["beispiel:1", "1"],
+        },
+        "reports.verdict": {"user_id": user_id, "job_id": job_id, "profile": ctx["profile"]},
+        "reports.answer": {
+            "report_id": ctx["report_id"], "outcome": "missing_board", "reason": None,
+            "job_id": job_id, "source": source, "scope": "beispiel",
+        },
+        "reports.for_user": {"user_id": user_id, "chunk": 10},
         "discovery.totals": {"resolve_version": 1, "mine_version": 1},
         # ingest
         "ingest.archive_documents": {"documents": [document]},
@@ -246,6 +262,14 @@ async def context(seeded):
         run_id = await admin.enqueue_run(conn, trigger=RunTrigger.MANUAL)
         sweep_id, _ = await ingest.start_sweep(conn, row.source)
         user = (await conn.exec_driver_sql("SELECT email FROM app_user LIMIT 1")).scalar()
+        # A reported link to answer. `reports.answer` only writes where the outcome is still
+        # NULL, so it needs a row nobody has answered.
+        report_id = (
+            await conn.exec_driver_sql(
+                "INSERT INTO user_report (user_id, url) "
+                f"VALUES ({seeded['user_id']}, 'https://example.test/jobs/probe') RETURNING id"
+            )
+        ).scalar()
 
     return {
         "user_id": seeded["user_id"],
@@ -258,6 +282,7 @@ async def context(seeded):
         "content_hash": row.content_hash,
         "run_id": run_id,
         "sweep_id": sweep_id,
+        "report_id": report_id,
         "scope_results": [ScopeResult(scope="probe-tenant", ok=True, documents=1)],
         "job_row": {
             "source": row.source, "external_id": row.external_id, "scope": None,
