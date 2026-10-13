@@ -126,6 +126,25 @@ COUNTRIES: dict[str, str] = {
     "macedonia": "MK", "roumania": "RO",
 }
 
+_AMERICAS = (
+    "AG", "AI", "AR", "AW", "BB", "BL", "BM", "BO", "BQ", "BR", "BS", "BZ", "CA", "CL", "CO", "CR",
+    "CU", "CW", "DM", "DO", "EC", "FK", "GD", "GF", "GL", "GP", "GS", "GT", "GY", "HN", "HT", "JM",
+    "KN", "KY", "LC", "MF", "MQ", "MS", "MX", "NI", "PA", "PE", "PM", "PR", "PY", "SR", "SV", "SX",
+    "TC", "TT", "UM", "US", "UY", "VC", "VE", "VG", "VI",
+)
+REGION_COUNTRIES: dict[str, tuple[str, ...]] = {
+    "amer": _AMERICAS, "americas": _AMERICAS, "north america": _AMERICAS,
+    "latin america": _AMERICAS, "south america": _AMERICAS, "central america": _AMERICAS,
+    "deutschlandweit": ("DE",), "bayern": ("DE",), "bavaria": ("DE",), "hessen": ("DE",),
+    "baden-wurttemberg": ("DE",), "baden wurttemberg": ("DE",), "baden-wuerttemberg": ("DE",),
+    "baden wuerttemberg": ("DE",), "niedersachsen": ("DE",), "lower saxony": ("DE",),
+    "nordrhein-westfalen": ("DE",), "north rhine-westphalia": ("DE",), "nrw": ("DE",),
+    "rheinland-pfalz": ("DE",), "rhineland-palatinate": ("DE",), "saarland": ("DE",),
+    "sachsen": ("DE",), "saxony": ("DE",), "sachsen-anhalt": ("DE",), "saxony-anhalt": ("DE",),
+    "schleswig-holstein": ("DE",), "thuringia": ("DE",), "mecklenburg-vorpommern": ("DE",),
+    "mecklenburg-western pomerania": ("DE",),
+}
+
 # "Chicago, IL" names no country, and US boards write it that way throughout. A state is only
 # evidence once the town before it is found in the US: "Toronto, CA" is Canada. "Georgia" is
 # absent as a name for the same reason it is absent from COUNTRIES; "GA" is unambiguous.

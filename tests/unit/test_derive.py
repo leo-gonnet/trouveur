@@ -211,6 +211,33 @@ def test_the_ways_boards_write_a_place_resolve_its_country(raw, country):
     assert facets.countries == [country]
 
 
+@pytest.mark.parametrize(
+    ("raw", "country"),
+    [
+        ("Parsdorf, Bavaria", "DE"),
+        ("Deutschlandweit", "DE"),
+        ("AMER", "US"),
+        ("North America", "US"),
+    ],
+)
+def test_a_location_naming_only_a_region_is_judged_by_its_countries(raw, country):
+    facets = derive(_job(title="Engineer", locations=[Location(raw=raw)]))
+    assert country in facets.unplaced_countries
+    assert "AT" not in facets.unplaced_countries
+
+
+def test_a_region_beside_a_location_we_cannot_read_is_not_evidence():
+    facets = derive(
+        _job(title="Engineer", locations=[Location(raw="Europe"), Location(raw="North America")])
+    )
+    assert facets.unplaced_countries == []
+
+
+def test_a_region_never_widens_a_town_already_placed():
+    facets = derive(_job(title="Engineer", locations=[Location(raw="Munich, Bavaria")]))
+    assert facets.unplaced_countries == []
+
+
 def test_a_state_code_is_not_a_country_unless_the_town_is_in_the_us():
     """"CA" is California after Redlands and Canada after Toronto."""
     facets = derive(_job(title="Engineer", locations=[Location(raw="Toronto, CA")]))

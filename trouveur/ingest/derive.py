@@ -33,6 +33,9 @@ _NOISE = re.compile(
     re.IGNORECASE,
 )
 _WORD = re.compile(r"[^\W\d_]+")
+_REGION = re.compile(
+    r"(?<!\w)(?:" + "|".join(re.escape(name) for name in vocab.REGION_COUNTRIES) + r")(?!\w)"
+)
 _NOT_A_PLACE = frozenset(vocab.LOCATION_NOISE + vocab.REMOTE_TERMS)
 # "Frankfurt an der Oder", "United States of America".
 _LONGEST_NAME = 4
@@ -87,6 +90,8 @@ def _places(
     cities: list[str] = []
     place_ids: list[int] = []
     unplaced: list[str] = []
+    regional: list[str] = []
+    unread = False
     says_remote = False
 
     for location in locations:
@@ -102,11 +107,21 @@ def _places(
                 cities.append(city)
             place_ids.extend(place.id for place in found_places)
             unplaced.extend(found_unplaced)
+            if not (found_countries or found_places or found_unplaced or remote):
+                found_regional = _regional(one.raw)
+                regional.extend(found_regional)
+                unread = unread or not found_regional
 
+    if not unread:
+        unplaced.extend(regional)
     return (
         _unique(countries), _unique(regions), _unique(cities),
         _unique(place_ids), _unique(unplaced), says_remote,
     )
+
+
+def _regional(raw: str) -> list[str]:
+    return [code for name in _REGION.findall(fold(raw)) for code in vocab.REGION_COUNTRIES[name]]
 
 
 def _each_named(location: Location) -> list[Location]:
