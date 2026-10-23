@@ -5,10 +5,11 @@ corpus. Example-based tests assert the handful of fields somebody thought to che
 *everything*, so a derivation change that silently reclassifies a field nobody is watching shows up
 as a diff in the pull request rather than as poor recall three weeks later.
 
-Each case records the versions it was generated at. Regenerating after changing a derivation but
-without bumping DERIVE_VERSION produces a diff with changed facets and an unchanged version number
--- which is the signal a reviewer needs, because it means the corpus in production still holds the
-old readings and no backfill has been scheduled.
+Each case records the normaliser version it was generated at, and `derive_version.json` records
+DERIVE_VERSION once for all of them, that being one number rather than one per source. Regenerating
+after changing a derivation but without bumping the version produces a diff with changed facets and
+an unchanged version number -- which is the signal a reviewer needs, because it means the corpus in
+production still holds the old readings and no backfill has been scheduled.
 
     uv run pytest tests/unit/test_golden.py --update-goldens
 
@@ -27,6 +28,7 @@ from trouveur.ingest.derive import derive
 from trouveur.sources.registry import normalizer_for
 
 CASES = Path(__file__).parent / "golden"
+PINNED_DERIVE_VERSION = CASES / "derive_version.json"
 
 
 def _cases() -> list[Path]:
@@ -42,15 +44,9 @@ def _render(path: Path) -> dict:
         payload["listing"], payload.get("detail"), external_id=payload.get("external_id")
     )
     if job is None:
-        return {
-            "normalize_version": normalize_version,
-            "derive_version": versions.DERIVE_VERSION,
-            "job": None,
-            "facets": None,
-        }
+        return {"normalize_version": normalize_version, "job": None, "facets": None}
     return {
         "normalize_version": normalize_version,
-        "derive_version": versions.DERIVE_VERSION,
         "job": job.model_dump(mode="json"),
         "facets": derive(job).model_dump(mode="json"),
     }
@@ -80,15 +76,24 @@ def test_golden(case: Path, request: pytest.FixtureRequest):
         f"{case.parent.name} normalizer version changed "
         f"{expected['normalize_version']} -> {actual['normalize_version']}; regenerate goldens."
     )
-    assert actual["derive_version"] == expected["derive_version"], (
-        f"DERIVE_VERSION changed {expected['derive_version']} -> {actual['derive_version']}; "
-        "regenerate goldens, and make sure a re-derive is queued for the existing corpus."
-    )
     assert actual == expected, (
         f"{case.parent.name}/{case.stem} changed.\n"
         f"expected: {_dump(expected)}\nactual:   {_dump(actual)}\n"
         "If this is intended, regenerate with --update-goldens and bump the relevant version in "
         "trouveur/versions.py so the corpus is re-derived."
+    )
+
+
+def test_the_pinned_derive_version(request: pytest.FixtureRequest):
+    if request.config.getoption("--update-goldens"):
+        PINNED_DERIVE_VERSION.write_text(
+            _dump({"derive_version": versions.DERIVE_VERSION}), encoding="utf-8"
+        )
+        pytest.skip("golden regenerated")
+    recorded = json.loads(PINNED_DERIVE_VERSION.read_text(encoding="utf-8"))["derive_version"]
+    assert recorded == versions.DERIVE_VERSION, (
+        f"DERIVE_VERSION changed {recorded} -> {versions.DERIVE_VERSION}; regenerate goldens, "
+        "and make sure a re-derive is queued for the existing corpus."
     )
 
 
