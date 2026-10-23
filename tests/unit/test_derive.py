@@ -218,6 +218,10 @@ def test_the_ways_boards_write_a_place_resolve_its_country(raw, country):
         ("Deutschlandweit", "DE"),
         ("AMER", "US"),
         ("North America", "US"),
+        # A state as a board writes it, with the hyphen of the official name as a space.
+        ("Nordrhein Westfalen", "DE"),
+        ("Mecklenburg Vorpommern", "DE"),
+        ("Rheinland Pfalz", "DE"),
     ],
 )
 def test_a_location_naming_only_a_region_is_judged_by_its_countries(raw, country):

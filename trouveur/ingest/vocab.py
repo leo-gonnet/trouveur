@@ -7,6 +7,7 @@ DERIVE_VERSION bump. Keys are folded to match trouveur.models.text.fold.
 from __future__ import annotations
 
 from trouveur.models.facets import EmploymentType, Seniority, WorkMode
+from trouveur.models.text import fold
 
 # A German name with an umlaut needs BOTH spellings. Arbeitsagentur writes "OESTERREICH", which
 # folds to "oesterreich", not to the "osterreich" that "Österreich" folds to -- keyed only on the
@@ -126,25 +127,6 @@ COUNTRIES: dict[str, str] = {
     "macedonia": "MK", "roumania": "RO",
 }
 
-_AMERICAS = (
-    "AG", "AI", "AR", "AW", "BB", "BL", "BM", "BO", "BQ", "BR", "BS", "BZ", "CA", "CL", "CO", "CR",
-    "CU", "CW", "DM", "DO", "EC", "FK", "GD", "GF", "GL", "GP", "GS", "GT", "GY", "HN", "HT", "JM",
-    "KN", "KY", "LC", "MF", "MQ", "MS", "MX", "NI", "PA", "PE", "PM", "PR", "PY", "SR", "SV", "SX",
-    "TC", "TT", "UM", "US", "UY", "VC", "VE", "VG", "VI",
-)
-REGION_COUNTRIES: dict[str, tuple[str, ...]] = {
-    "amer": _AMERICAS, "americas": _AMERICAS, "north america": _AMERICAS,
-    "latin america": _AMERICAS, "south america": _AMERICAS, "central america": _AMERICAS,
-    "deutschlandweit": ("DE",), "bayern": ("DE",), "bavaria": ("DE",), "hessen": ("DE",),
-    "baden-wurttemberg": ("DE",), "baden wurttemberg": ("DE",), "baden-wuerttemberg": ("DE",),
-    "baden wuerttemberg": ("DE",), "niedersachsen": ("DE",), "lower saxony": ("DE",),
-    "nordrhein-westfalen": ("DE",), "north rhine-westphalia": ("DE",), "nrw": ("DE",),
-    "rheinland-pfalz": ("DE",), "rhineland-palatinate": ("DE",), "saarland": ("DE",),
-    "sachsen": ("DE",), "saxony": ("DE",), "sachsen-anhalt": ("DE",), "saxony-anhalt": ("DE",),
-    "schleswig-holstein": ("DE",), "thuringia": ("DE",), "mecklenburg-vorpommern": ("DE",),
-    "mecklenburg-western pomerania": ("DE",),
-}
-
 # "Chicago, IL" names no country, and US boards write it that way throughout. A state is only
 # evidence once the town before it is found in the US: "Toronto, CA" is Canada. "Georgia" is
 # absent as a name for the same reason it is absent from COUNTRIES; "GA" is unambiguous.
@@ -180,6 +162,34 @@ REGIONS: dict[str, str] = {
     "sachsen_anhalt": "Sachsen-Anhalt",
     "schleswig_holstein": "Schleswig-Holstein",
     "thueringen": "Thüringen",
+}
+
+_AMERICAS = (
+    "AG", "AI", "AR", "AW", "BB", "BL", "BM", "BO", "BQ", "BR", "BS", "BZ", "CA", "CL", "CO", "CR",
+    "CU", "CW", "DM", "DO", "EC", "FK", "GD", "GF", "GL", "GP", "GS", "GT", "GY", "HN", "HT", "JM",
+    "KN", "KY", "LC", "MF", "MQ", "MS", "MX", "NI", "PA", "PE", "PM", "PR", "PY", "SR", "SV", "SX",
+    "TC", "TT", "UM", "US", "UY", "VC", "VE", "VG", "VI",
+)
+_UMLAUTS = str.maketrans({"ä": "ae", "ö": "oe", "ü": "ue"})
+# Every spelling a board writes a German state in, generated from REGIONS above so the sixteen of
+# them stay one list: folded, with the umlaut spelled out (see COUNTRIES), and with the hyphen as
+# a space, which is how "Nordrhein Westfalen" and "Mecklenburg Vorpommern" are usually written.
+_GERMAN_STATES = [
+    spelling
+    for name in REGIONS.values()
+    for folded in (fold(name), fold(name.translate(_UMLAUTS)))
+    for spelling in (folded, folded.replace("-", " "))
+]
+REGION_COUNTRIES: dict[str, tuple[str, ...]] = {
+    "amer": _AMERICAS, "americas": _AMERICAS, "north america": _AMERICAS,
+    "latin america": _AMERICAS, "south america": _AMERICAS, "central america": _AMERICAS,
+    "deutschlandweit": ("DE",),
+    # The English and short names, which REGIONS does not hold.
+    "bavaria": ("DE",), "hesse": ("DE",), "lower saxony": ("DE",), "nrw": ("DE",),
+    "north rhine-westphalia": ("DE",), "north rhine westphalia": ("DE",),
+    "rhineland-palatinate": ("DE",), "saxony": ("DE",), "saxony-anhalt": ("DE",),
+    "thuringia": ("DE",), "mecklenburg-western pomerania": ("DE",),
+    **{spelling: ("DE",) for spelling in _GERMAN_STATES},
 }
 
 REMOTE_TERMS = (
