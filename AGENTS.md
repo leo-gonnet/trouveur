@@ -151,7 +151,7 @@ since these fail silently rather than raising.
 
 The repo is public. Users' career data is not, and must never enter it.
 
-- **Never commit** `.env`, database dumps, or anything holding a user's objectives, salary, watched
+- **Never publish** `.env`, database dumps, or anything holding a user's objectives, salary, watched
   employers, address or password. **Fixtures are hand-written** — never a real payload.
 - **Profiles live in the database only**, edited through the web UI — there is deliberately no file
   path in or out (the tenant registry is the exception).
