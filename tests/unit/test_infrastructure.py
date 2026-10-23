@@ -417,7 +417,7 @@ async def _run_drain(service, *, detail, embed):
         async def __aexit__(self, *exc):
             return False
 
-    async def fake_enabled_tenants(conn):
+    async def fake_registered_tenants(conn):
         return {}
 
     async def fake_drain_derive(conn):
@@ -439,7 +439,7 @@ async def _run_drain(service, *, detail, embed):
         monkeypatch.setattr(service, "connect", lambda: _Conn())
         monkeypatch.setattr(service, "PoliteClient", lambda: _Client())
         monkeypatch.setattr(service, "build_sources", lambda **kwargs: [])
-        monkeypatch.setattr(service.admin_q, "enabled_tenants", fake_enabled_tenants)
+        monkeypatch.setattr(service.admin_q, "registered_tenants", fake_registered_tenants)
         monkeypatch.setattr(service.workers, "drain_detail", detail)
         monkeypatch.setattr(service.workers, "drain_derive", fake_drain_derive)
         monkeypatch.setattr(service.workers, "drain_dedup", fake_drain_dedup)

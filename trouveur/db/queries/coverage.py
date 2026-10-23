@@ -28,13 +28,20 @@ from trouveur.db.queries import freshness, location
 # `retrievable` is what the dense arm could actually return today: inside the horizon and
 # carrying a vector. The gap between it and `open_jobs` is a posting collected but invisible to
 # recommendations, which otherwise reads as poor recall.
+#
+# `discovered` is the one number that says whether discovery and the board trial are earning their
+# keep: postings in this area from a board nobody registered by hand. A global source has no
+# `source_tenant` row at all, so the LEFT JOIN leaves it NULL and it counts as not discovered,
+# which is right -- nobody discovered it.
 _BY_SOURCE = f"""
 WITH area AS (
     SELECT j.id, j.source, j.dedup_group,
-           ({freshness.sql("j")} AND e.embedding_768 IS NOT NULL) AS retrievable
+           ({freshness.sql("j")} AND e.embedding_768 IS NOT NULL) AS retrievable,
+           (t.origin = 'discovered') AS discovered
     FROM job j
     JOIN job_facet f ON f.job_id = j.id
     LEFT JOIN job_embedding e ON e.job_id = j.id
+    LEFT JOIN source_tenant t ON t.source = j.source AND t.scope = j.scope
     WHERE j.closed_at IS NULL
       AND {location.SQL}
 ),
@@ -47,7 +54,8 @@ groups AS (
 SELECT a.source,
        count(*) AS open_jobs,
        count(*) FILTER (WHERE a.retrievable) AS retrievable_jobs,
-       count(*) FILTER (WHERE coalesce(g.sources, 1) = 1) AS only_source
+       count(*) FILTER (WHERE coalesce(g.sources, 1) = 1) AS only_source,
+       count(*) FILTER (WHERE a.discovered) AS discovered_jobs
 FROM area a
 LEFT JOIN groups g ON g.dedup_group = a.dedup_group
 GROUP BY a.source
@@ -66,22 +74,38 @@ async def by_source(
     )
 
 
-# Four states from two columns, and they partition the rows: a table of states whose columns do
-# not add up to the boards registered is one a reader cannot check. `enabled` decides first,
-# because it is the operative fact -- what the sweep actually does -- and `dropped_at` only says
-# why a board that is off is off. It also beats `origin`: a candidate somebody tried and rejected
-# is not awaiting review any more.
+# Five states, and they partition the rows: a table of states whose columns do not add up to the
+# boards registered is one a reader cannot check. `enabled` decides first, because it is the
+# operative fact -- what the sweep actually does -- and `dropped_at` only says why a board that is
+# off is off. It also beats `origin`: a candidate somebody tried and rejected is not waiting for a
+# trial any more.
+#
+# `auto_on` is a subset of `sweeping` and deliberately not a state of its own: it is how many of
+# the boards being swept got there without a human, which is the whole measure of the board trial.
+#
+# `to_try` and `monthly` split what used to be one `candidates` column, because they mean opposite
+# things now. `to_try` is a board nothing has asked yet -- it will be swept within a few runs.
+# `monthly` is a board we asked, that had nothing for any reader, and that is asked again every
+# `trial_recheck_days`: not rejected, just not worth a nightly request. A `monthly` column that
+# keeps growing while `auto_on` does not is discovery finding boards in the wrong part of the
+# world, which is a lead-source problem and not a trial problem.
 _TENANT_STATES = """
-SELECT source,
-       count(*) FILTER (WHERE enabled) AS sweeping,
+SELECT t.source,
+       count(*) FILTER (WHERE t.enabled) AS sweeping,
+       count(*) FILTER (WHERE t.enabled AND t.origin = 'discovered') AS auto_on,
        count(*) FILTER (
-           WHERE NOT enabled AND dropped_at IS NULL AND origin = 'discovered') AS candidates,
+           WHERE NOT t.enabled AND t.dropped_at IS NULL AND t.origin = 'discovered'
+             AND h.trial_at IS NULL) AS to_try,
        count(*) FILTER (
-           WHERE NOT enabled AND dropped_at IS NULL AND origin = 'manual') AS disabled,
-       count(*) FILTER (WHERE NOT enabled AND dropped_at IS NOT NULL) AS dropped
-FROM source_tenant
-GROUP BY source
-ORDER BY source
+           WHERE NOT t.enabled AND t.dropped_at IS NULL AND t.origin = 'discovered'
+             AND h.trial_at IS NOT NULL) AS monthly,
+       count(*) FILTER (
+           WHERE NOT t.enabled AND t.dropped_at IS NULL AND t.origin = 'manual') AS disabled,
+       count(*) FILTER (WHERE NOT t.enabled AND t.dropped_at IS NOT NULL) AS dropped
+FROM source_tenant t
+LEFT JOIN source_scope_health h ON h.source = t.source AND h.scope = t.scope
+GROUP BY t.source
+ORDER BY t.source
 """
 
 

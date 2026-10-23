@@ -64,6 +64,15 @@ class Settings(BaseSettings):
     # Comma separated. A source is retired by naming it here, never by deleting its adapter.
     disabled_sources: str = ""
 
+    # Discovered boards swept on trial per run, and how long before one that found nothing for
+    # any reader is tried again. Together they are the whole cost of the trial: boards are swept
+    # one request at a time at the shared per-provider interval, so 300 is roughly five minutes
+    # added to a scan, and a pool bigger than 300 * recheck_days rotates slower than the interval
+    # suggests. Raise the cap before shortening the interval -- the cap buys a board its first
+    # look, which is where almost all of the recall is.
+    trial_boards_per_run: int = 300
+    trial_recheck_days: int = 30
+
     # How old a posting may be and still be recommended. Measured discovery lag is under 1.3 days
     # at p99 for every source that carries volume, so this drops old inventory, never a posting
     # we were merely slow to find.

@@ -104,17 +104,20 @@
     <h2>Boards needing attention</h2>
     <span class="hint">
       {{ '{:,}'.format(tenant_totals.tenants) }} in the crawl set ·
-      {{ '{:,}'.format(tenant_totals.sweeping) }} sweeping ·
+      {{ '{:,}'.format(tenant_totals.sweeping) }} sweeping
+      ({{ '{:,}'.format(tenant_totals.auto_on) }} found by discovery) ·
+      {{ '{:,}'.format(tenant_totals.candidates) }} on trial ·
       {{ '{:,}'.format(tenant_totals.dropped) }} dropped
     </span>
   </div>
   <p class="hint">
     Read-only. The crawl set is shared by every user, so changing it is an operator action on the
-    server — <code>trouveur tenants add|enable|disable|remove</code>. Only boards that are failing
-    or awaiting review are listed: a board is never dropped automatically, because a run of
-    failures is as likely to be a provider outage as a dead board, so a streak that keeps growing
-    is one to remove by hand. A <em>candidate</em> is a discovery pass's proposal, disabled until
-    somebody promotes it. The whole set is <code>trouveur tenants list</code>.
+    server — <code>trouveur tenants add|enable|disable|remove</code>. Only failing boards are
+    listed, because they are the only ones that need a person: a board is never dropped
+    automatically, since a run of failures is as likely to be a provider outage as a dead board, so
+    a streak that keeps growing is one to remove by hand. Boards <em>on trial</em> are swept once
+    each and kept for every night if they had an open posting in a reader's area; one that had none
+    is asked again every few weeks. The whole set is <code>trouveur tenants list</code>.
   </p>
   {% if tenants %}
   <table>
@@ -139,13 +142,13 @@
     {% if row.last_error %}<tr><td colspan="6" class="hint">{{ row.last_error }}</td></tr>{% endif %}
     {% endfor %}
   </table>
-  {% if tenants | length < tenant_totals.failing + tenant_totals.candidates %}
+  {% if tenants | length < tenant_totals.failing %}
     <p class="hint">Showing the worst {{ tenants | length }} of
-      {{ '{:,}'.format(tenant_totals.failing + tenant_totals.candidates) }} —
+      {{ '{:,}'.format(tenant_totals.failing) }} —
       <code>trouveur tenants list --failing</code> for the rest.</p>
   {% endif %}
   {% elif tenant_totals.tenants %}
-    <p class="empty">Every board swept cleanly, and nothing is awaiting review.</p>
+    <p class="empty">Every board swept cleanly.</p>
   {% else %}
     <p class="empty">No tenants registered. Add one with <code>trouveur tenants add</code>.</p>
   {% endif %}

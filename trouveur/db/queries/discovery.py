@@ -17,6 +17,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from trouveur.db.queries import location
 from trouveur.db.schema import discovery_lead, job
 
 # One posting with everything a lead needs, its raw payloads included.
@@ -173,6 +174,47 @@ async def promote_candidates(conn: AsyncConnection, sources: Sequence[str]) -> i
     if not sources:
         return 0
     result = await conn.execute(sa.text(_PROMOTE), {"sources": list(sources)})
+    return result.rowcount or 0
+
+
+# The verdict on a trial: a board holding an open posting inside this area is swept nightly from
+# now on, and no human saw it happen.
+#
+# Run once per area the readers actually asked for, because the filter's parameters are per area.
+# It is `location.SQL` verbatim and not a second opinion: a board judged by a rule of its own
+# would turn on boards whose postings the matcher then filters out, and turn away boards whose
+# postings it would have shown. AGENTS.md calls that re-deriving downstream.
+#
+# Idempotent and not keyed on "swept tonight", which is why it needs no handle on the run: a board
+# already enabled is excluded by the WHERE, and one whose trial landed in a run that died before
+# the verdict is judged by the next run instead of being lost. `dropped_at IS NULL` keeps an
+# operator's decision: a board they tried and rejected is not promoted by its own old postings.
+#
+# Only candidates, so this can never widen the crawl beyond what discovery proposed, and never
+# narrows it: nothing here writes `enabled = false`.
+_ENABLE_WITH_LOCAL_JOBS = f"""
+UPDATE source_tenant t
+SET enabled = true
+WHERE t.origin = 'discovered'
+  AND NOT t.enabled
+  AND t.dropped_at IS NULL
+  AND EXISTS (
+      SELECT 1
+      FROM job j
+      JOIN job_facet f ON f.job_id = j.id
+      WHERE j.source = t.source
+        AND j.scope = t.scope
+        AND j.closed_at IS NULL
+        AND {location.SQL}
+  )
+"""
+
+
+async def enable_boards_with_local_jobs(conn: AsyncConnection, area: object) -> int:
+    """Switch on every candidate board holding an open posting inside `area`. Returns how many."""
+    result = await conn.execute(
+        sa.text(_ENABLE_WITH_LOCAL_JOBS), location.params(area)
+    )
     return result.rowcount or 0
 
 

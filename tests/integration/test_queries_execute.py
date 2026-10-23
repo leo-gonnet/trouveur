@@ -85,6 +85,7 @@ def _arguments(ctx: dict) -> dict[str, dict]:
         "archive.closures": {"day": _today(), "after": 0, "chunk": 10},
         # admin
         "admin.enabled_tenants": {},
+        "admin.registered_tenants": {},
         "admin.list_tenants": {"source": source},
         "admin.add_tenants": {"source": source, "scopes": ["probe-tenant"]},
         "admin.set_tenant_enabled": {"source": source, "scope": "probe-tenant", "enabled": False},
@@ -92,6 +93,8 @@ def _arguments(ctx: dict) -> dict[str, dict]:
         "admin.record_scope_health": {"source": source, "results": ctx["scope_results"]},
         "admin.scope_health": {"failing_only": True},
         "admin.prune_scope_health": {"source": source, "known_scopes": ["probe-tenant"]},
+        "admin.tenants_due_for_trial": {"limit": 10, "recheck_days": 30, "source": source},
+        "admin.record_trials": {"tenants": {source: ["probe-tenant"]}},
         "admin.remove_tenant": {"source": source, "scope": "probe-tenant"},
         "admin.recent_sweeps": {},
         "admin.source_health": {},
@@ -132,6 +135,7 @@ def _arguments(ctx: dict) -> dict[str, dict]:
         "discovery.leads_to_resolve": {"version": 99, "chunk": 10},
         "discovery.write_resolutions": {"rows": [ctx["resolution_row"]]},
         "discovery.promote_candidates": {"sources": [source]},
+        "discovery.enable_boards_with_local_jobs": {"area": ctx["profile"]},
         "discovery.unread_hosts": {},
         # reports -- a reader's "found it elsewhere". The lookup runs both of its statements:
         # a source and ids for the indexed one, urls for the scan it falls back to.

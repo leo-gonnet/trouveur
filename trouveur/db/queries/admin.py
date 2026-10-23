@@ -36,6 +36,104 @@ async def enabled_tenants(conn: AsyncConnection) -> dict[str, list[str]]:
     return grouped
 
 
+async def registered_tenants(conn: AsyncConnection) -> dict[str, list[str]]:
+    """Every board still in the crawl set, switched on or not, grouped by source.
+
+    What the detail drain builds its sources from, where `enabled_tenants` is what the sweep
+    fetches. A detail fetch addresses one posting by its external id and never reads the scope
+    list, but a tenant-scoped source with no scopes is not built at all -- so a board on trial
+    that is the only one of its source left every one of its postings without a description,
+    failing with "no source registered", until the item parked.
+    """
+    rows = await conn.execute(
+        sa.select(source_tenant.c.source, source_tenant.c.scope)
+        .where(source_tenant.c.dropped_at.is_(None))
+        .order_by(source_tenant.c.source, source_tenant.c.scope)
+    )
+    grouped: dict[str, list[str]] = {}
+    for row in rows:
+        grouped.setdefault(row.source, []).append(row.scope)
+    return grouped
+
+
+# Boards a discovery pass proposed and nobody has decided about, longest-untried first.
+#
+# A NULL `trial_at` sorts first, so a board found last night is tried before one we have already
+# judged -- the pool rotates instead of the same head of it being re-swept. The interval is the
+# only thing that makes the pool affordable: thousands of boards hire nowhere near any reader, and
+# a board that was outside every area a month ago may have posted locally since.
+#
+# `dropped_at IS NULL` is load-bearing. A board an operator tried and decided against must not be
+# handed back to the sweep by the trial, which would be the decision silently undone.
+_TRIAL_DUE = """
+SELECT t.source, t.scope
+FROM source_tenant t
+LEFT JOIN source_scope_health h ON h.source = t.source AND h.scope = t.scope
+WHERE t.origin = 'discovered'
+  AND NOT t.enabled
+  AND t.dropped_at IS NULL
+  AND (
+       h.trial_at IS NULL
+       OR h.trial_at < now() - make_interval(days => CAST(:recheck_days AS integer))
+  )
+  -- Cast, because asyncpg sends a bare parameter with no type context and the server answers
+  -- "could not determine data type of parameter $1" rather than ignoring it.
+  AND (CAST(:source AS text) IS NULL OR t.source = CAST(:source AS text))
+ORDER BY h.trial_at ASC NULLS FIRST, t.source, t.scope
+LIMIT :limit
+"""
+
+
+async def tenants_due_for_trial(
+    conn: AsyncConnection,
+    *,
+    limit: int,
+    recheck_days: int,
+    source: str | None = None,
+) -> dict[str, list[str]]:
+    """Up to `limit` candidate boards to sweep once this run, grouped like `enabled_tenants`.
+
+    Same shape as the crawl set on purpose: the sweep adds them to the tenants it was going to
+    fetch anyway and never learns that some of its boards were on trial.
+    """
+    if limit <= 0:
+        return {}
+    rows = await conn.execute(
+        sa.text(_TRIAL_DUE),
+        {"limit": limit, "recheck_days": recheck_days, "source": source},
+    )
+    grouped: dict[str, list[str]] = {}
+    for row in rows:
+        grouped.setdefault(row.source, []).append(row.scope)
+    return grouped
+
+
+async def record_trials(conn: AsyncConnection, tenants: dict[str, list[str]]) -> int:
+    """Stamp `trial_at` on every board this run put on trial.
+
+    Written whether the fetch worked or not, and before the verdict is known: a board that 404s,
+    or a run that dies before derive, must not come back on the next tick. It would be re-swept
+    every night for ever, which is the one failure mode the cap exists to prevent.
+    """
+    rows = [
+        {"source": source, "scope": scope}
+        for source, scopes in tenants.items()
+        for scope in scopes
+    ]
+    if not rows:
+        return 0
+    stmt = pg_insert(source_scope_health).values(
+        [{**row, "trial_at": sa.func.now()} for row in rows]
+    )
+    await conn.execute(
+        stmt.on_conflict_do_update(
+            index_elements=[source_scope_health.c.source, source_scope_health.c.scope],
+            set_={"trial_at": stmt.excluded.trial_at},
+        )
+    )
+    return len(rows)
+
+
 async def list_tenants(
     conn: AsyncConnection, source: str | None = None, *, failing_only: bool = False
 ) -> list[sa.Row]:
@@ -60,6 +158,7 @@ async def list_tenants(
             source_scope_health.c.last_documents,
             source_scope_health.c.last_error,
             source_scope_health.c.consecutive_failures,
+            source_scope_health.c.trial_at,
         )
         .select_from(
             source_tenant.outerjoin(
@@ -92,10 +191,13 @@ async def tenants_needing_attention(
     can 404 every night for ever and the only symptom is an integer going up -- and nothing
     retires it automatically, on purpose, because a failure streak is as likely to be a provider
     outage as a dead board. The page exists to surface the few that need a decision: the ones
-    failing, and the candidates a discovery pass has proposed.
+    failing.
 
-    Rendering the whole set did the opposite: measured at 10,000 tenants, 1.9 MiB of HTML and
-    10,769 rows in a page that otherwise weighs 39 KB. `list_tenants` is how the CLI reads it all.
+    Candidates used to be listed here too, when a human had to promote each one. The trial does
+    that now, so they are a count and not rows: discovery reaches thousands of them, and at that
+    size they bury the handful of failing boards this page exists for -- the exact fault that
+    rendering the whole set had. Measured at 10,000 tenants: 1.9 MiB of HTML and 10,769 rows in a
+    page that otherwise weighs 39 KB. `list_tenants` is how the CLI reads it all.
     """
     rows = list(
         await conn.execute(
@@ -111,7 +213,7 @@ async def tenants_needing_attention(
                 -- it. Its failure streak is frozen at whatever it was, so without this it would
                 -- sit at the top of the list for ever.
                 WHERE t.dropped_at IS NULL
-                  AND (coalesce(h.consecutive_failures, 0) > 0 OR t.origin = 'discovered')
+                  AND coalesce(h.consecutive_failures, 0) > 0
                 ORDER BY coalesce(h.consecutive_failures, 0) DESC, t.source, t.scope
                 LIMIT :limit
                 """
@@ -129,7 +231,10 @@ async def tenants_needing_attention(
                            WHERE t.dropped_at IS NULL
                              AND coalesce(h.consecutive_failures, 0) > 0) AS failing,
                        count(*) FILTER (
-                           WHERE t.dropped_at IS NULL AND t.origin = 'discovered') AS candidates,
+                           WHERE t.enabled AND t.origin = 'discovered') AS auto_on,
+                       count(*) FILTER (
+                           WHERE t.dropped_at IS NULL AND NOT t.enabled
+                             AND t.origin = 'discovered') AS candidates,
                        count(*) FILTER (WHERE t.dropped_at IS NOT NULL) AS dropped
                 FROM source_tenant t
                 LEFT JOIN source_scope_health h
@@ -142,6 +247,7 @@ async def tenants_needing_attention(
         "tenants": int(totals.tenants),
         "sweeping": int(totals.sweeping or 0),
         "failing": int(totals.failing or 0),
+        "auto_on": int(totals.auto_on or 0),
         "candidates": int(totals.candidates or 0),
         "dropped": int(totals.dropped or 0),
     }
@@ -291,11 +397,23 @@ async def scope_health(conn: AsyncConnection, failing_only: bool = False) -> lis
 async def prune_scope_health(
     conn: AsyncConnection, source: str, known_scopes: Sequence[str]
 ) -> int:
-    """Forget tenants no longer registered, so deregistering one also clears its health row."""
+    """Forget tenants no longer registered, so deregistering one also clears its health row.
+
+    A scope absent from this sweep is NOT in itself unregistered, which is what this used to
+    assume. Every board that is registered and switched off is absent from every sweep, so its
+    history was deleted each night and the page showed "last success: never" for a board that had
+    swept cleanly for months. Worse now: `trial_at` lives on this row, and wiping it would make
+    every candidate due for a trial again on the next run, with the cap the only thing between
+    that and the whole pool being swept nightly.
+    """
     result = await conn.execute(
         source_scope_health.delete().where(
             source_scope_health.c.source == source,
             source_scope_health.c.scope.notin_(list(known_scopes)),
+            ~sa.exists().where(
+                source_tenant.c.source == source_scope_health.c.source,
+                source_tenant.c.scope == source_scope_health.c.scope,
+            ),
         )
     )
     return result.rowcount or 0

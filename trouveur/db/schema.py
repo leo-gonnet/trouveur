@@ -182,8 +182,10 @@ source_tenant = sa.Table(
     metadata,
     sa.Column("source", sa.Text, primary_key=True),
     sa.Column("scope", sa.Text, primary_key=True),
-    # Discovery inserts disabled rows and a human promotes them, so it can never enlarge the
-    # crawl, the bill or the politeness budget on its own.
+    # Discovery inserts disabled rows. What promotes one is its own trial sweep finding an open
+    # posting inside a reader's area -- measured, not guessed -- and the trial is capped per run,
+    # so discovery still cannot enlarge the politeness budget on its own. Nothing here is ever
+    # switched off automatically: see `source_scope_health.trial_at`.
     sa.Column("enabled", sa.Boolean, nullable=False, server_default="false"),
     sa.Column("origin", tenant_origin, nullable=False, server_default="manual"),
     sa.Column("note", sa.Text),
@@ -263,6 +265,10 @@ source_scope_health = sa.Table(
     sa.Column("last_documents", sa.Integer, nullable=False, server_default="0"),
     sa.Column("last_error", sa.Text),
     sa.Column("consecutive_failures", sa.Integer, nullable=False, server_default="0"),
+    # The last time a discovered board was tried AND judged, which is what bounds the trial: due
+    # for one is a date comparison and the cap per run is a LIMIT. NULL means never tried, so a
+    # freshly proposed board is first in the queue.
+    sa.Column("trial_at", sa.DateTime(timezone=True)),
     sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False,
               server_default=sa.func.now()),
 )
