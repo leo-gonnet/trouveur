@@ -120,6 +120,10 @@ def _places(
     )
 
 
+def _only_a_region(city: str, place: Place) -> bool:
+    return fold(city) in vocab.REGION_COUNTRIES and place.population < _PROMINENT
+
+
 def _regional(raw: str) -> list[str]:
     return [code for name in _REGION.findall(fold(raw)) for code in vocab.REGION_COUNTRIES[name]]
 
@@ -155,6 +159,14 @@ def _place(location: Location) -> tuple[list[str], str | None, list[Place], list
         place = places.resolve(city, country)
     elif city and _names_only_a_town(location):
         place = places.resolve_anywhere(city)
+        # A name a whole region shares, and nothing else, is a town only when it names a big one.
+        # "Sachsen" resolves to Sachsen bei Ansbach, 3,349 people and 400km from Saxony, and
+        # "Thuringen" to a village in Austria: a state-wide posting was pinned to a hamlet no
+        # reader's circle reaches, with the wrong country. Berlin, Bremen and Hamburg name a state
+        # and a city both, and are prominent, so they keep theirs. Only this lookup is guarded --
+        # a stated country means the name is not standing alone, and "Berlin, CT" is Connecticut.
+        if place and _only_a_region(city, place):
+            return [], None, [], list(vocab.REGION_COUNTRIES[fold(city)]), remote
         country = place.country if place else None
 
     if place:
