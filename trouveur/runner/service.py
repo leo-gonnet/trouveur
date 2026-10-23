@@ -235,7 +235,13 @@ async def _execute(settings: Settings, run) -> None:
     unprepared = await prepare_arrivals(settings)
     # After the queues and before matching: a board on trial is judged on derived facets, and a
     # board switched on now has its postings already in the corpus for this run's match.
-    promoted = await trial.judge()
+    # Isolated, because the next line is every reader's edition: a verdict about tomorrow's
+    # corpus must not cost anybody tonight's. Idempotent, so the next run reaches it instead.
+    promoted = 0
+    try:
+        promoted = await trial.judge()
+    except Exception:
+        log.exception("the board trial failed; matching continues and the next run re-judges")
     matches = await matching.run_all(settings)
     notified = 0
     if settings.smtp_host:

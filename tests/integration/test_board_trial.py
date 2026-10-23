@@ -42,6 +42,22 @@ _DISTANT_JOB = {
 }
 
 
+# A posting derivation could not place: the company's own wording, and no office to fall back on.
+# The location filter admits it, and the trial must not promote a board on it.
+_UNPLACEABLE_JOB = {
+    "id": 7003,
+    "title": "Projektleiter",
+    "company_name": "Nirgendwo AG",
+    "absolute_url": "https://job-boards.greenhouse.io/nirgendwo/jobs/7003",
+    "location": {"name": "Standort nach Absprache"},
+    "offices": [],
+    "departments": [{"id": 2, "name": "Operations"}],
+    "first_published": "2026-09-01T10:00:00-04:00",
+    "updated_at": "2026-09-02T10:00:00-04:00",
+    "content": "<p>Projektleitung.</p>",
+}
+
+
 def _ok(scope: str):
     from trouveur.sources.base import ScopeResult
 
@@ -83,7 +99,8 @@ async def _collect(scope: str, payload: dict) -> None:
 async def _tenant(scope: str) -> dict:
     async with connect() as conn:
         row = await conn.exec_driver_sql(
-            "SELECT enabled, origin::text AS origin, dropped_at FROM source_tenant "
+            "SELECT enabled, origin::text AS origin, dropped_at, decided_at "
+            "FROM source_tenant "
             f"WHERE source = 'greenhouse' AND scope = '{scope}'"
         )
         return dict(row.one()._mapping)
@@ -153,6 +170,124 @@ async def test_the_trial_does_not_undo_a_board_an_operator_dropped(clean_db):
     assert row["dropped_at"] is not None
 
 
+async def test_the_trial_does_not_undo_a_board_an_operator_disabled(clean_db):
+    """`disable` and `drop` are different decisions and both are decisions. A disabled board was
+    indistinguishable from a candidate nothing had asked, so the trial swept it, found its own
+    local posting, and switched it back on -- every night, with nothing on any page saying so."""
+    from tests.integration.seed import seed_user
+    from trouveur.db.queries import coverage as coverage_q
+    from trouveur.discovery import trial
+
+    await seed_user()
+    async with connect() as conn:
+        await admin_q.add_tenants(
+            conn, "greenhouse", ["nahegmbh"], enabled=True, origin=TenantOrigin.DISCOVERED
+        )
+        await admin_q.set_tenant_enabled(conn, "greenhouse", "nahegmbh", False)
+    await _collect("nahegmbh", _LOCAL_JOB)
+
+    async with connect() as conn:
+        due = await admin_q.tenants_due_for_trial(
+            conn, limit=10, recheck_days=30, sources=["greenhouse"]
+        )
+    assert due == {}, "a board an operator switched off is not a board waiting for a trial"
+
+    assert await trial.judge() == 0
+    row = await _tenant("nahegmbh")
+    assert row["enabled"] is False
+    assert row["decided_at"] is not None
+
+    async with connect() as conn:
+        states = {row.source: row for row in await coverage_q.tenant_states(conn)}
+    assert states["greenhouse"].disabled == 1, (
+        "and the operator can see it: counted where a person's decision belongs, not as a "
+        "candidate still waiting"
+    )
+    assert states["greenhouse"].to_try == 0
+
+
+async def test_a_reader_who_named_no_location_does_not_promote_every_candidate(clean_db):
+    """An empty location is "anywhere" to the filter: right for that reader, and no verdict at all
+    on a board. One blank Profile would enable the whole pool for everybody, permanently."""
+    from tests.integration.seed import seed_user
+    from trouveur.discovery import trial
+
+    await seed_user(countries=[], city_ids=[])
+    await _candidate("fernekk")
+    await _collect("fernekk", _DISTANT_JOB)
+
+    assert await trial.judge() == 0
+    assert (await _tenant("fernekk"))["enabled"] is False
+
+
+async def test_a_posting_nothing_could_place_does_not_promote_its_board(clean_db):
+    """The filter admits an unplaceable posting on purpose: being wrong costs one row ranked too
+    high. Here it costs a board swept nightly for ever, so the trial wants a posting placed."""
+    from tests.integration.seed import seed_user
+    from trouveur.discovery import trial
+
+    await seed_user()
+    await _candidate("nirgendwo")
+    await _collect("nirgendwo", _UNPLACEABLE_JOB)
+
+    async with connect() as conn:
+        facets = (
+            await conn.exec_driver_sql(
+                "SELECT f.countries, f.unplaced_countries, f.work_mode::text AS work_mode "
+                "FROM job_facet f JOIN job j ON j.id = f.job_id WHERE j.scope = 'nirgendwo'"
+            )
+        ).one()
+    assert not facets.countries and not facets.unplaced_countries, (
+        "the fixture has to be a posting derivation could not place, or this proves nothing"
+    )
+    assert facets.work_mode != "remote"
+
+    assert await trial.judge() == 0
+    assert (await _tenant("nirgendwo"))["enabled"] is False
+
+
+async def test_a_disabled_sources_candidates_do_not_spend_the_trial_cap(clean_db):
+    """A source nothing will ask must be out of the queue, not merely out of the sweep: its boards
+    are never stamped, so a pool of them bigger than the cap starves every other source."""
+    async with connect() as conn:
+        await admin_q.add_tenants(
+            conn, "greenhouse", ["eins", "zwei"], enabled=False,
+            origin=TenantOrigin.DISCOVERED,
+        )
+        await admin_q.add_tenants(
+            conn, "personio", ["drei"], enabled=False, origin=TenantOrigin.DISCOVERED
+        )
+        due = await admin_q.tenants_due_for_trial(
+            conn, limit=1, recheck_days=30, sources=["personio"]
+        )
+    assert due == {"personio": ["drei"]}, (
+        "greenhouse sorts first and would take the only slot every night"
+    )
+
+
+async def test_a_failing_candidate_does_not_crowd_the_boards_needing_attention(clean_db):
+    """Discovery misreads slugs by the thousand and each 404 grows a streak for ever. Ordered by
+    streak they bury the swept boards the page exists for, and no candidate needs a decision."""
+    from trouveur.sources.base import ScopeResult
+
+    async with connect() as conn:
+        await admin_q.add_tenants(conn, "greenhouse", ["beispiel"], enabled=True)
+        await _candidate("tippfehler")
+        await admin_q.record_scope_health(
+            conn,
+            "greenhouse",
+            [
+                ScopeResult(scope="beispiel", ok=False, documents=0, error="HTTP 500"),
+                ScopeResult(scope="tippfehler", ok=False, documents=0, error="HTTP 404"),
+            ],
+        )
+        rows, totals = await admin_q.tenants_needing_attention(conn, limit=50)
+
+    assert [row.scope for row in rows] == ["beispiel"]
+    assert totals["failing"] == 1
+    assert totals["candidates"] == 1, "still counted, so the operator knows the pool is there"
+
+
 async def test_the_trial_queue_respects_its_cap_and_then_its_interval(clean_db):
     """The cap is the scan's whole protection: without it the pool is swept every night, and at
     the size discovery reaches that is hours. The interval is what stops a board being re-asked
@@ -162,11 +297,15 @@ async def test_the_trial_queue_respects_its_cap_and_then_its_interval(clean_db):
     await _candidate("drei")
 
     async with connect() as conn:
-        first = await admin_q.tenants_due_for_trial(conn, limit=2, recheck_days=30)
+        first = await admin_q.tenants_due_for_trial(
+            conn, limit=2, recheck_days=30, sources=["greenhouse"]
+        )
         assert sum(len(scopes) for scopes in first.values()) == 2
         await admin_q.record_trials(conn, first)
 
-        second = await admin_q.tenants_due_for_trial(conn, limit=10, recheck_days=30)
+        second = await admin_q.tenants_due_for_trial(
+            conn, limit=10, recheck_days=30, sources=["greenhouse"]
+        )
         assert sum(len(scopes) for scopes in second.values()) == 1, (
             "a board tried tonight must not be in tomorrow's queue"
         )
@@ -174,12 +313,16 @@ async def test_the_trial_queue_respects_its_cap_and_then_its_interval(clean_db):
         assert not tried & set(second["greenhouse"])
         await admin_q.record_trials(conn, second)
 
-        assert await admin_q.tenants_due_for_trial(conn, limit=10, recheck_days=30) == {}
+        assert await admin_q.tenants_due_for_trial(
+            conn, limit=10, recheck_days=30, sources=["greenhouse"]
+        ) == {}
 
         await conn.exec_driver_sql(
             "UPDATE source_scope_health SET trial_at = now() - interval '31 days'"
         )
-        due = await admin_q.tenants_due_for_trial(conn, limit=10, recheck_days=30)
+        due = await admin_q.tenants_due_for_trial(
+            conn, limit=10, recheck_days=30, sources=["greenhouse"]
+        )
     assert sorted(due["greenhouse"]) == ["drei", "eins", "zwei"], (
         "after the interval every board that found nothing is asked again"
     )
@@ -302,7 +445,9 @@ async def test_a_sweep_fetches_its_trial_boards_and_marks_them_tried(clean_db, m
     assert len(asked & {"nahegmbh", "fernekk", "spaeter"}) == 2
 
     async with connect() as conn:
-        due = await admin_q.tenants_due_for_trial(conn, limit=10, recheck_days=30)
+        due = await admin_q.tenants_due_for_trial(
+            conn, limit=10, recheck_days=30, sources=["greenhouse"]
+        )
     assert sum(len(scopes) for scopes in due.values()) == 1, (
         "a board asked tonight must not be asked again tomorrow"
     )

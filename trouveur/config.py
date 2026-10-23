@@ -70,6 +70,9 @@ class Settings(BaseSettings):
     # added to a scan, and a pool bigger than 300 * recheck_days rotates slower than the interval
     # suggests. Raise the cap before shortening the interval -- the cap buys a board its first
     # look, which is where almost all of the recall is.
+    #
+    # The fetch is the cheap half: these postings also go through detail, derive and embed, and
+    # `runner.MATCH_WAIT_LIMIT` starts matching two hours later whatever the queue depth.
     trial_boards_per_run: int = 300
     trial_recheck_days: int = 30
 

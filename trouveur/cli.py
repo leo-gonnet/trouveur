@@ -10,7 +10,7 @@ from pathlib import Path
 
 import click
 
-from trouveur import versions
+from trouveur import clock, versions
 from trouveur.config import get_settings
 
 
@@ -74,6 +74,7 @@ def drain(rounds: int) -> None:
     Reading the whole archive for links takes many passes the first time; `--rounds` is how you
     get it over with rather than waiting for the runner's ticks.
     """
+    from trouveur.discovery import trial
     from trouveur.runner import drain_queues
 
     settings = get_settings()
@@ -83,6 +84,10 @@ def drain(rounds: int) -> None:
         # that created it, so a second asyncio.run() would reuse a pool on a closed loop.
         for _ in range(max(rounds, 1)):
             click.echo(str(await drain_queues(settings)))
+        # Here as well as in the runner, or an installation driven from the CLI alone spends
+        # trial slots, stamps the boards tried, and never promotes one.
+        promoted = await trial.judge()
+        click.echo(f"trial promoted {promoted} board(s) to nightly sweeping")
 
     asyncio.run(_run())
 
@@ -381,7 +386,7 @@ def tenants_list(source: str | None, failing: bool) -> None:
     )
     for row in rows:
         state = "yes" if row.enabled else ("drop" if row.dropped_at else "no")
-        tried = row.trial_at.date().isoformat() if row.trial_at else "never"
+        tried = clock.to_local(row.trial_at).date().isoformat() if row.trial_at else "never"
         click.echo(
             f"{row.source:<14}{row.scope:<24}{state:<6}"
             f"{row.origin:<11}{row.last_documents or 0:>7}  {row.consecutive_failures or 0:>5}"

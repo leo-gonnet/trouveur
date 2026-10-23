@@ -83,6 +83,9 @@ async def by_source(
 # `auto_on` is a subset of `sweeping` and deliberately not a state of its own: it is how many of
 # the boards being swept got there without a human, which is the whole measure of the board trial.
 #
+# `disabled` is a board a person switched off, whatever found it: counting a disabled discovered
+# board under `monthly` showed it as still waiting for a trial it will never get.
+#
 # `to_try` and `monthly` split what used to be one `candidates` column, because they mean opposite
 # things now. `to_try` is a board nothing has asked yet -- it will be swept within a few runs.
 # `monthly` is a board we asked, that had nothing for any reader, and that is asked again every
@@ -95,12 +98,13 @@ SELECT t.source,
        count(*) FILTER (WHERE t.enabled AND t.origin = 'discovered') AS auto_on,
        count(*) FILTER (
            WHERE NOT t.enabled AND t.dropped_at IS NULL AND t.origin = 'discovered'
-             AND h.trial_at IS NULL) AS to_try,
+             AND t.decided_at IS NULL AND h.trial_at IS NULL) AS to_try,
        count(*) FILTER (
            WHERE NOT t.enabled AND t.dropped_at IS NULL AND t.origin = 'discovered'
-             AND h.trial_at IS NOT NULL) AS monthly,
+             AND t.decided_at IS NULL AND h.trial_at IS NOT NULL) AS monthly,
        count(*) FILTER (
-           WHERE NOT t.enabled AND t.dropped_at IS NULL AND t.origin = 'manual') AS disabled,
+           WHERE NOT t.enabled AND t.dropped_at IS NULL
+             AND (t.origin = 'manual' OR t.decided_at IS NOT NULL)) AS disabled,
        count(*) FILTER (WHERE NOT t.enabled AND t.dropped_at IS NOT NULL) AS dropped
 FROM source_tenant t
 LEFT JOIN source_scope_health h ON h.source = t.source AND h.scope = t.scope

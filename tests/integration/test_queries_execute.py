@@ -93,7 +93,12 @@ def _arguments(ctx: dict) -> dict[str, dict]:
         "admin.record_scope_health": {"source": source, "results": ctx["scope_results"]},
         "admin.scope_health": {"failing_only": True},
         "admin.prune_scope_health": {"source": source, "known_scopes": ["probe-tenant"]},
-        "admin.tenants_due_for_trial": {"limit": 10, "recheck_days": 30, "source": source},
+        "admin.tenants_due_for_trial": {
+            "limit": 10,
+            "recheck_days": 30,
+            "sources": [source],
+            "source": source,
+        },
         "admin.record_trials": {"tenants": {source: ["probe-tenant"]}},
         "admin.remove_tenant": {"source": source, "scope": "probe-tenant"},
         "admin.recent_sweeps": {},

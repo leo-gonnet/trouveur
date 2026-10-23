@@ -194,6 +194,10 @@ source_tenant = sa.Table(
     # Tried and decided against, as opposed to never tried: the row stays so a discovery pass
     # does not propose the board again, and the reason lives in `note`.
     sa.Column("dropped_at", sa.DateTime(timezone=True)),
+    # A person decided about this board, whichever way, and only the CLI writes it. `NOT enabled`
+    # alone cannot tell `tenants disable` from a candidate nothing has asked yet, and the trial
+    # swept the first and turned it back on.
+    sa.Column("decided_at", sa.DateTime(timezone=True)),
 )
 
 # One job seen somewhere, with its link and what the URL rules made of it. The lead sources write

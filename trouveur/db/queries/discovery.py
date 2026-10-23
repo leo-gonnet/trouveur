@@ -170,7 +170,7 @@ ON CONFLICT (source, scope) DO NOTHING
 
 
 async def promote_candidates(conn: AsyncConnection, sources: Sequence[str]) -> int:
-    """Write every newly-seen board as a disabled candidate, for a human to promote (task 04)."""
+    """Write every newly-seen board as a disabled candidate, for its trial sweep to judge."""
     if not sources:
         return 0
     result = await conn.execute(sa.text(_PROMOTE), {"sources": list(sources)})
@@ -187,8 +187,16 @@ async def promote_candidates(conn: AsyncConnection, sources: Sequence[str]) -> i
 #
 # Idempotent and not keyed on "swept tonight", which is why it needs no handle on the run: a board
 # already enabled is excluded by the WHERE, and one whose trial landed in a run that died before
-# the verdict is judged by the next run instead of being lost. `dropped_at IS NULL` keeps an
-# operator's decision: a board they tried and rejected is not promoted by its own old postings.
+# the verdict is judged by the next run instead of being lost. `dropped_at IS NULL` and
+# `decided_at IS NULL` keep an operator's decision, whichever way they made it.
+#
+# The filter is necessary and not sufficient here, and this is the one caller where that is so.
+# It admits a posting nothing could place, which is right when being wrong costs one row ranked
+# too high and wrong when it costs a board swept every night for ever. So the trial asks for a
+# posting that was PLACED too: a country, a country it may be in, or a role derived remote.
+#
+# Not applied to the filter's twin branch, a posting whose source named no place at all: that is
+# an aggregator blanking a field, and a company's own board is all discovery ever resolves to.
 #
 # Only candidates, so this can never widen the crawl beyond what discovery proposed, and never
 # narrows it: nothing here writes `enabled = false`.
@@ -198,6 +206,7 @@ SET enabled = true
 WHERE t.origin = 'discovered'
   AND NOT t.enabled
   AND t.dropped_at IS NULL
+  AND t.decided_at IS NULL
   AND EXISTS (
       SELECT 1
       FROM job j
@@ -205,6 +214,11 @@ WHERE t.origin = 'discovered'
       WHERE j.source = t.source
         AND j.scope = t.scope
         AND j.closed_at IS NULL
+        AND (
+            cardinality(f.countries) > 0
+            OR cardinality(f.unplaced_countries) > 0
+            OR f.work_mode = 'remote'
+        )
         AND {location.SQL}
   )
 """

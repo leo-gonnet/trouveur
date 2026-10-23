@@ -63,8 +63,12 @@ async def registered_tenants(conn: AsyncConnection) -> dict[str, list[str]]:
 # only thing that makes the pool affordable: thousands of boards hire nowhere near any reader, and
 # a board that was outside every area a month ago may have posted locally since.
 #
-# `dropped_at IS NULL` is load-bearing. A board an operator tried and decided against must not be
-# handed back to the sweep by the trial, which would be the decision silently undone.
+# `dropped_at IS NULL` and `decided_at IS NULL` are both load-bearing: `tenants disable` leaves
+# `dropped_at` NULL, so without the second one the trial swept a disabled board and turned it
+# straight back on.
+#
+# `sources` is the sources this run can build. One it cannot build is never swept and so never
+# stamped tried, and its candidates would take the cap's slots again on every run.
 _TRIAL_DUE = """
 SELECT t.source, t.scope
 FROM source_tenant t
@@ -72,6 +76,8 @@ LEFT JOIN source_scope_health h ON h.source = t.source AND h.scope = t.scope
 WHERE t.origin = 'discovered'
   AND NOT t.enabled
   AND t.dropped_at IS NULL
+  AND t.decided_at IS NULL
+  AND t.source = ANY(CAST(:sources AS text[]))
   AND (
        h.trial_at IS NULL
        OR h.trial_at < now() - make_interval(days => CAST(:recheck_days AS integer))
@@ -89,6 +95,7 @@ async def tenants_due_for_trial(
     *,
     limit: int,
     recheck_days: int,
+    sources: Sequence[str],
     source: str | None = None,
 ) -> dict[str, list[str]]:
     """Up to `limit` candidate boards to sweep once this run, grouped like `enabled_tenants`.
@@ -96,11 +103,16 @@ async def tenants_due_for_trial(
     Same shape as the crawl set on purpose: the sweep adds them to the tenants it was going to
     fetch anyway and never learns that some of its boards were on trial.
     """
-    if limit <= 0:
+    if limit <= 0 or not sources:
         return {}
     rows = await conn.execute(
         sa.text(_TRIAL_DUE),
-        {"limit": limit, "recheck_days": recheck_days, "source": source},
+        {
+            "limit": limit,
+            "recheck_days": recheck_days,
+            "source": source,
+            "sources": list(sources),
+        },
     )
     grouped: dict[str, list[str]] = {}
     for row in rows:
@@ -198,6 +210,10 @@ async def tenants_needing_attention(
     size they bury the handful of failing boards this page exists for -- the exact fault that
     rendering the whole set had. Measured at 10,000 tenants: 1.9 MiB of HTML and 10,769 rows in a
     page that otherwise weighs 39 KB. `list_tenants` is how the CLI reads it all.
+
+    A failing candidate is counted and not listed for the same reason: discovery misreads slugs
+    by the thousand, each 404 grows a streak for ever, and ordering by streak puts them above the
+    swept boards. `tenants list --failing` still shows them.
     """
     rows = list(
         await conn.execute(
@@ -214,6 +230,7 @@ async def tenants_needing_attention(
                 -- sit at the top of the list for ever.
                 WHERE t.dropped_at IS NULL
                   AND coalesce(h.consecutive_failures, 0) > 0
+                  AND (t.enabled OR t.origin = 'manual' OR t.decided_at IS NOT NULL)
                 ORDER BY coalesce(h.consecutive_failures, 0) DESC, t.source, t.scope
                 LIMIT :limit
                 """
@@ -229,11 +246,14 @@ async def tenants_needing_attention(
                        count(*) FILTER (WHERE t.enabled) AS sweeping,
                        count(*) FILTER (
                            WHERE t.dropped_at IS NULL
-                             AND coalesce(h.consecutive_failures, 0) > 0) AS failing,
+                             AND coalesce(h.consecutive_failures, 0) > 0
+                             AND (t.enabled OR t.origin = 'manual'
+                                  OR t.decided_at IS NOT NULL)) AS failing,
                        count(*) FILTER (
                            WHERE t.enabled AND t.origin = 'discovered') AS auto_on,
                        count(*) FILTER (
                            WHERE t.dropped_at IS NULL AND NOT t.enabled
+                             AND t.decided_at IS NULL
                              AND t.origin = 'discovered') AS candidates,
                        count(*) FILTER (WHERE t.dropped_at IS NOT NULL) AS dropped
                 FROM source_tenant t
@@ -289,8 +309,12 @@ async def set_tenant_enabled(
     conn: AsyncConnection, source: str, scope: str, enabled: bool
 ) -> None:
     """Switch a tenant on or off. Switching one on also undoes a drop: a board being swept again
-    is not one we decided against, and leaving the mark would keep it counted as rejected."""
-    values: dict[str, Any] = {"enabled": enabled}
+    is not one we decided against, and leaving the mark would keep it counted as rejected.
+
+    `decided_at` is stamped either way, and the board trial reads it: without it a discovered
+    board switched off here is swept on the next run and switched straight back on.
+    """
+    values: dict[str, Any] = {"enabled": enabled, "decided_at": sa.func.now()}
     if enabled:
         values["dropped_at"] = None
     await conn.execute(
@@ -309,7 +333,11 @@ async def drop_tenant(
     rejected again, and nothing anywhere says it already was. The reason goes in `note`, which is
     the only place a later reader can learn why.
     """
-    values: dict[str, Any] = {"enabled": False, "dropped_at": sa.func.now()}
+    values: dict[str, Any] = {
+        "enabled": False,
+        "dropped_at": sa.func.now(),
+        "decided_at": sa.func.now(),
+    }
     if note is not None:
         values["note"] = note
     result = await conn.execute(

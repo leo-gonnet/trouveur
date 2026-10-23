@@ -22,6 +22,7 @@ from trouveur.models import RawDocument
 from trouveur.sources import build_sources
 from trouveur.sources.base import Source, SweepOutcome
 from trouveur.sources.http import PoliteClient
+from trouveur.sources.registry import SOURCES
 
 log = logging.getLogger(__name__)
 
@@ -103,24 +104,25 @@ async def run(
     # fetched, archived, closed and recorded exactly like a board somebody promoted by hand, and
     # the only difference is the verdict the runner reaches afterwards (`discovery/trial.py`). A
     # separate pass would be a second sweep path to keep correct.
+    disabled = [name.strip() for name in settings.disabled_sources.split(",") if name.strip()]
+    # What the trial queue is restricted to: a disabled source's candidates are never swept, so
+    # never stamped, so they would take the cap's slots again on every run.
+    askable = sorted(set(SOURCES) - set(disabled))
     async with connect() as conn:
         tenants = await admin_q.enabled_tenants(conn)
         trials = await admin_q.tenants_due_for_trial(
             conn,
             limit=settings.trial_boards_per_run,
             recheck_days=settings.trial_recheck_days,
+            sources=askable,
             source=only_source,
         )
     for source, scopes in trials.items():
         tenants[source] = sorted(set(tenants.get(source, [])) | set(scopes))
 
-    sources = build_sources(
-        tenants=tenants,
-        only=only_source,
-        disabled=settings.disabled_sources.split(","),
-    )
-    # A source named in `disabled_sources` is not built, so its boards were never asked -- marking
-    # them tried would retire them for a month on the strength of a sweep that did not happen.
+    sources = build_sources(tenants=tenants, only=only_source, disabled=disabled)
+    # Filtered here as well as in the query, which `--source` and a missing adapter do not reach:
+    # marking a board tried that nothing asked retires it for a month on a sweep that never ran.
     swept = {source.name for source in sources}
     trials = {source: scopes for source, scopes in trials.items() if source in swept}
 

@@ -161,14 +161,18 @@ async def test_a_dropped_board_is_counted_as_dropped_and_leaves_the_trial_queue(
             conn, "greenhouse", ["tried-this-one"], enabled=False,
             origin=TenantOrigin.DISCOVERED,
         )
-        due = await admin_q.tenants_due_for_trial(conn, limit=10, recheck_days=30)
+        due = await admin_q.tenants_due_for_trial(
+            conn, limit=10, recheck_days=30, sources=["greenhouse"]
+        )
         assert due == {"greenhouse": ["tried-this-one"]}
         _, totals = await admin_q.tenants_needing_attention(conn)
         assert totals["candidates"] == 1
 
         assert await admin_q.drop_tenant(conn, "greenhouse", "tried-this-one", note="empty board")
         rows, totals = await admin_q.tenants_needing_attention(conn)
-        assert await admin_q.tenants_due_for_trial(conn, limit=10, recheck_days=30) == {}
+        assert await admin_q.tenants_due_for_trial(
+            conn, limit=10, recheck_days=30, sources=["greenhouse"]
+        ) == {}
 
     assert not any(row.scope == "tried-this-one" for row in rows), (
         "a board already decided against is still asking for a decision"
