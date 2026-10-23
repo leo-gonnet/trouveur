@@ -211,6 +211,62 @@ def test_the_ways_boards_write_a_place_resolve_its_country(raw, country):
     assert facets.countries == [country]
 
 
+@pytest.mark.parametrize(
+    ("raw", "country"),
+    [
+        ("Parsdorf, Bavaria", "DE"),
+        ("Deutschlandweit", "DE"),
+        ("AMER", "US"),
+        ("North America", "US"),
+        ("Nordrhein Westfalen", "DE"),
+        ("Mecklenburg Vorpommern", "DE"),
+        ("Rheinland Pfalz", "DE"),
+    ],
+)
+def test_a_location_naming_only_a_region_is_judged_by_its_countries(raw, country):
+    facets = derive(_job(title="Engineer", locations=[Location(raw=raw)]))
+    assert country in facets.unplaced_countries
+    assert "AT" not in facets.unplaced_countries
+
+
+@pytest.mark.parametrize("raw", ["Thüringen", "Sachsen", "Sachsen-Anhalt", "Schleswig-Holstein"])
+def test_a_state_name_standing_alone_is_not_the_hamlet_that_shares_it(raw):
+    """"Sachsen" resolved to Sachsen bei Ansbach and "Thüringen" to a village in Austria, pinning
+    a state-wide posting to a place no reader's circle reaches."""
+    facets = derive(_job(title="Engineer", locations=[Location(raw=raw)]))
+    assert facets.unplaced_countries == ["DE"]
+    assert facets.place_ids == []
+    assert facets.countries == []
+
+
+@pytest.mark.parametrize("raw", ["Berlin", "Bremen", "Hamburg"])
+def test_a_city_state_keeps_the_city(raw):
+    """Berlin names a state too, and is not a hamlet; losing its place id would unplace the
+    busiest location in the corpus."""
+    facets = derive(_job(title="Engineer", locations=[Location(raw=raw)]))
+    assert facets.countries == ["DE"]
+    assert facets.place_ids
+
+
+def test_a_state_name_beside_a_country_is_read_as_the_town():
+    """"Berlin, CT" is Connecticut: a stated country means the name is not standing alone."""
+    facets = derive(_job(title="Engineer", locations=[Location(raw="Berlin, CT")]))
+    assert facets.countries == ["US"]
+    assert facets.place_ids
+
+
+def test_a_region_beside_a_location_we_cannot_read_is_not_evidence():
+    facets = derive(
+        _job(title="Engineer", locations=[Location(raw="Europe"), Location(raw="North America")])
+    )
+    assert facets.unplaced_countries == []
+
+
+def test_a_region_never_widens_a_town_already_placed():
+    facets = derive(_job(title="Engineer", locations=[Location(raw="Munich, Bavaria")]))
+    assert facets.unplaced_countries == []
+
+
 def test_a_state_code_is_not_a_country_unless_the_town_is_in_the_us():
     """"CA" is California after Redlands and Canada after Toronto."""
     facets = derive(_job(title="Engineer", locations=[Location(raw="Toronto, CA")]))
