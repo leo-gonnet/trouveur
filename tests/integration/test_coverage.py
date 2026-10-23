@@ -148,11 +148,11 @@ async def test_a_posting_with_no_vector_is_open_but_not_retrievable(
     assert after.retrievable_jobs == 0
 
 
-async def test_a_dropped_board_is_counted_as_dropped_and_stops_asking_for_a_decision(
+async def test_a_dropped_board_is_counted_as_dropped_and_leaves_the_trial_queue(
     clean_db, gh_board, aa_listing, aa_detail
 ):
-    """Dropping keeps the row so discovery cannot propose the board again -- which would also
-    leave it on the list of boards awaiting a decision for ever."""
+    """Dropping keeps the row so discovery cannot propose the board again, and takes it out of the
+    trial queue -- left in, the trial would sweep a board somebody decided against every month."""
     await seed_corpus(gh_board, aa_listing, aa_detail)
     await seed_user("berlin@example.test", countries=["DE"])
 
@@ -161,31 +161,43 @@ async def test_a_dropped_board_is_counted_as_dropped_and_stops_asking_for_a_deci
             conn, "greenhouse", ["tried-this-one"], enabled=False,
             origin=TenantOrigin.DISCOVERED,
         )
-        rows, totals = await admin_q.tenants_needing_attention(conn)
-        assert any(row.scope == "tried-this-one" for row in rows), "a candidate was not listed"
+        due = await admin_q.tenants_due_for_trial(
+            conn, limit=10, recheck_days=30, sources=["greenhouse"]
+        )
+        assert due == {"greenhouse": ["tried-this-one"]}
+        _, totals = await admin_q.tenants_needing_attention(conn)
         assert totals["candidates"] == 1
 
         assert await admin_q.drop_tenant(conn, "greenhouse", "tried-this-one", note="empty board")
         rows, totals = await admin_q.tenants_needing_attention(conn)
+        assert await admin_q.tenants_due_for_trial(
+            conn, limit=10, recheck_days=30, sources=["greenhouse"]
+        ) == {}
 
     assert not any(row.scope == "tried-this-one" for row in rows), (
         "a board already decided against is still asking for a decision"
     )
-    assert totals == {"tenants": 1, "sweeping": 0, "failing": 0, "candidates": 0, "dropped": 1}
+    assert totals == {
+        "tenants": 1, "sweeping": 0, "failing": 0, "auto_on": 0, "candidates": 0, "dropped": 1,
+    }
 
     states = {row.source: row for row in (await _report()).tenants}
-    assert states["greenhouse"].dropped == 1
-    assert states["greenhouse"].candidates == 0
-    # The four states partition the boards: a column that can double-count makes a table of
-    # states one a reader cannot check against the total.
     row = states["greenhouse"]
-    assert row.sweeping + row.candidates + row.disabled + row.dropped == 1
+    assert row.dropped == 1
+    assert (row.to_try, row.monthly) == (0, 0)
+    # The five states partition the boards: a column that can double-count makes a table of
+    # states one a reader cannot check against the total. `auto_on` is deliberately not in the
+    # sum -- it is part of `sweeping`, not a sixth state.
+    assert row.sweeping + row.to_try + row.monthly + row.disabled + row.dropped == 1
 
     async with connect() as conn:
         await admin_q.set_tenant_enabled(conn, "greenhouse", "tried-this-one", True)
     reopened = {row.source: row for row in (await _report()).tenants}
     assert reopened["greenhouse"].dropped == 0, "enabling a board left it marked as rejected"
     assert reopened["greenhouse"].sweeping == 1
+    assert reopened["greenhouse"].auto_on == 1, (
+        "a discovered board being swept is what the trial is measured by"
+    )
 
 
 def _rendered_row(body: str, source: str) -> list[int]:

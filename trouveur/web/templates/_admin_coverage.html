@@ -9,6 +9,8 @@
     corpus holds overall. <em>Retrievable</em> is the part inside the horizon that carries a
     vector; the rest was collected but cannot reach a recommendation. <em>Only here</em> counts
     postings no other source in this area also has: lose that source and those go with it.
+    <em>Found</em> counts postings from a board nobody registered by hand — discovery proposed it
+    and its trial sweep kept it.
   </p>
   {% if coverage.areas %}
     {% for entry in coverage.areas %}
@@ -20,13 +22,14 @@
       {% if entry.sources %}
       <table>
         <tr><th>Source</th><th class="num">Open</th><th class="num">Retrievable</th>
-            <th class="num">Only here</th></tr>
+            <th class="num">Only here</th><th class="num">Found</th></tr>
         {% for row in entry.sources %}
         <tr>
           <td>{{ row.source }}</td>
           <td class="num">{{ '{:,}'.format(row.open_jobs) }}</td>
           <td class="num">{{ '{:,}'.format(row.retrievable_jobs) }}</td>
           <td class="num">{{ '{:,}'.format(row.only_source) }}</td>
+          <td class="num">{{ '{:,}'.format(row.discovered_jobs) }}</td>
         </tr>
         {% endfor %}
         <tr>
@@ -34,6 +37,7 @@
           <td class="num">{{ '{:,}'.format(entry.open_jobs) }}</td>
           <td class="num">{{ '{:,}'.format(entry.retrievable_jobs) }}</td>
           <td class="num">{{ '{:,}'.format(entry.only_source) }}</td>
+          <td class="num">{{ '{:,}'.format(entry.discovered_jobs) }}</td>
         </tr>
       </table>
       {% else %}
@@ -49,21 +53,29 @@
 <section class="section">
   <div class="section-head"><h2>Crawl set by source</h2></div>
   <p class="hint">
-    Boards, not postings, and shared by every reader rather than belonging to an area. A
-    <em>candidate</em> is a discovery pass's proposal, waiting for somebody to promote it;
-    <em>dropped</em> is a board that was tried and decided against, kept so the next pass does not
-    propose it again. Change any of it with
+    Boards, not postings, and shared by every reader rather than belonging to an area.
+    <em>Auto-on</em> is the part of <em>sweeping</em> that no human switched on: discovery proposed
+    the board and its trial sweep found an open posting in a reader's area. <em>To try</em> has
+    never been swept and goes first in the trial queue; <em>monthly</em> was swept, had nothing for
+    any reader, and is asked again every few weeks rather than every night. <em>Disabled</em> is a
+    board a person switched off, whatever found it, and the trial leaves those alone.
+    <em>Dropped</em> is a board a person tried and decided against, kept so the next pass does not
+    propose it again.
+    Nothing here is ever switched off on its own. Change any of it with
     <code>trouveur tenants enable|disable|drop|remove</code>.
   </p>
   {% if coverage.tenants %}
   <table>
-    <tr><th>Source</th><th class="num">Sweeping</th><th class="num">Candidates</th>
+    <tr><th>Source</th><th class="num">Sweeping</th><th class="num">Auto-on</th>
+        <th class="num">To try</th><th class="num">Monthly</th>
         <th class="num">Disabled</th><th class="num">Dropped</th></tr>
     {% for row in coverage.tenants %}
     <tr>
       <td>{{ row.source }}</td>
       <td class="num">{{ '{:,}'.format(row.sweeping) }}</td>
-      <td class="num">{{ '{:,}'.format(row.candidates) }}</td>
+      <td class="num">{{ '{:,}'.format(row.auto_on) }}</td>
+      <td class="num">{{ '{:,}'.format(row.to_try) }}</td>
+      <td class="num">{{ '{:,}'.format(row.monthly) }}</td>
       <td class="num">{{ '{:,}'.format(row.disabled) }}</td>
       <td class="num">{{ '{:,}'.format(row.dropped) }}</td>
     </tr>
@@ -86,8 +98,8 @@
   <p class="hint">
     A <em>lead</em> is one job seen somewhere, with its link, found by reading the postings we
     already hold. The link is read as a board, so one lead can bring that company's whole board
-    with it: a board we can sweep is added to the crawl set above as a candidate, switched off,
-    for you to promote with <code>trouveur tenants enable</code>.
+    with it: a board we can sweep is added to the crawl set above, swept once on trial, and kept
+    for every night if it had an open posting in a reader's area.
   </p>
   {% if coverage.leads.unmined_jobs or coverage.leads.awaiting_resolve %}
     <p class="notice">Still working through the archive:

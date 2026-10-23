@@ -17,6 +17,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from trouveur.db.queries import location
 from trouveur.db.schema import discovery_lead, job
 
 # One posting with everything a lead needs, its raw payloads included.
@@ -169,10 +170,65 @@ ON CONFLICT (source, scope) DO NOTHING
 
 
 async def promote_candidates(conn: AsyncConnection, sources: Sequence[str]) -> int:
-    """Write every newly-seen board as a disabled candidate, for a human to promote (task 04)."""
+    """Write every newly-seen board as a disabled candidate, for its trial sweep to judge."""
     if not sources:
         return 0
     result = await conn.execute(sa.text(_PROMOTE), {"sources": list(sources)})
+    return result.rowcount or 0
+
+
+# The verdict on a trial: a board holding an open posting inside this area is swept nightly from
+# now on, and no human saw it happen.
+#
+# Run once per area the readers actually asked for, because the filter's parameters are per area.
+# It is `location.SQL` verbatim and not a second opinion: a board judged by a rule of its own
+# would turn on boards whose postings the matcher then filters out, and turn away boards whose
+# postings it would have shown. AGENTS.md calls that re-deriving downstream.
+#
+# Idempotent and not keyed on "swept tonight", which is why it needs no handle on the run: a board
+# already enabled is excluded by the WHERE, and one whose trial landed in a run that died before
+# the verdict is judged by the next run instead of being lost. `dropped_at IS NULL` and
+# `decided_at IS NULL` keep an operator's decision, whichever way they made it.
+#
+# The filter is necessary and not sufficient here, and this is the one caller where that is so.
+# It admits a posting nothing could place, which is right when being wrong costs one row ranked
+# too high and wrong when it costs a board swept every night for ever. So the trial asks for a
+# posting that was PLACED too: a country, a country it may be in, or a role derived remote.
+#
+# Not applied to the filter's twin branch, a posting whose source named no place at all: that is
+# an aggregator blanking a field, and a company's own board is all discovery ever resolves to.
+#
+# Only candidates, so this can never widen the crawl beyond what discovery proposed, and never
+# narrows it: nothing here writes `enabled = false`.
+_ENABLE_WITH_LOCAL_JOBS = f"""
+UPDATE source_tenant t
+SET enabled = true
+WHERE t.origin = 'discovered'
+  AND NOT t.enabled
+  AND t.dropped_at IS NULL
+  AND t.decided_at IS NULL
+  AND EXISTS (
+      SELECT 1
+      FROM job j
+      JOIN job_facet f ON f.job_id = j.id
+      WHERE j.source = t.source
+        AND j.scope = t.scope
+        AND j.closed_at IS NULL
+        AND (
+            cardinality(f.countries) > 0
+            OR cardinality(f.unplaced_countries) > 0
+            OR f.work_mode = 'remote'
+        )
+        AND {location.SQL}
+  )
+"""
+
+
+async def enable_boards_with_local_jobs(conn: AsyncConnection, area: object) -> int:
+    """Switch on every candidate board holding an open posting inside `area`. Returns how many."""
+    result = await conn.execute(
+        sa.text(_ENABLE_WITH_LOCAL_JOBS), location.params(area)
+    )
     return result.rowcount or 0
 
 

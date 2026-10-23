@@ -16,7 +16,7 @@ from trouveur import clock, versions
 from trouveur.config import Settings, get_settings
 from trouveur.db.engine import connect
 from trouveur.db.queries import admin as admin_q
-from trouveur.discovery import reports
+from trouveur.discovery import reports, trial
 from trouveur.discovery import work as discovery
 from trouveur.ingest import pipeline as ingest
 from trouveur.ingest import workers
@@ -108,8 +108,12 @@ async def drain_queues(settings: Settings) -> dict[str, int]:
     """
     done = {"detail": 0, "derive": 0, "embed": 0, "dedup": 0, "leads": 0, "reports": 0}
 
+    # Every registered board, not only the enabled ones. A detail fetch addresses one posting by
+    # its external id and never reads the scope list, but a tenant-scoped source with no scopes is
+    # not built at all -- so a board on trial that was the only one of its source left all of its
+    # postings without a description, failing "no source registered" until the items parked.
     async with connect() as conn:
-        tenants = await admin_q.enabled_tenants(conn)
+        tenants = await admin_q.registered_tenants(conn)
     sources = {source.name: source for source in build_sources(tenants=tenants)}
 
     async def fetch_details() -> None:
@@ -229,6 +233,15 @@ async def _execute(settings: Settings, run) -> None:
         return
 
     unprepared = await prepare_arrivals(settings)
+    # After the queues and before matching: a board on trial is judged on derived facets, and a
+    # board switched on now has its postings already in the corpus for this run's match.
+    # Isolated, because the next line is every reader's edition: a verdict about tomorrow's
+    # corpus must not cost anybody tonight's. Idempotent, so the next run reaches it instead.
+    promoted = 0
+    try:
+        promoted = await trial.judge()
+    except Exception:
+        log.exception("the board trial failed; matching continues and the next run re-judges")
     matches = await matching.run_all(settings)
     notified = 0
     if settings.smtp_host:
@@ -240,6 +253,8 @@ async def _execute(settings: Settings, run) -> None:
         "sources": {name: asdict(item) for name, item in report.per_source.items()},
         "matches": _match_payload(matches),
         "unprepared": unprepared,
+        "boards_tried": report.trialled,
+        "boards_promoted": promoted,
         "digests_sent": notified,
     }
     async with connect() as conn:

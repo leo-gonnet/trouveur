@@ -11,7 +11,6 @@ all of them every night would make the scan take hours.
   corpus like any others.
 - After derive: at least one open job inside any user's area means **on**, swept every night.
   None means **checked again monthly**.
-- A board that had local jobs and has had none for a long time drops to monthly.
 - Cap trial sweeps per night, so the scan time stays under control.
 - Show on / trial / monthly counts in the coverage report.
 
@@ -19,6 +18,13 @@ all of them every night would make the scan take hours.
 - A board with a local job is turned on without a human.
 - A board with none is not swept nightly.
 - The nightly cap is respected.
+
+**Decided against while building this.** The draft also demoted a board that had local jobs and
+has had none for a long time. Dropped: the crawl set only ever grows. A company with nothing open
+in the area today is the company that posts there next month, and a board we stopped sweeping
+loses those postings with nothing on any page saying so — the same reason a failure streak does
+not retire a board either. The only shrinking stays `trouveur tenants drop`, which a person does.
+One request a night for a board that was once relevant is the cheapest insurance we have.
 
 **Prompt**
 
@@ -32,7 +38,7 @@ After their jobs are derived, check whether any open job passes any user's locat
 Reuse the match run's filter; do not re-derive.
 - If yes, enable the board: it is swept nightly.
 - If no, check it again in 30 days.
-- A board with no local job for 60 days drops to the monthly check.
+- Nothing is ever switched off: see "Decided against" above.
 
 Store "when to check next" as observation (source_scope_health or a new column), not as
 configuration. AGENTS.md explains why the two tables are separate.

@@ -10,7 +10,7 @@ from pathlib import Path
 
 import click
 
-from trouveur import versions
+from trouveur import clock, versions
 from trouveur.config import get_settings
 
 
@@ -74,6 +74,7 @@ def drain(rounds: int) -> None:
     Reading the whole archive for links takes many passes the first time; `--rounds` is how you
     get it over with rather than waiting for the runner's ticks.
     """
+    from trouveur.discovery import trial
     from trouveur.runner import drain_queues
 
     settings = get_settings()
@@ -83,6 +84,10 @@ def drain(rounds: int) -> None:
         # that created it, so a second asyncio.run() would reuse a pool on a closed loop.
         for _ in range(max(rounds, 1)):
             click.echo(str(await drain_queues(settings)))
+        # Here as well as in the runner, or an installation driven from the CLI alone spends
+        # trial slots, stamps the boards tried, and never promotes one.
+        promoted = await trial.judge()
+        click.echo(f"trial promoted {promoted} board(s) to nightly sweeping")
 
     asyncio.run(_run())
 
@@ -285,15 +290,17 @@ def coverage(as_json: bool) -> None:
             f"\n{entry.area.label}  ({entry.area.readers} reader"
             f"{'' if entry.area.readers == 1 else 's'})"
         )
-        click.echo(f"  {'source':<16}{'open':>8}{'retrievable':>13}{'only here':>11}")
+        click.echo(
+            f"  {'source':<16}{'open':>8}{'retrievable':>13}{'only here':>11}{'found':>8}"
+        )
         for row in entry.sources:
             click.echo(
                 f"  {row.source:<16}{row.open_jobs:>8,}{row.retrievable_jobs:>13,}"
-                f"{row.only_source:>11,}"
+                f"{row.only_source:>11,}{row.discovered_jobs:>8,}"
             )
         click.echo(
             f"  {'all sources':<16}{entry.open_jobs:>8,}{entry.retrievable_jobs:>13,}"
-            f"{entry.only_source:>11,}"
+            f"{entry.only_source:>11,}{entry.discovered_jobs:>8,}"
         )
 
     if card.leads:
@@ -335,13 +342,17 @@ def coverage(as_json: bool) -> None:
         click.echo("  No tenant-scoped source has any board registered.")
     else:
         click.echo(
-            f"  {'source':<16}{'sweeping':>10}{'candidates':>12}{'disabled':>10}{'dropped':>9}"
+            f"  {'source':<16}{'sweeping':>10}{'auto-on':>9}{'to try':>8}{'monthly':>9}"
+            f"{'disabled':>10}{'dropped':>9}"
         )
         for row in card.tenants:
             click.echo(
-                f"  {row.source:<16}{row.sweeping:>10,}{row.candidates:>12,}"
-                f"{row.disabled:>10,}{row.dropped:>9,}"
+                f"  {row.source:<16}{row.sweeping:>10,}{row.auto_on:>9,}{row.to_try:>8,}"
+                f"{row.monthly:>9,}{row.disabled:>10,}{row.dropped:>9,}"
             )
+        click.echo(
+            "  auto-on is part of sweeping: boards the trial switched on with no human."
+        )
 
 
 @main.group()
@@ -369,12 +380,17 @@ def tenants_list(source: str | None, failing: bool) -> None:
     if not rows:
         click.echo("No failing tenants." if failing else "No tenants registered.")
         return
-    click.echo(f"{'source':<14}{'scope':<24}{'on':<6}{'origin':<11}{'docs':>7}  {'fails':>5}")
+    click.echo(
+        f"{'source':<14}{'scope':<24}{'on':<6}{'origin':<11}{'docs':>7}  {'fails':>5}"
+        f"  {'tried':<11}"
+    )
     for row in rows:
         state = "yes" if row.enabled else ("drop" if row.dropped_at else "no")
+        tried = clock.to_local(row.trial_at).date().isoformat() if row.trial_at else "never"
         click.echo(
             f"{row.source:<14}{row.scope:<24}{state:<6}"
             f"{row.origin:<11}{row.last_documents or 0:>7}  {row.consecutive_failures or 0:>5}"
+            f"  {tried:<11}"
             + (f"  {row.last_error[:48]}" if row.last_error else "")
         )
 

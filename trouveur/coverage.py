@@ -74,6 +74,9 @@ class SourceCoverage:
     # Postings no other source in this area also has, by the dedup markers. Lose the source,
     # lose these outright.
     only_source: int
+    # Postings from a board nobody registered by hand: discovery proposed it and the trial sweep
+    # kept it. What this area would not hold if discovery were switched off.
+    discovered_jobs: int
 
 
 @dataclass(frozen=True)
@@ -94,15 +97,26 @@ class AreaCoverage:
         """How much of this area rests on a single source: postings with no twin elsewhere."""
         return sum(row.only_source for row in self.sources)
 
+    @property
+    def discovered_jobs(self) -> int:
+        """What discovery brought this area, boards nobody registered by hand."""
+        return sum(row.discovered_jobs for row in self.sources)
+
 
 @dataclass(frozen=True)
 class TenantCoverage:
     source: str
     sweeping: int
-    # Proposed by a discovery pass and not yet promoted.
-    candidates: int
+    # Part of `sweeping`, not a state beside it: boards the trial switched on with no human
+    # involved. The measure of whether discovery is paying for itself.
+    auto_on: int
+    # Proposed by a discovery pass and not swept even once yet. These go first in the trial queue.
+    to_try: int
+    # Tried, had nothing for any reader, and asked again every `trial_recheck_days`. Not rejected:
+    # the company may post locally next month.
+    monthly: int
     disabled: int
-    # Tried and decided against. Kept so discovery does not propose it again.
+    # Tried and decided against by a person. Kept so discovery does not propose it again.
     dropped: int
 
 
@@ -182,6 +196,7 @@ class Report:
                     "open_jobs": entry.open_jobs,
                     "retrievable_jobs": entry.retrievable_jobs,
                     "only_source": entry.only_source,
+                    "discovered_jobs": entry.discovered_jobs,
                     "sources": [asdict(row) for row in entry.sources],
                 }
                 for entry in self.areas
@@ -240,6 +255,7 @@ async def report(conn: AsyncConnection, horizon_days: int) -> Report:
                         open_jobs=int(row.open_jobs),
                         retrievable_jobs=int(row.retrievable_jobs),
                         only_source=int(row.only_source),
+                        discovered_jobs=int(row.discovered_jobs),
                     )
                     for row in rows
                 ],
@@ -255,7 +271,9 @@ async def report(conn: AsyncConnection, horizon_days: int) -> Report:
             TenantCoverage(
                 source=row.source,
                 sweeping=int(row.sweeping),
-                candidates=int(row.candidates),
+                auto_on=int(row.auto_on),
+                to_try=int(row.to_try),
+                monthly=int(row.monthly),
                 disabled=int(row.disabled),
                 dropped=int(row.dropped),
             )

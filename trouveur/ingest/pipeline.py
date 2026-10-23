@@ -22,6 +22,7 @@ from trouveur.models import RawDocument
 from trouveur.sources import build_sources
 from trouveur.sources.base import Source, SweepOutcome
 from trouveur.sources.http import PoliteClient
+from trouveur.sources.registry import SOURCES
 
 log = logging.getLogger(__name__)
 
@@ -66,6 +67,9 @@ class IngestReport:
     per_source: dict[str, SourceReport] = field(default_factory=dict)
     skipped: list[str] = field(default_factory=list)
     pruned: int = 0
+    # Discovered boards this run swept once. Their verdict comes later, once the derive queue has
+    # given their postings facets: see trouveur.discovery.trial.
+    trialled: int = 0
 
     @property
     def cancelled(self) -> bool:
@@ -81,6 +85,8 @@ class IngestReport:
             )
         if self.pruned:
             parts.append(f"pruned {self.pruned} aged-out vector(s)")
+        if self.trialled:
+            parts.append(f"tried {self.trialled} discovered board(s)")
         if self.skipped:
             parts.append(f"cancelled before {', '.join(self.skipped)}")
         return " | ".join(parts) or "nothing ran"
@@ -94,18 +100,48 @@ async def run(
     control: RunControl | None = None,
 ) -> IngestReport:
     settings = settings or get_settings()
+    # The boards on trial are merged into the crawl set and the sweep is told nothing: they are
+    # fetched, archived, closed and recorded exactly like a board somebody promoted by hand, and
+    # the only difference is the verdict the runner reaches afterwards (`discovery/trial.py`). A
+    # separate pass would be a second sweep path to keep correct.
+    disabled = [name.strip() for name in settings.disabled_sources.split(",") if name.strip()]
+    # What the trial queue is restricted to: a disabled source's candidates are never swept, so
+    # never stamped, so they would take the cap's slots again on every run.
+    askable = sorted(set(SOURCES) - set(disabled))
     async with connect() as conn:
         tenants = await admin_q.enabled_tenants(conn)
-    sources = build_sources(
-        tenants=tenants,
-        only=only_source,
-        disabled=settings.disabled_sources.split(","),
-    )
+        trials = await admin_q.tenants_due_for_trial(
+            conn,
+            limit=settings.trial_boards_per_run,
+            recheck_days=settings.trial_recheck_days,
+            sources=askable,
+            source=only_source,
+        )
+    for source, scopes in trials.items():
+        tenants[source] = sorted(set(tenants.get(source, [])) | set(scopes))
+
+    sources = build_sources(tenants=tenants, only=only_source, disabled=disabled)
+    # Filtered here as well as in the query, which `--source` and a missing adapter do not reach:
+    # marking a board tried that nothing asked retires it for a month on a sweep that never ran.
+    swept = {source.name for source in sources}
+    trials = {source: scopes for source, scopes in trials.items() if source in swept}
 
     async with PoliteClient() as client:
         report = await sweep_sources(
             client, sources, settings=settings, backfill=backfill, control=control
         )
+
+    # Before the verdict and regardless of what it will be: a board that 404s, or a run that dies
+    # in the next stage, must not be back in tomorrow's trial queue -- it would be swept every
+    # night for ever, which is the one failure the cap exists to prevent. Only the sources a
+    # cancelled run never reached are left unstamped; the boards of a source it did sweep were
+    # asked, and asking them again tomorrow would spend the cap twice over.
+    tried = {
+        source: scopes for source, scopes in trials.items() if source not in set(report.skipped)
+    }
+    if tried:
+        async with connect() as conn:
+            report.trialled = await admin_q.record_trials(conn, tried)
 
     # Unconditional, including after a cancelled run: unlike retirement, age is known without
     # asking any source.
