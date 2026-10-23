@@ -171,9 +171,7 @@ _AMERICAS = (
     "TC", "TT", "UM", "US", "UY", "VC", "VE", "VG", "VI",
 )
 _UMLAUTS = str.maketrans({"ä": "ae", "ö": "oe", "ü": "ue"})
-# Every spelling a board writes a German state in, generated from REGIONS above so the sixteen of
-# them stay one list: folded, with the umlaut spelled out (see COUNTRIES), and with the hyphen as
-# a space, which is how "Nordrhein Westfalen" and "Mecklenburg Vorpommern" are usually written.
+# Boards write a state folded, with the umlaut spelled out (see COUNTRIES), or hyphen as a space.
 _GERMAN_STATES = [
     spelling
     for name in REGIONS.values()
