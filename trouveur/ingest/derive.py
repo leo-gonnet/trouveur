@@ -123,14 +123,12 @@ def _places(
 
 
 def _hinted(locations: list[Location]) -> list[str]:
-    """A hinted country is usually right and sometimes its neighbour: an aggregator files a Vienna
-    posting under Germany. Judged by both, it still reaches the reader in Vienna."""
     codes = [
         vocab.COUNTRIES.get(fold(location.country_hint))
         for location in locations
         if location.country_hint
     ]
-    return [near for code in codes if code for near in (code, *vocab.NEIGHBOURS.get(code, ()))]
+    return [code for code in codes if code]
 
 
 def _only_a_region(city: str, place: Place) -> bool:

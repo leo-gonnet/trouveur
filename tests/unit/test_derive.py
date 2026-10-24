@@ -308,15 +308,14 @@ def test_a_nation_inside_a_longer_name_is_not_that_nation():
     assert "GB" not in facets.countries + facets.unplaced_countries
 
 
-def test_a_hinted_country_is_judged_with_its_neighbours():
-    """An aggregator files Vienna postings under Germany. Judged by Germany alone, a blank one
-    would never reach the reader in Vienna it was posted for."""
+def test_a_hinted_country_judges_a_posting_that_names_no_place_without_stating_it():
+    """A hint is where a posting usually is, so it never becomes a stated country: the posting is
+    only judged by it."""
     facets = derive(
-        _job(title="Engineer", locations=[Location(raw="", country_hint="Germany")])
+        _job(title="Engineer", locations=[Location(raw="", country_hint="United Kingdom")])
     )
     assert facets.countries == []
-    assert {"DE", "AT"} <= set(facets.unplaced_countries)
-    assert "GB" not in facets.unplaced_countries
+    assert facets.unplaced_countries == ["GB"]
 
 
 def test_a_hint_never_overrides_a_place_the_posting_names():

@@ -217,27 +217,6 @@ REGION_COUNTRIES: dict[str, tuple[str, ...]] = {
     **{spelling: ("DE",) for spelling in _GERMAN_STATES},
 }
 
-NEIGHBOURS: dict[str, tuple[str, ...]] = {
-    "AD": ("ES", "FR"), "AL": ("GR", "ME", "MK", "XK"),
-    "AT": ("CH", "CZ", "DE", "HU", "IT", "LI", "SI", "SK"), "BA": ("HR", "ME", "RS"),
-    "BE": ("DE", "FR", "LU", "NL"), "BG": ("GR", "MK", "RO", "RS", "TR"),
-    "BY": ("LT", "LV", "PL", "RU", "UA"), "CH": ("AT", "DE", "FR", "IT", "LI"),
-    "CZ": ("AT", "DE", "PL", "SK"), "DE": ("AT", "BE", "CH", "CZ", "DK", "FR", "LU", "NL", "PL"),
-    "DK": ("DE",), "EE": ("LV", "RU"), "ES": ("AD", "FR", "GI", "PT"), "FI": ("NO", "RU", "SE"),
-    "FR": ("AD", "BE", "CH", "DE", "ES", "IT", "LU", "MC"), "GB": ("IE",),
-    "GR": ("AL", "BG", "MK", "TR"), "HR": ("BA", "HU", "ME", "RS", "SI"),
-    "HU": ("AT", "HR", "RO", "RS", "SI", "SK", "UA"), "IE": ("GB",),
-    "IT": ("AT", "CH", "FR", "SI", "SM", "VA"), "LI": ("AT", "CH"),
-    "LT": ("BY", "LV", "PL", "RU"), "LU": ("BE", "DE", "FR"), "LV": ("BY", "EE", "LT", "RU"),
-    "MC": ("FR",), "MD": ("RO", "UA"), "ME": ("AL", "BA", "HR", "RS", "XK"),
-    "MK": ("AL", "BG", "GR", "RS", "XK"), "NL": ("BE", "DE"), "NO": ("FI", "RU", "SE"),
-    "PL": ("BY", "CZ", "DE", "LT", "RU", "SK", "UA"), "PT": ("ES",),
-    "RO": ("BG", "HU", "MD", "RS", "UA"), "RS": ("BA", "BG", "HR", "HU", "ME", "MK", "RO", "XK"),
-    "SE": ("FI", "NO"), "SI": ("AT", "HR", "HU", "IT"), "SK": ("AT", "CZ", "HU", "PL", "UA"),
-    "SM": ("IT",), "UA": ("BY", "HU", "MD", "PL", "RO", "RU", "SK"), "VA": ("IT",),
-    "XK": ("AL", "ME", "MK", "RS"),
-}
-
 REMOTE_TERMS = (
     "remote", "homeoffice", "home office", "telearbeit", "ortsunabhangig",
     "work from home", "fully remote", "100% remote", "vollstandig remote",
