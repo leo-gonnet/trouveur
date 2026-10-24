@@ -1,6 +1,6 @@
 # One image, three roles: web UI, migrations, and the runner. Same code, different command.
 
-FROM python:3.12-slim-bookworm AS build
+FROM python:3.12-slim-bookworm AS deps
 
 COPY --from=ghcr.io/astral-sh/uv:0.12 /uv /bin/uv
 
@@ -15,9 +15,6 @@ COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-install-project --no-dev --extra embeddings --extra archive
 
-COPY . .
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --extra embeddings --extra archive
 
 # Bake the embedding model into the image rather than fetching it on first use. A runtime download
 # would repeat on every container recreate, needs egress from the runner, and would make the first
@@ -28,8 +25,15 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # cached intfloat/multilingual-e5-small, so the download this layer exists to prevent happened on
 # the first scan anyway -- silently, until a fastembed release dropped the stale name and turned
 # a wrong-but-quiet image into a failed build.
+#
+# Only the two files that name the model are copied, so this stage, and the model layer of the
+# image, rebuild when they change rather than on every commit. Without __init__.py files the
+# directories import as namespace packages, which skips the package imports that need the rest of
+# the source. If local.py gains an import, add its file here or the build fails.
+FROM deps AS model
+COPY trouveur/ingest/embed/base.py trouveur/ingest/embed/local.py /model/trouveur/ingest/embed/
 ENV FASTEMBED_CACHE_PATH=/app/.fastembed
-RUN uv run --no-dev python -c \
+RUN cd /model && /app/.venv/bin/python -c \
     "from fastembed import TextEmbedding; \
      from trouveur.ingest.embed.local import LocalOnnxProvider; \
      TextEmbedding(model_name=LocalOnnxProvider.model)"
@@ -37,7 +41,7 @@ RUN uv run --no-dev python -c \
 
 FROM python:3.12-slim-bookworm
 
-# Same base as the build stage, so the /app/.venv interpreter symlink stays valid.
+# Same base as the deps stage, so the /app/.venv interpreter symlink stays valid.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends postgresql-client \
     && rm -rf /var/lib/apt/lists/* \
@@ -45,7 +49,17 @@ RUN apt-get update \
     && useradd --system --gid app --home-dir /app app
 
 WORKDIR /app
-COPY --from=build --chown=app:app /app /app
+# Least often changed first, so a code-only commit rebuilds, pushes and pulls a few MB instead of
+# the venv and the model again. The project is installed into the venv last, as its own layer:
+# installing it in the deps stage restamps a dozen files on every commit, and that alone made the
+# whole venv layer new each time.
+COPY --from=deps --chown=app:app /app/.venv /app/.venv
+COPY --from=model --chown=app:app /app/.fastembed /app/.fastembed
+COPY --chown=app:app . /app
+RUN --mount=from=ghcr.io/astral-sh/uv:0.12,source=/uv,target=/bin/uv \
+    --mount=type=cache,target=/root/.cache/uv \
+    UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never \
+    uv sync --frozen --no-dev --extra embeddings --extra archive
 
 # WORKDIR creates /app as root before the COPY lands, and `COPY --chown` only sets ownership on
 # what it copies -- so /app itself stays root-owned while its contents do not. $HOME is /app, so
