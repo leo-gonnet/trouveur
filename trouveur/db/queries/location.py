@@ -29,13 +29,24 @@ def _admitted(facets: str) -> str:
     )"""
 
 
-_PLACED_TWINS = """
+_TWINS_NAMING_A_PLACE = """
     FROM job s
     JOIN job_facet sf ON sf.job_id = s.id
     WHERE s.dedup_group = j.dedup_group
       AND s.id <> j.id
-      AND s.closed_at IS NULL
+      AND s.location_text <> ''
       AND (cardinality(sf.countries) > 0 OR cardinality(sf.unplaced_countries) > 0)
+"""
+_PLACED_TWINS = f"{_TWINS_NAMING_A_PLACE} AND s.closed_at IS NULL"
+
+# A copy with no place of its own whose origin closed after we first saw it is the same role,
+# closed: aggregators keep listing for weeks what the employer's board already took down.
+CLOSED_AT_ORIGIN = f"""
+    (
+        j.location_text = ''
+        AND NOT EXISTS (SELECT 1 {_PLACED_TWINS})
+        AND EXISTS (SELECT 1 {_TWINS_NAMING_A_PLACE} AND s.closed_at >= j.first_seen_at)
+    )
 """
 
 # The ONE filter applied before ranking, and deliberately the only one. Every other preference a
@@ -64,21 +75,19 @@ _PLACED_TWINS = """
 # aggregator had blanked the location of a role its origin board states, and passing it as
 # unstated showed a Vienna reader Elastic's London role. Only when the source said NOTHING --
 # "Sobernheim" beside a twin in Coburg is the same role in another town, and must keep its own.
+#
+# The twins outrank a country the source only hinted at, being where the role actually is.
 SQL = f"""
     (
         {_remote_allowed("f")}
         AND (
             CAST(:anywhere AS boolean)
-            OR {_admitted("f")}
-            OR (
-                cardinality(f.countries) = 0
-                AND cardinality(f.unplaced_countries) = 0
-                AND CASE
-                    WHEN j.location_text = '' AND EXISTS (SELECT 1 {_PLACED_TWINS})
-                    THEN EXISTS (SELECT 1 {_PLACED_TWINS} AND {_admitted("sf")})
-                    ELSE TRUE
-                END
-            )
+            OR CASE
+                WHEN j.location_text = '' AND EXISTS (SELECT 1 {_PLACED_TWINS})
+                THEN EXISTS (SELECT 1 {_PLACED_TWINS} AND {_admitted("sf")})
+                ELSE {_admitted("f")}
+                    OR (cardinality(f.countries) = 0 AND cardinality(f.unplaced_countries) = 0)
+            END
         )
     )
 """
