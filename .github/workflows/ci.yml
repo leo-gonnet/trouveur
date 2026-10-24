@@ -1,7 +1,5 @@
 name: ci
 
-# Pull requests only: with a push trigger as well, every push to a branch with an open PR ran the
-# suite twice. Main is tested by deploy.yml.
 on:
   pull_request:
 

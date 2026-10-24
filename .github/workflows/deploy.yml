@@ -12,8 +12,6 @@ jobs:
   test:
     uses: ./.github/workflows/test.yml
 
-  # Runs alongside the tests and pushes only the commit's own tag, which nothing runs until deploy
-  # names it. :latest is compose's fallback tag, so it moves in deploy, after the tests pass.
   build:
     runs-on: ubuntu-latest
     permissions:
@@ -54,8 +52,6 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Recomputed, not passed from build: the name matches a secret in this repo's logs, and
-      # GitHub drops a job output that looks like one.
       - id: image
         run: echo "ref=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
 
