@@ -1,20 +1,24 @@
 """Workday payload -> CanonicalJob. Pure: no I/O, no clock, no database.
 
-Two listing fields are traps and neither is read: `postedOn` is relative prose ("Posted Today"),
-and `locationsText` is a count ("3 Locations"), not a place.
+Two listing fields are traps: `postedOn` is relative prose ("Posted Today") and is never read, and
+`locationsText` is a count ("3 Locations") whenever a posting has several places.
 """
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from typing import Any
 
 from trouveur.models import CanonicalJob, Location, collapse_whitespace
 from trouveur.sources.parse import html_to_text
 
-version = 1
+version = 2
 
 SOURCE = "workday"
+
+# Localised with the board: "3 Locations", "2 Standorte".
+_LOCATION_COUNT = re.compile(r"^\d+\s+\w+$")
 
 
 def normalize(
@@ -41,7 +45,7 @@ def normalize(
         description=html_to_text(info.get("jobDescription")),
         # `startDate` is the only absolute date either payload states. `postedOn` is prose.
         posted_at=_date(info.get("startDate")),
-        locations=_locations(info),
+        locations=_locations(info) or _listing_location(listing),
         salary=None,
         remote_hint=None,
         employment_type_hint=collapse_whitespace(info.get("timeType")),
@@ -65,7 +69,6 @@ def _company(detail: dict) -> str | None:
 
 
 def _locations(info: dict) -> list[Location]:
-    """The detail's real location strings. `locationsText` from the listing is never one."""
     names = [collapse_whitespace(info.get("location"))]
     for extra in info.get("additionalLocations") or []:
         names.append(collapse_whitespace(extra if isinstance(extra, str) else None))
@@ -79,6 +82,14 @@ def _locations(info: dict) -> list[Location]:
         # One code for the whole posting, so it only describes a location list of one.
         places.append(Location(raw=name, country=country_name if len(names) == 1 else None))
     return places
+
+
+def _listing_location(listing: dict) -> list[Location]:
+    """For a posting whose detail parked: with no place at all, it passes every location filter."""
+    text = collapse_whitespace(listing.get("locationsText"))
+    if not text or _LOCATION_COUNT.match(text):
+        return []
+    return [Location(raw=text)]
 
 
 def _date(value: Any) -> datetime | None:
