@@ -92,6 +92,8 @@ job = sa.Table(
               server_default=sa.func.now()),
     sa.Column("last_seen_at", sa.DateTime(timezone=True), nullable=False,
               server_default=sa.func.now()),
+    # Never moved once set: a re-derive after a version bump would make the corpus new again.
+    sa.Column("ready_at", sa.DateTime(timezone=True)),
     sa.Column("closed_at", sa.DateTime(timezone=True)),
     sa.Column("dedup_group", BYTEA),
     sa.Column("dedup_version", sa.Integer, nullable=False, server_default="0"),

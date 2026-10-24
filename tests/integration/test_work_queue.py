@@ -14,7 +14,7 @@ async def _items(conn) -> dict[tuple[int, str], tuple[int, bool]]:
 
 
 async def _jobs_by_source(conn) -> dict[str, list[int]]:
-    """And an empty queue: seeding leaves the Arbeitsagentur detail item behind."""
+    """And an empty queue, so a test's own items are the only ones."""
     await conn.exec_driver_sql("DELETE FROM work_item")
     rows = await conn.exec_driver_sql("SELECT source, id FROM job ORDER BY id")
     found: dict[str, list[int]] = {}
@@ -105,3 +105,49 @@ async def test_requeue_revives_parked_items_and_drops_those_of_closed_postings(
 
         assert await requeue_parked(conn, WorkKind.DETAIL) == (1, 1)
         assert await _items(conn) == {(live, "detail"): (0, False)}
+
+
+async def test_a_posting_is_ready_once_the_match_has_nothing_left_to_wait_for(
+    clean_db, gh_board, aa_listing, aa_detail
+):
+    """A parked detail must not hide its posting for good."""
+    from trouveur.db.engine import connect
+    from trouveur.work import MAX_ATTEMPTS, WorkKind, claim, complete, enqueue, fail
+
+    await seed_corpus(gh_board, aa_listing, aa_detail)
+    async with connect() as conn:
+        fetched, failing = (await _jobs_by_source(conn))["greenhouse"]
+        await conn.exec_driver_sql("UPDATE job SET ready_at = NULL")
+        await enqueue(conn, WorkKind.DETAIL, [fetched, failing], "1")
+        await enqueue(conn, WorkKind.DEDUP, [fetched], "1")
+        items = {item.job_id: item.id for item in await claim(conn, WorkKind.DETAIL, 2, "test")}
+        await complete(conn, [items[fetched]])
+        await fail(conn, [items[failing]], "HTTP 500 from the board.")
+        ready = dict((await conn.exec_driver_sql("SELECT id, ready_at FROM job")).all())
+        assert ready[fetched] is not None, "dedup is not something the match reads"
+        assert ready[failing] is None
+
+        await conn.exec_driver_sql(
+            "UPDATE work_item SET attempts = $1 - 1 WHERE job_id = $2", (MAX_ATTEMPTS, failing)
+        )
+        await fail(conn, [items[failing]], "HTTP 500 from the board.")
+        parked = await conn.exec_driver_sql("SELECT ready_at FROM job WHERE id = $1", (failing,))
+        assert parked.scalar_one() is not None
+
+
+async def test_a_re_derive_does_not_make_a_posting_new_again(
+    clean_db, gh_board, aa_listing, aa_detail
+):
+    """Otherwise a DERIVE_VERSION bump puts the whole week back into the next run."""
+    from trouveur.db.engine import connect
+    from trouveur.ingest import workers
+    from trouveur.work import WorkKind, refill
+
+    await seed_corpus(gh_board, aa_listing, aa_detail)
+    async with connect() as conn:
+        await conn.exec_driver_sql("UPDATE job SET ready_at = now() - interval '3 days'")
+        before = dict((await conn.exec_driver_sql("SELECT id, ready_at FROM job")).all())
+        await refill(conn, WorkKind.DERIVE, "999")
+        assert await workers.drain_derive(conn) > 0
+        after = dict((await conn.exec_driver_sql("SELECT id, ready_at FROM job")).all())
+    assert after == before

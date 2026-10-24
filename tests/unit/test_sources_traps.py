@@ -271,18 +271,24 @@ def test_workday_relative_posted_on_never_becomes_a_date():
     assert dated.posted_at == datetime(2026, 9, 1, tzinfo=UTC)
 
 
-def test_workday_locations_text_is_a_count_not_a_place():
-    """`locationsText` reads "3 Locations"; used as a location it fills the city column with it."""
+def test_workday_locations_text_is_a_place_unless_it_is_a_count():
+    """`locationsText` reads "3 Locations" on a posting with several places."""
     from trouveur.sources.workday import normalize
 
-    job = normalize(
-        {"title": "Engineer", "locationsText": "3 Locations"},
-        None,
-        external_id="acme:wd5:Careers:/job/x",
-    )
+    def locations(text, detail=None):
+        job = normalize(
+            {"title": "Engineer", "locationsText": text},
+            detail,
+            external_id="acme:wd5:Careers:/job/x",
+        )
+        assert job is not None
+        return [location.raw for location in job.locations]
 
-    assert job is not None
-    assert [location.raw for location in job.locations] == []
+    assert locations("3 Locations") == []
+    assert locations("2 Standorte") == []
+    assert locations("Springfield, Massachusetts") == ["Springfield, Massachusetts"]
+    detail = {"jobPostingInfo": {"title": "Engineer", "location": "AT, Vienna", "posted": True}}
+    assert locations("Vienna", detail) == ["AT, Vienna"]
 
 
 # --------------------------------------------------------------------------- lever

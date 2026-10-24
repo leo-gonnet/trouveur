@@ -85,8 +85,8 @@ They share only the database, so either can be down alone.
 - **Retention and the candidate window are different windows.** `retrieval_horizon_days` is how long
   we keep a posting; `retrieve.NEW_ARRIVALS_HOURS` how far back a scheduled run looks. A run the
   *user* caused passes the whole horizon.
-- **Age and arrival differ**: staleness reads `COALESCE(posted_at, first_seen_at)`, the candidate
-  window `first_seen_at`.
+- **Age and readiness differ**: staleness reads `COALESCE(posted_at, first_seen_at)`, the candidate
+  window `ready_at`, stamped once and never moved.
 - **A scheduled run matches only once its sweep is prepared**, waiting only for work that could run.
 
 ## Critical code patterns

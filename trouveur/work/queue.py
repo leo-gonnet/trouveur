@@ -92,6 +92,7 @@ async def complete(conn: AsyncConnection, item_ids: list[int]) -> None:
     if not item_ids:
         return
     await conn.execute(work_item.delete().where(work_item.c.id.in_(item_ids)))
+    await mark_ready(conn)
 
 
 async def fail(conn: AsyncConnection, item_ids: list[int], error: str) -> None:
@@ -120,6 +121,34 @@ async def fail(conn: AsyncConnection, item_ids: list[int], error: str) -> None:
             ),
         )
     )
+    await mark_ready(conn)
+
+
+# Dedup is left out: the match does not read it.
+_READY_AFTER = (WorkKind.DETAIL.value, WorkKind.DERIVE.value, WorkKind.EMBED.value)
+
+
+async def mark_ready(conn: AsyncConnection) -> int:
+    """A parked item does not hold a posting back, or it would stay hidden for good.
+
+    Every posting is checked, not only the caller's: the detail and derive halves commit in
+    parallel, so each can miss the other's last item. SKIP LOCKED so they never wait on each other.
+    """
+    live = sa.exists().where(
+        work_item.c.job_id == job.c.id,
+        work_item.c.kind.in_(_READY_AFTER),
+        work_item.c.attempts < MAX_ATTEMPTS,
+    )
+    ready = (
+        sa.select(job.c.id)
+        .where(job.c.ready_at.is_(None), ~live)
+        .with_for_update(skip_locked=True)
+        .scalar_subquery()
+    )
+    result = await conn.execute(
+        job.update().where(job.c.id.in_(ready)).values(ready_at=sa.func.now())
+    )
+    return result.rowcount or 0
 
 
 async def pause_source(
