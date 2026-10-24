@@ -24,11 +24,9 @@ from trouveur.models import Expansion
 _ELIGIBLE = f"""
     j.closed_at IS NULL
     AND {freshness.sql("j")}
-    -- When WE got it, which is not how old the advert is. A run after a sweep considers that
-    -- sweep's additions and nothing else: a posting gets one chance, on the day it arrives. A
-    -- posting we first saw today but that was posted three days ago is a new arrival and belongs
-    -- in today's run, which is why this reads first_seen_at and the clause above reads COALESCE.
-    AND j.first_seen_at > :seen_since
+    -- Not first_seen_at: a posting still waiting for its detail has no location yet, and would
+    -- leave the window before it had one.
+    AND j.ready_at > :seen_since
     AND {location.SQL}
 """
 

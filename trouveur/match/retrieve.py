@@ -28,13 +28,12 @@ PER_QUERY_DEPTH = 200
 # postings, not by this number.
 FUSED_LIMIT = 2000
 
-# How far back a run held after a sweep looks: that sweep's additions, and nothing else. Twenty-
-# five rather than twenty-four so a run starting a few minutes late cannot drop a sliver of the
-# day -- the hour of overlap is free, because anything already scored is skipped.
+# How far back a run held after a sweep looks: what became ready since the last run, and nothing
+# else. Twenty-five rather than twenty-four so a run starting a few minutes late cannot drop a
+# sliver of the day -- the hour of overlap is free, because anything already scored is skipped.
 #
-# A posting therefore gets exactly one chance, on the day it arrives. It used to get seven, which
-# meant a quiet week promoted postings that had been beaten by two thousand others for six days
-# running: nothing about them had changed except the competition.
+# One chance, not seven: a wider window lets a quiet week promote postings beaten by two thousand
+# others for six days running.
 NEW_ARRIVALS_HOURS = 25
 
 
@@ -66,9 +65,10 @@ async def retrieve_arms(
     the queries rather than replacing them -- substituting cost a needle 310 rank positions.
 
     Two windows, and they mean different things. `fresh_since` is how old the ADVERT may be, kept
-    for the whole retained horizon. `seen_since` is how recently WE got it, and is what makes a
-    daily run consider only the last sweep; a run triggered by a profile change passes the whole
-    horizon here instead, so the new profile's queries decide what gets re-judged.
+    for the whole retained horizon. `seen_since` is how recently it became READY (`job.ready_at`),
+    and is what makes a daily run consider only what is new since the last one; a run triggered
+    by a profile change passes the whole horizon here instead, so the new profile's queries
+    decide what gets re-judged.
 
     Neither has a default on purpose, so a retrieval number cannot quietly become a measurement of
     the windowing policy instead.

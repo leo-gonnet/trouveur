@@ -42,6 +42,8 @@ async def seed_corpus(gh_board, aa_listing, aa_detail):
                          kind=DocumentKind.DETAIL, payload=aa_detail)],
         )
         await persist(conn, "arbeitsagentur", [aa_id], requires_detail=True)
+        # drain_detail completes this item; left queued, the posting is never ready.
+        await conn.exec_driver_sql("DELETE FROM work_item WHERE kind = 'detail'")
     for drain in (workers.drain_derive, workers.drain_dedup, workers.drain_embed):
         async with connect() as conn:
             await drain(conn)

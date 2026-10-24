@@ -265,17 +265,12 @@ async def prepare_arrivals(settings: Settings) -> int:
     """Work the queues until every posting the match is about to consider has its facets and its
     vector, or MATCH_WAIT_LIMIT passes. Returns how many were still waiting.
 
-    Matching straight after the sweep saw none of what the sweep had just brought in: a posting
-    with no facets or no vector is invisible to retrieval, and by the next night it had left the
-    candidate window. Greenhouse, Ashby, Workday and Personio are swept first, and not one of
-    their postings had ever reached a nightly edition.
+    The match reads only ready postings, so this wait decides whether the sweep's postings reach
+    this edition or the next one.
 
-    Only work that could run now counts, so an item backing off after an error, a paused source or
-    a parked item cannot hold the run. A round that moves nothing ends the wait: nothing will move
-    on the next one either, and a detail half that raised every round held a run for its whole
-    limit. Only the QUEUE kinds count as movement -- discovery drains in the same tick and walks
-    the whole archive, so reading it as progress would hold every run for the full limit while the
-    stages the match is actually waiting on had nothing left to do.
+    Only work that could run now counts, so an item backing off, a paused source or a parked item
+    cannot hold the run. A round that moves nothing ends the wait. Only the QUEUE kinds count as
+    movement: discovery walks the whole archive, and would hold every run for the full limit.
     """
     since = datetime.now(UTC) - timedelta(hours=retrieve.NEW_ARRIVALS_HOURS)
     deadline = datetime.now(UTC) + MATCH_WAIT_LIMIT

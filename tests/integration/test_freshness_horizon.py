@@ -21,17 +21,18 @@ pytestmark = pytest.mark.asyncio
 
 NOW = datetime.now(UTC)
 HORIZON = timedelta(days=7)
-# These tests are about how old an ADVERT may be. The candidate window -- how recently we got it
-# -- is opened to the whole horizon so it cannot be what makes an assertion pass.
+# These tests are about how old an ADVERT may be. The candidate window -- how recently it became
+# ready -- is opened to the whole horizon so it cannot be what makes an assertion pass.
 SINCE = NOW - HORIZON
 
 
 async def _age_everything(days: int) -> None:
-    """Backdate the whole seeded corpus, both dates the horizon reads."""
+    """Backdate the whole seeded corpus: both dates the horizon reads, and the window's."""
     async with connect() as conn:
         await conn.exec_driver_sql(
             f"UPDATE job SET posted_at = now() - interval '{days} days', "
-            f"first_seen_at = now() - interval '{days} days'"
+            f"first_seen_at = now() - interval '{days} days', "
+            f"ready_at = now() - interval '{days} days'"
         )
 
 
@@ -153,23 +154,22 @@ async def test_a_daily_run_sees_only_what_the_last_sweep_added(
         assert await mq.lexical_candidates(conn, profile, "ingenieur", 10, SINCE, SINCE)
 
 
-async def test_a_new_arrival_is_when_we_got_it_not_when_it_was_posted(
+async def test_a_new_arrival_is_when_it_became_ready_not_when_it_was_posted_or_seen(
     clean_db, gh_board, aa_listing, aa_detail
 ):
-    """The candidate window reads first_seen_at, and the staleness bound reads COALESCE.
-
-    Boards routinely list a posting with a publication date days before we discover it. Folding
-    the candidate window into the same COALESCE would drop those on the one run that could ever
-    have offered them -- silently, since they would simply not be retrieved.
-    """
+    """Keyed on either other date, the one run that could offer a posting could come before its
+    detail, and match it with no location."""
     await seed_corpus(gh_board, aa_listing, aa_detail)
     _, profile = await seed_user(title="Process Engineer")
+    narrow = NOW - timedelta(hours=25)
 
     async with connect() as conn:
         await conn.exec_driver_sql(
-            "UPDATE job SET posted_at = now() - interval '3 days', first_seen_at = now()"
+            "UPDATE job SET posted_at = now() - interval '3 days', "
+            "first_seen_at = now() - interval '3 days', ready_at = NULL"
         )
-        found = await mq.lexical_candidates(
-            conn, profile, "ingenieur", 10, SINCE, NOW - timedelta(hours=25)
-        )
-    assert found, "a posting published three days ago but first seen today is a new arrival"
+        waiting = await mq.lexical_candidates(conn, profile, "ingenieur", 10, SINCE, narrow)
+        await conn.exec_driver_sql("UPDATE job SET ready_at = now()")
+        found = await mq.lexical_candidates(conn, profile, "ingenieur", 10, SINCE, narrow)
+    assert waiting == [], "a posting still waiting for its detail was matched"
+    assert found, "a posting seen three days ago but ready today is a new arrival"
