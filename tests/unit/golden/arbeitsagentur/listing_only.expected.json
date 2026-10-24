@@ -36,6 +36,7 @@
       {
         "city": "München, Oberbayern",
         "country": "DEUTSCHLAND",
+        "country_hint": null,
         "raw": "München, Oberbayern, BAYERN, DEUTSCHLAND",
         "region": "BAYERN"
       }

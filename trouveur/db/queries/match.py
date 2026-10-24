@@ -28,6 +28,7 @@ _ELIGIBLE = f"""
     -- leave the window before it had one.
     AND j.ready_at > :seen_since
     AND {location.SQL}
+    AND NOT {location.CLOSED_AT_ORIGIN}
 """
 
 # There is deliberately NO ANN index on job_embedding, so this is an exact scan over the vectors

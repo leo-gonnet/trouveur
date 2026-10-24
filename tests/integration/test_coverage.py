@@ -148,6 +148,27 @@ async def test_a_posting_with_no_vector_is_open_but_not_retrievable(
     assert after.retrievable_jobs == 0
 
 
+async def test_a_copy_whose_origin_closed_is_open_but_not_retrievable(
+    clean_db, gh_board, aa_listing, aa_detail
+):
+    """Retrieval leaves such a copy out; counted here as retrievable, it hid that gap."""
+    await seed_corpus(gh_board, aa_listing, aa_detail)
+    await _place_every_posting_in("DE", BERLIN)
+    await seed_user("berlin@example.test", countries=["DE"])
+    async with connect() as conn:
+        copy, twin = (
+            await conn.exec_driver_sql("SELECT id FROM job ORDER BY id LIMIT 2")
+        ).scalars().all()
+        await conn.exec_driver_sql(
+            "UPDATE job SET dedup_group = $1 WHERE id = ANY($2)", (b"\x01", [copy, twin])
+        )
+        await conn.exec_driver_sql("UPDATE job SET location_text = '' WHERE id = $1", (copy,))
+        await conn.exec_driver_sql("UPDATE job SET closed_at = now() WHERE id = $1", (twin,))
+
+    area = (await _report()).areas[0]
+    assert area.retrievable_jobs == area.open_jobs - 1
+
+
 async def test_a_dropped_board_is_counted_as_dropped_and_leaves_the_trial_queue(
     clean_db, gh_board, aa_listing, aa_detail
 ):

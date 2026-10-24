@@ -1,0 +1,47 @@
+{
+  "facets": {
+    "cities": [],
+    "countries": [],
+    "employment_type": "unknown",
+    "is_agency": null,
+    "language": null,
+    "place_ids": [],
+    "regions": [],
+    "salary_annualised": false,
+    "salary_max_eur_year": null,
+    "salary_min_eur_year": null,
+    "seniority": "unknown",
+    "skills": [],
+    "unplaced_countries": [
+      "GB"
+    ],
+    "work_mode": "onsite"
+  },
+  "job": {
+    "agency_hint": null,
+    "closes_at": null,
+    "company": "Beispieltracker",
+    "department_hint": null,
+    "description": "About the role Build & run the platform. Find more English Speaking Jobs in United Kingdom on Arbeitnow",
+    "employment_type_hint": null,
+    "external_id": "platform-engineer-123456",
+    "language_hint": null,
+    "locations": [
+      {
+        "city": null,
+        "country": null,
+        "country_hint": "United Kingdom",
+        "raw": "",
+        "region": null
+      }
+    ],
+    "posted_at": "2026-10-18T11:55:22Z",
+    "remote_hint": false,
+    "salary": null,
+    "source": "arbeitnow",
+    "title": "Platform Engineer",
+    "updated_at": null,
+    "url": "https://www.arbeitnow.co.uk/jobs/companies/beispieltracker/platform-engineer-123456"
+  },
+  "normalize_version": 2
+}

@@ -34,6 +34,7 @@
       {
         "city": null,
         "country": null,
+        "country_hint": null,
         "raw": "Wien, Austria",
         "region": null
       }

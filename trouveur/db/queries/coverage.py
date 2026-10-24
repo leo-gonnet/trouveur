@@ -36,7 +36,8 @@ from trouveur.db.queries import freshness, location
 _BY_SOURCE = f"""
 WITH area AS (
     SELECT j.id, j.source, j.dedup_group,
-           ({freshness.sql("j")} AND e.embedding_768 IS NOT NULL) AS retrievable,
+           ({freshness.sql("j")} AND e.embedding_768 IS NOT NULL
+            AND NOT {location.CLOSED_AT_ORIGIN}) AS retrievable,
            (t.origin = 'discovered') AS discovered
     FROM job j
     JOIN job_facet f ON f.job_id = j.id

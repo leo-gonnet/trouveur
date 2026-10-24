@@ -118,7 +118,9 @@ async def test_a_town_that_could_be_several_places_reaches_a_reader_in_any_of_th
     assert await _passes(near_geneva, "Geneva, Switzerland or the US")
 
 
-async def _kept_beside_a_berlin_twin(profile, copy_says: str, *, twin_open: bool = True) -> int:
+async def _kept_beside_a_berlin_twin(
+    profile, copy_says: str, *, twin_open: bool = True, copy_hinted: tuple[str, ...] = ()
+) -> int:
     """A copy with no location facets and its twin in Berlin, both open and in one group."""
     async with connect() as conn:
         rows = await conn.exec_driver_sql("SELECT id FROM job ORDER BY id LIMIT 2")
@@ -137,9 +139,9 @@ async def _kept_beside_a_berlin_twin(profile, copy_says: str, *, twin_open: bool
             "UPDATE job SET location_text = $1 WHERE id = $2", (copy_says, copy)
         )
         await conn.exec_driver_sql(
-            "UPDATE job_facet SET countries = $1, place_ids = $2, unplaced_countries = '{}', "
-            "work_mode = 'onsite' WHERE job_id = $3",
-            ([], [], copy),
+            "UPDATE job_facet SET countries = $1, place_ids = $2, unplaced_countries = $3, "
+            "work_mode = 'onsite' WHERE job_id = $4",
+            ([], [], list(copy_hinted), copy),
         )
         await conn.exec_driver_sql(
             "UPDATE job_facet SET countries = $1, place_ids = $2, unplaced_countries = '{}', "
@@ -170,6 +172,41 @@ async def test_a_copy_that_names_its_own_town_is_never_judged_by_a_twin(
     _, vienna = await seed_user(countries=[], city_ids=[VIENNA], radius_km=30)
     assert await _kept_beside_a_berlin_twin(vienna, "Sobernheim") == 1
     assert await _kept_beside_a_berlin_twin(vienna, "", twin_open=False) == 1
+
+
+async def test_a_twin_outranks_the_country_a_copy_was_only_hinted_at(
+    clean_db, gh_board, aa_listing, aa_detail
+):
+    """A blank copy filed under a market is judged by the board it was copied from, which says
+    where the role is; the market only says where it is usually."""
+    await seed_corpus(gh_board, aa_listing, aa_detail)
+    _, vienna = await seed_user(countries=[], city_ids=[VIENNA], radius_km=30)
+    _, germany = await seed_user("germany@example.test", countries=["DE"], city_ids=[])
+    assert await _kept_beside_a_berlin_twin(vienna, "", copy_hinted=("AT",)) == 0
+    assert await _kept_beside_a_berlin_twin(germany, "", copy_hinted=("GB",)) == 2
+    assert await _kept_beside_a_berlin_twin(vienna, "", twin_open=False, copy_hinted=("GB",)) == 0
+
+
+async def _retrieved_copy(profile, *, twin_open: bool) -> bool:
+    await _kept_beside_a_berlin_twin(profile, "", twin_open=twin_open)
+    async with connect() as conn:
+        await conn.exec_driver_sql("UPDATE job SET ready_at = now()")
+        copy, title = (
+            await conn.exec_driver_sql("SELECT id, title FROM job ORDER BY id LIMIT 1")
+        ).one()
+        found = await mq.lexical_candidates(conn, profile, title, 50, SINCE, SINCE)
+    return copy in found
+
+
+async def test_a_copy_whose_origin_closed_is_not_retrieved(
+    clean_db, gh_board, aa_listing, aa_detail
+):
+    """Aggregators keep listing for weeks a role its own board already closed, and with no
+    place of its own the copy reached readers as a posting of unknown location."""
+    await seed_corpus(gh_board, aa_listing, aa_detail)
+    _, germany = await seed_user("germany@example.test", countries=["DE"], city_ids=[])
+    assert await _retrieved_copy(germany, twin_open=True)
+    assert not await _retrieved_copy(germany, twin_open=False)
 
 
 async def test_a_reader_who_declined_fully_remote_roles_sees_none_whatever_country_they_list(

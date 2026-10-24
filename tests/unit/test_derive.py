@@ -257,8 +257,72 @@ def test_a_state_name_beside_a_country_is_read_as_the_town():
 
 def test_a_region_beside_a_location_we_cannot_read_is_not_evidence():
     facets = derive(
-        _job(title="Engineer", locations=[Location(raw="Europe"), Location(raw="North America")])
+        _job(title="Engineer", locations=[Location(raw="Mordor"), Location(raw="North America")])
     )
+    assert facets.unplaced_countries == []
+
+
+@pytest.mark.parametrize(
+    ("raw", "countries"),
+    [
+        ("Spain, Austria", ["ES", "AT"]),
+        ("Deutschland, Österreich, Schweiz und Italien", ["DE", "AT", "CH", "IT"]),
+        ("Germany, Ireland", ["DE", "IE"]),
+        ("Canada, Mexico, USA", ["CA", "MX", "US"]),
+    ],
+)
+def test_a_list_of_countries_keeps_every_country(raw, countries):
+    """"Spain, Austria" derived to Austria alone, read as the town of Spain: a posting open in
+    four countries reached readers in one."""
+    facets = derive(_job(title="Engineer", locations=[Location(raw=raw)]))
+    assert facets.countries == countries
+    assert facets.place_ids == []
+
+
+def test_a_town_before_two_country_names_is_still_a_town():
+    facets = derive(
+        _job(title="Engineer", locations=[Location(raw="Holland, Michigan, United States")])
+    )
+    assert facets.countries == ["US"]
+    assert facets.place_ids
+
+
+@pytest.mark.parametrize(
+    ("raw", "country", "outside"),
+    [
+        ("Europe", "AT", "US"),
+        ("EMEA", "AE", "US"),
+        ("European Union", "AT", "GB"),
+        ("England", "GB", "AT"),
+        ("Remote (EMEA)", "DE", "US"),
+    ],
+)
+def test_a_continent_or_nation_is_judged_by_its_countries(raw, country, outside):
+    facets = derive(_job(title="Engineer", locations=[Location(raw=raw)]))
+    assert country in facets.unplaced_countries
+    assert outside not in facets.unplaced_countries
+
+
+def test_a_nation_inside_a_longer_name_is_not_that_nation():
+    facets = derive(_job(title="Engineer", locations=[Location(raw="Sydney, New South Wales")]))
+    assert "GB" not in facets.countries + facets.unplaced_countries
+
+
+def test_a_hinted_country_judges_a_posting_that_names_no_place_without_stating_it():
+    """A hint is where a posting usually is, so it never becomes a stated country: the posting is
+    only judged by it."""
+    facets = derive(
+        _job(title="Engineer", locations=[Location(raw="", country_hint="United Kingdom")])
+    )
+    assert facets.countries == []
+    assert facets.unplaced_countries == ["GB"]
+
+
+def test_a_hint_never_overrides_a_place_the_posting_names():
+    facets = derive(
+        _job(title="Engineer", locations=[Location(raw="Vienna", country_hint="Germany")])
+    )
+    assert facets.countries == ["AT"]
     assert facets.unplaced_countries == []
 
 

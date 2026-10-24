@@ -37,12 +37,14 @@
       {
         "city": null,
         "country": null,
+        "country_hint": null,
         "raw": "AT, Vienna",
         "region": null
       },
       {
         "city": null,
         "country": null,
+        "country_hint": null,
         "raw": "DE, Munich",
         "region": null
       }

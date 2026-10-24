@@ -170,6 +170,26 @@ _AMERICAS = (
     "KN", "KY", "LC", "MF", "MQ", "MS", "MX", "NI", "PA", "PE", "PM", "PR", "PY", "SR", "SV", "SX",
     "TC", "TT", "UM", "US", "UY", "VC", "VE", "VG", "VI",
 )
+_EUROPE = (
+    "AD", "AL", "AT", "AX", "BA", "BE", "BG", "BY", "CH", "CY", "CZ", "DE", "DK", "EE", "ES", "FI",
+    "FO", "FR", "GB", "GG", "GI", "GR", "HR", "HU", "IE", "IM", "IS", "IT", "JE", "LI", "LT", "LU",
+    "LV", "MC", "MD", "ME", "MK", "MT", "NL", "NO", "PL", "PT", "RO", "RS", "RU", "SE", "SI", "SJ",
+    "SK", "SM", "UA", "VA", "XK",
+)
+_EUROPEAN_UNION = (
+    "AT", "BE", "BG", "CY", "CZ", "DE", "DK", "EE", "ES", "FI", "FR", "GR", "HR", "HU", "IE", "IT",
+    "LT", "LU", "LV", "MT", "NL", "PL", "PT", "RO", "SE", "SI", "SK",
+)
+_MIDDLE_EAST = (
+    "AE", "BH", "CY", "EG", "IL", "IQ", "IR", "JO", "KW", "LB", "OM", "PS", "QA", "SA", "SY", "TR",
+    "YE",
+)
+_AFRICA = (
+    "AO", "BF", "BI", "BJ", "BW", "CD", "CF", "CG", "CI", "CM", "CV", "DJ", "DZ", "EG", "EH", "ER",
+    "ET", "GA", "GH", "GM", "GN", "GQ", "GW", "KE", "KM", "LR", "LS", "LY", "MA", "MG", "ML", "MR",
+    "MU", "MW", "MZ", "NA", "NE", "NG", "RE", "RW", "SC", "SD", "SH", "SL", "SN", "SO", "SS", "ST",
+    "SZ", "TD", "TG", "TN", "TZ", "UG", "YT", "ZA", "ZM", "ZW",
+)
 _UMLAUTS = str.maketrans({"ä": "ae", "ö": "oe", "ü": "ue"})
 # Boards write a state folded, with the umlaut spelled out (see COUNTRIES), or hyphen as a space.
 _GERMAN_STATES = [
@@ -181,6 +201,13 @@ _GERMAN_STATES = [
 REGION_COUNTRIES: dict[str, tuple[str, ...]] = {
     "amer": _AMERICAS, "americas": _AMERICAS, "north america": _AMERICAS,
     "latin america": _AMERICAS, "south america": _AMERICAS, "central america": _AMERICAS,
+    "europe": _EUROPE, "european union": _EUROPEAN_UNION, "middle east": _MIDDLE_EAST,
+    "emea": tuple(sorted(set(_EUROPE + _MIDDLE_EAST + _AFRICA))),
+    "dach": ("DE", "AT", "CH"), "benelux": ("BE", "NL", "LU"),
+    "nordics": ("DK", "FI", "IS", "NO", "SE"),
+    # As regions, never as COUNTRIES: read inside free text, "Wales" made New South Wales British.
+    "england": ("GB",), "scotland": ("GB",), "wales": ("GB",), "northern ireland": ("GB",),
+    "new england": ("US",), "new south wales": ("AU",),
     "deutschlandweit": ("DE",),
     # The English and short names, which REGIONS does not hold.
     "bavaria": ("DE",), "hesse": ("DE",), "lower saxony": ("DE",), "nrw": ("DE",),

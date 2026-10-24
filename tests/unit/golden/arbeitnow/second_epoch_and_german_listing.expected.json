@@ -34,6 +34,7 @@
       {
         "city": null,
         "country": null,
+        "country_hint": null,
         "raw": "Wien",
         "region": null
       }
@@ -46,5 +47,5 @@
     "updated_at": null,
     "url": "https://www.arbeitnow.com/jobs/companies/beispiel/werkstudent"
   },
-  "normalize_version": 1
+  "normalize_version": 2
 }

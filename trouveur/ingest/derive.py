@@ -114,10 +114,21 @@ def _places(
 
     if not unread:
         unplaced.extend(regional)
+    if not (countries or place_ids or unplaced):
+        unplaced.extend(_hinted(locations))
     return (
         _unique(countries), _unique(regions), _unique(cities),
         _unique(place_ids), _unique(unplaced), says_remote,
     )
+
+
+def _hinted(locations: list[Location]) -> list[str]:
+    codes = [
+        vocab.COUNTRIES.get(fold(location.country_hint))
+        for location in locations
+        if location.country_hint
+    ]
+    return [code for code in codes if code]
 
 
 def _only_a_region(city: str, place: Place) -> bool:
@@ -193,6 +204,9 @@ def _mentioned(raw: str) -> tuple[list[str], list[Place], list[str]]:
     weak: list[tuple[Place, ...]] = []
     for part in _parts(raw):
         if fold(part) in _NOT_A_PLACE:
+            continue
+        if fold(part) in vocab.COUNTRIES and not _is_code(part):
+            stated.append(vocab.COUNTRIES[fold(part)])
             continue
         found = () if _is_code(part) else places.named(part)
         if found:
@@ -296,6 +310,8 @@ def _parse_free_text(raw: str) -> tuple[str | None, str | None, bool]:
 
     remote = any(fold(part) in vocab.REMOTE_TERMS for part in parts)
     named = [part for part in parts if fold(part) not in vocab.REMOTE_TERMS]
+    if _lists_countries(named):
+        return None, None, remote
 
     country = None
     for index in range(len(named) - 1, -1, -1):
@@ -311,6 +327,18 @@ def _parse_free_text(raw: str) -> tuple[str | None, str | None, bool]:
         if country is None and named and places.exists(named[0], "US"):
             country = "US"
     return country, (_city(named[0]) if named else None), remote
+
+
+def _lists_countries(named: list[str]) -> bool:
+    """"Spain, Austria" is two countries, not the town of Spain in Austria. "Holland, Michigan,
+    United States" and "Taipei, Taiwan, China" are one town each."""
+    keys = [fold(part) for part in named]
+    return (
+        bool(keys)
+        and keys[0] in vocab.COUNTRIES
+        and sum(key in vocab.COUNTRIES for key in keys) > 1
+        and not any(key in vocab.US_STATES for key in keys)
+    )
 
 
 def _location_text(locations: list[Location]) -> str:
