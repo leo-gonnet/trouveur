@@ -88,15 +88,23 @@ async def persist(
     result.upserted = len(job_ids)
     await q.ensure_facet_rows(conn, list(job_ids.values()))
 
+    renormalized: list[int] = []
     for external_id, job_id in job_ids.items():
         previous = stored.get(external_id)
         if previous is None or previous[1] != incoming.get(external_id):
             result.changed.append(job_id)
         else:
             result.unchanged += 1
+            # The hash covers what a reranker reads, not everything derivation does: a normalizer
+            # that fills a structured field leaves it alone, and the facets would keep the old read.
+            if previous[2] < normalize_version:
+                renormalized.append(job_id)
 
+    if result.changed or renormalized:
+        await enqueue(
+            conn, WorkKind.DERIVE, result.changed + renormalized, str(versions.DERIVE_VERSION)
+        )
     if result.changed:
-        await enqueue(conn, WorkKind.DERIVE, result.changed, str(versions.DERIVE_VERSION))
         await enqueue(conn, WorkKind.DEDUP, result.changed, str(versions.DEDUP_VERSION))
     if result.needs_detail:
         detail_ids = [job_ids[eid] for eid in result.needs_detail if eid in job_ids]

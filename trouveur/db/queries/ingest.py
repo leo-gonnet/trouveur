@@ -76,13 +76,16 @@ async def latest_documents(
 
 async def stored_content_hashes(
     conn: AsyncConnection, source: str, external_ids: Sequence[str]
-) -> dict[str, tuple[int, bytes]]:
+) -> dict[str, tuple[int, bytes, int]]:
     if not external_ids:
         return {}
-    stmt = sa.select(job.c.id, job.c.external_id, job.c.content_hash).where(
-        job.c.source == source, job.c.external_id.in_(list(external_ids))
-    )
-    return {row.external_id: (row.id, row.content_hash) for row in await conn.execute(stmt)}
+    stmt = sa.select(
+        job.c.id, job.c.external_id, job.c.content_hash, job.c.normalize_version
+    ).where(job.c.source == source, job.c.external_id.in_(list(external_ids)))
+    return {
+        row.external_id: (row.id, row.content_hash, row.normalize_version)
+        for row in await conn.execute(stmt)
+    }
 
 
 def job_row(

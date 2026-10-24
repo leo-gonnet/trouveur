@@ -73,6 +73,26 @@ async def test_detail_arrival_changes_the_hash_and_a_replay_changes_nothing(
     assert replay.unchanged == 1
 
 
+async def test_a_newer_normalizer_re_derives_what_it_did_not_re_hash(
+    clean_db, gh_board, aa_listing, aa_detail
+):
+    """A normalizer that fills a field the hash does not cover -- a country hint -- changed the
+    stored row and left its facets reading the old one, with no work queued to correct them."""
+    from trouveur.db.engine import connect
+    from trouveur.ingest.persist import persist
+
+    aa_id = await seed_corpus(gh_board, aa_listing, aa_detail)
+    async with connect() as conn:
+        await conn.exec_driver_sql("DELETE FROM work_item")
+        await conn.exec_driver_sql(
+            "UPDATE job SET normalize_version = 0 WHERE external_id = $1", (aa_id,)
+        )
+        replay = await persist(conn, "arbeitsagentur", [aa_id], requires_detail=True)
+        kinds = (await conn.exec_driver_sql("SELECT kind::text FROM work_item")).scalars().all()
+    assert replay.changed == []
+    assert kinds == ["derive"]
+
+
 async def test_closing_a_posting_removes_its_embedding(
     clean_db, gh_board, aa_listing, aa_detail
 ):
