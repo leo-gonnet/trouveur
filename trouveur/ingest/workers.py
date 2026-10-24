@@ -119,7 +119,7 @@ async def drain_embed(conn: AsyncConnection, limit: int = 256) -> int:
         embedding_text(
             row.title,
             row.company,
-            [item.get("raw", "") for item in (row.locations or [])],
+            [item["raw"] for item in (row.locations or []) if item.get("raw")],
             row.description,
         )
         for row in rows

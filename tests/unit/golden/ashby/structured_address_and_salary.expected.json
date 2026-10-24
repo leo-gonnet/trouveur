@@ -37,12 +37,14 @@
       {
         "city": "Vienna",
         "country": "Austria",
+        "country_hint": null,
         "raw": "Vienna, Austria",
         "region": "Wien"
       },
       {
         "city": null,
         "country": null,
+        "country_hint": null,
         "raw": "Remote (EU)",
         "region": null
       }

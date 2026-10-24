@@ -34,6 +34,7 @@
       {
         "city": "Wien",
         "country": "OESTERREICH",
+        "country_hint": null,
         "raw": "Wien, WIEN, OESTERREICH",
         "region": "WIEN"
       }

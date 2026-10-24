@@ -42,6 +42,9 @@ class Location(BaseModel):
     region: str | None = None
     # Verbatim as the source wrote it ("DEUTSCHLAND", "Italy"). Mapping to ISO is derivation.
     country: str | None = None
+    # A country the source implies without stating it, such as the market an aggregator files a
+    # posting under: usually where the job is, not always. Verbatim, like `country`.
+    country_hint: str | None = None
 
 
 class SalaryQuote(BaseModel):

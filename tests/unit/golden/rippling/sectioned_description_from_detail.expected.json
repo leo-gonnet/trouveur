@@ -36,12 +36,14 @@
       {
         "city": null,
         "country": null,
+        "country_hint": null,
         "raw": "Vienna, Austria",
         "region": null
       },
       {
         "city": null,
         "country": null,
+        "country_hint": null,
         "raw": "Graz, Austria",
         "region": null
       }

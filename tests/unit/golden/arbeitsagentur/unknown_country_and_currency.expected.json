@@ -30,6 +30,7 @@
       {
         "city": "Atlantis",
         "country": "ATLANTIS",
+        "country_hint": null,
         "raw": "Atlantis, ATLANTIS",
         "region": null
       }

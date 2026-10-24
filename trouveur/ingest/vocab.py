@@ -170,6 +170,26 @@ _AMERICAS = (
     "KN", "KY", "LC", "MF", "MQ", "MS", "MX", "NI", "PA", "PE", "PM", "PR", "PY", "SR", "SV", "SX",
     "TC", "TT", "UM", "US", "UY", "VC", "VE", "VG", "VI",
 )
+_EUROPE = (
+    "AD", "AL", "AT", "AX", "BA", "BE", "BG", "BY", "CH", "CY", "CZ", "DE", "DK", "EE", "ES", "FI",
+    "FO", "FR", "GB", "GG", "GI", "GR", "HR", "HU", "IE", "IM", "IS", "IT", "JE", "LI", "LT", "LU",
+    "LV", "MC", "MD", "ME", "MK", "MT", "NL", "NO", "PL", "PT", "RO", "RS", "RU", "SE", "SI", "SJ",
+    "SK", "SM", "UA", "VA", "XK",
+)
+_EUROPEAN_UNION = (
+    "AT", "BE", "BG", "CY", "CZ", "DE", "DK", "EE", "ES", "FI", "FR", "GR", "HR", "HU", "IE", "IT",
+    "LT", "LU", "LV", "MT", "NL", "PL", "PT", "RO", "SE", "SI", "SK",
+)
+_MIDDLE_EAST = (
+    "AE", "BH", "CY", "EG", "IL", "IQ", "IR", "JO", "KW", "LB", "OM", "PS", "QA", "SA", "SY", "TR",
+    "YE",
+)
+_AFRICA = (
+    "AO", "BF", "BI", "BJ", "BW", "CD", "CF", "CG", "CI", "CM", "CV", "DJ", "DZ", "EG", "EH", "ER",
+    "ET", "GA", "GH", "GM", "GN", "GQ", "GW", "KE", "KM", "LR", "LS", "LY", "MA", "MG", "ML", "MR",
+    "MU", "MW", "MZ", "NA", "NE", "NG", "RE", "RW", "SC", "SD", "SH", "SL", "SN", "SO", "SS", "ST",
+    "SZ", "TD", "TG", "TN", "TZ", "UG", "YT", "ZA", "ZM", "ZW",
+)
 _UMLAUTS = str.maketrans({"ä": "ae", "ö": "oe", "ü": "ue"})
 # Boards write a state folded, with the umlaut spelled out (see COUNTRIES), or hyphen as a space.
 _GERMAN_STATES = [
@@ -181,6 +201,13 @@ _GERMAN_STATES = [
 REGION_COUNTRIES: dict[str, tuple[str, ...]] = {
     "amer": _AMERICAS, "americas": _AMERICAS, "north america": _AMERICAS,
     "latin america": _AMERICAS, "south america": _AMERICAS, "central america": _AMERICAS,
+    "europe": _EUROPE, "european union": _EUROPEAN_UNION, "middle east": _MIDDLE_EAST,
+    "emea": tuple(sorted(set(_EUROPE + _MIDDLE_EAST + _AFRICA))),
+    "dach": ("DE", "AT", "CH"), "benelux": ("BE", "NL", "LU"),
+    "nordics": ("DK", "FI", "IS", "NO", "SE"),
+    # As regions, never as COUNTRIES: read inside free text, "Wales" made New South Wales British.
+    "england": ("GB",), "scotland": ("GB",), "wales": ("GB",), "northern ireland": ("GB",),
+    "new england": ("US",), "new south wales": ("AU",),
     "deutschlandweit": ("DE",),
     # The English and short names, which REGIONS does not hold.
     "bavaria": ("DE",), "hesse": ("DE",), "lower saxony": ("DE",), "nrw": ("DE",),
@@ -188,6 +215,27 @@ REGION_COUNTRIES: dict[str, tuple[str, ...]] = {
     "rhineland-palatinate": ("DE",), "saxony": ("DE",), "saxony-anhalt": ("DE",),
     "thuringia": ("DE",), "mecklenburg-western pomerania": ("DE",),
     **{spelling: ("DE",) for spelling in _GERMAN_STATES},
+}
+
+NEIGHBOURS: dict[str, tuple[str, ...]] = {
+    "AD": ("ES", "FR"), "AL": ("GR", "ME", "MK", "XK"),
+    "AT": ("CH", "CZ", "DE", "HU", "IT", "LI", "SI", "SK"), "BA": ("HR", "ME", "RS"),
+    "BE": ("DE", "FR", "LU", "NL"), "BG": ("GR", "MK", "RO", "RS", "TR"),
+    "BY": ("LT", "LV", "PL", "RU", "UA"), "CH": ("AT", "DE", "FR", "IT", "LI"),
+    "CZ": ("AT", "DE", "PL", "SK"), "DE": ("AT", "BE", "CH", "CZ", "DK", "FR", "LU", "NL", "PL"),
+    "DK": ("DE",), "EE": ("LV", "RU"), "ES": ("AD", "FR", "GI", "PT"), "FI": ("NO", "RU", "SE"),
+    "FR": ("AD", "BE", "CH", "DE", "ES", "IT", "LU", "MC"), "GB": ("IE",),
+    "GR": ("AL", "BG", "MK", "TR"), "HR": ("BA", "HU", "ME", "RS", "SI"),
+    "HU": ("AT", "HR", "RO", "RS", "SI", "SK", "UA"), "IE": ("GB",),
+    "IT": ("AT", "CH", "FR", "SI", "SM", "VA"), "LI": ("AT", "CH"),
+    "LT": ("BY", "LV", "PL", "RU"), "LU": ("BE", "DE", "FR"), "LV": ("BY", "EE", "LT", "RU"),
+    "MC": ("FR",), "MD": ("RO", "UA"), "ME": ("AL", "BA", "HR", "RS", "XK"),
+    "MK": ("AL", "BG", "GR", "RS", "XK"), "NL": ("BE", "DE"), "NO": ("FI", "RU", "SE"),
+    "PL": ("BY", "CZ", "DE", "LT", "RU", "SK", "UA"), "PT": ("ES",),
+    "RO": ("BG", "HU", "MD", "RS", "UA"), "RS": ("BA", "BG", "HR", "HU", "ME", "MK", "RO", "XK"),
+    "SE": ("FI", "NO"), "SI": ("AT", "HR", "HU", "IT"), "SK": ("AT", "CZ", "HU", "PL", "UA"),
+    "SM": ("IT",), "UA": ("BY", "HU", "MD", "PL", "RO", "RU", "SK"), "VA": ("IT",),
+    "XK": ("AL", "ME", "MK", "RS"),
 }
 
 REMOTE_TERMS = (

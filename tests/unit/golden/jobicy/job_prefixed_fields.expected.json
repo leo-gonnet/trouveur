@@ -28,6 +28,7 @@
       {
         "city": null,
         "country": null,
+        "country_hint": null,
         "raw": "Anywhere",
         "region": null
       }
