@@ -1,9 +1,13 @@
 name: ci
 
+# Pull requests only: with a push trigger as well, every push to a branch with an open PR ran the
+# suite twice. Main is tested by deploy.yml.
 on:
   pull_request:
-  push:
-    branches-ignore: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
