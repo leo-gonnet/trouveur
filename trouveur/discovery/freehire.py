@@ -20,13 +20,12 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from trouveur import coverage
 from trouveur.config import Settings, get_settings
 from trouveur.db.engine import connect
-from trouveur.db.queries import coverage as coverage_q
 from trouveur.db.queries import discovery as discovery_q
 from trouveur.db.queries import ingest as ingest_q
 from trouveur.discovery.work import record_leads
-from trouveur.ingest import places
 from trouveur.models import Lead, LeadOrigin
 from trouveur.sources.errors import FetchError, SourceBlocked
 from trouveur.sources.feed import require_list
@@ -162,16 +161,6 @@ async def harvest(
     return found
 
 
-async def reader_countries(conn) -> set[str]:
-    """Every country an active reader's area reaches, towns' countries included."""
-    countries: set[str] = set()
-    for area in await coverage_q.areas(conn):
-        countries |= {code.upper() for code in area.countries or ()}
-        if area.city_ids:
-            countries |= set(places.area(list(area.city_ids), int(area.radius_km))[1])
-    return countries
-
-
 async def run(settings: Settings | None = None, *, force: bool = False) -> Harvest | None:
     """One pass, when a week has gone by since the last one. Returns None when not due."""
     settings = settings or get_settings()
@@ -180,7 +169,7 @@ async def run(settings: Settings | None = None, *, force: bool = False) -> Harve
         last = await ingest_q.last_sweep_started(conn, SOURCE)
         if not force and last is not None and now - last < EVERY:
             return None
-        countries = await reader_countries(conn)
+        countries = await coverage.reader_countries(conn)
         known = await discovery_q.payload_values(conn, origin=SOURCE, key="board")
         sweep_id, _ = await ingest_q.start_sweep(conn, SOURCE)
 

@@ -314,6 +314,16 @@ async def areas(conn: AsyncConnection) -> list[Area]:
     )
 
 
+async def reader_countries(conn: AsyncConnection) -> set[str]:
+    """Every country an active reader's area reaches, towns' countries included."""
+    countries: set[str] = set()
+    for area in await coverage_q.areas(conn):
+        countries |= {code.upper() for code in area.countries or ()}
+        if area.city_ids:
+            countries |= set(places.area(list(area.city_ids), int(area.radius_km))[1])
+    return countries
+
+
 async def report(conn: AsyncConnection, horizon_days: int) -> Report:
     """The whole report: one filtered pass over the corpus per area, plus the crawl set once.
 
