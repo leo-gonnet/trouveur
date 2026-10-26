@@ -323,3 +323,54 @@ async def payload_values(conn: AsyncConnection, *, origin: str, key: str) -> set
         {"origin": origin, "key": key},
     )
     return {row.value for row in rows if row.value}
+
+
+# Whether we already hold a job another site showed us, by company and title, open copies only.
+# The fold is applied to both sides here and nowhere else, so the two spellings cannot drift
+# apart. It drops a gender tag (`(m/w/d)`, `w/m/d`) from a title and a legal form from a company,
+# which is where one employer's job differs between its board and an aggregator; everything else
+# must match exactly.
+#
+# `[\W_]` and not `[[:alnum:]]`: `sa.text` would read `:alnum` as a bind parameter.
+_GENDER_TAG = r"\(?\m[mwfdix]\s*/\s*[mwfdix](\s*/\s*[mwfdix])?\M\)?"
+_LEGAL_FORM = r"\m(gmbh|mbh|ag|se|kg|kgaa|co|inc|ltd|llc|plc|sa|sas|srl|spa|bv|nv|ab|as|oy)\M"
+
+
+def _fold(expression: str) -> str:
+    return rf"btrim(regexp_replace({expression}, '[\W_]+', ' ', 'g'))"
+
+
+def _title(column: str) -> str:
+    return _fold(f"regexp_replace(lower({column}), '{_GENDER_TAG}', ' ', 'g')")
+
+
+def _company(column: str) -> str:
+    stripped = f"regexp_replace({_fold(f'lower({column})')}, '{_LEGAL_FORM}', ' ', 'g')"
+    return rf"btrim(regexp_replace({stripped}, '\s+', ' ', 'g'))"
+
+
+_HELD_BY_NAME = f"""
+WITH wanted AS (
+    SELECT w.key, {_company("w.company")} AS company, {_title("w.title")} AS title
+    FROM unnest(CAST(:keys AS bigint[]), CAST(:companies AS text[]), CAST(:titles AS text[]))
+         AS w(key, company, title)
+)
+SELECT DISTINCT ON (w.key) w.key, j.id
+FROM wanted w
+JOIN job j ON {_company("j.company")} = w.company AND {_title("j.title")} = w.title
+WHERE j.closed_at IS NULL AND w.company <> '' AND w.title <> ''
+ORDER BY w.key, j.id
+"""
+
+
+async def held_jobs(
+    conn: AsyncConnection, wanted: Sequence[tuple[int, str, str]]
+) -> dict[int, int]:
+    """Our open copy of each wanted `(key, company, title)`, by the caller's key."""
+    if not wanted:
+        return {}
+    keys, companies, titles = (list(column) for column in zip(*wanted, strict=True))
+    rows = await conn.execute(
+        sa.text(_HELD_BY_NAME), {"keys": keys, "companies": companies, "titles": titles}
+    )
+    return {row.key: row.id for row in rows}

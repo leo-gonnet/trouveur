@@ -22,6 +22,9 @@ from trouveur.db.queries import discovery as discovery_q
 from trouveur.db.queries import freshness
 from trouveur.ingest import places
 
+# One day's searches give a few dozen jobs per site, too few to compare; a week is enough.
+RECALL_DAYS = 7
+
 
 @dataclass(frozen=True)
 class Area:
@@ -187,6 +190,24 @@ class ReportCoverage:
 
 
 @dataclass(frozen=True)
+class RecallCoverage:
+    """How much of what one aggregator showed us this window we already held when it did.
+
+    Recall against the reader's alternative, searching that site with their own queries, judged
+    at first sight so the board a lead brings in cannot make its own job read as held.
+    """
+
+    origin: str
+    days: int
+    seen: int
+    held: int
+
+    @property
+    def held_share(self) -> float | None:
+        return self.held / self.seen if self.seen else None
+
+
+@dataclass(frozen=True)
 class BlockedSource:
     """A source whose last sweep the site refused. Its numbers above are not "found nothing"."""
 
@@ -206,6 +227,8 @@ class Report:
     # None until a reader has reported a link, for the same reason.
     reports: ReportCoverage | None = None
     blocked: list[BlockedSource] = field(default_factory=list)
+    # Empty until an aggregator pass has judged a lead.
+    recall: list[RecallCoverage] = field(default_factory=list)
 
     def as_dict(self) -> dict:
         """The shape `trouveur coverage --json` prints. Plain types only, for an agent to read."""
@@ -235,6 +258,10 @@ class Report:
             "blocked": [
                 {"source": row.source, "since": row.since.isoformat(), "error": row.error}
                 for row in self.blocked
+            ],
+            "recall": [
+                {**asdict(row), "held_share": row.held_share}
+                for row in self.recall
             ],
         }
 
@@ -299,6 +326,15 @@ async def report(conn: AsyncConnection, horizon_days: int) -> Report:
         blocked=[
             BlockedSource(source=row.source, since=row.started_at, error=row.error)
             for row in await coverage_q.blocked_sources(conn)
+        ],
+        recall=[
+            RecallCoverage(
+                origin=row.origin,
+                days=RECALL_DAYS,
+                seen=int(row.seen),
+                held=int(row.held),
+            )
+            for row in await coverage_q.recall(conn, RECALL_DAYS)
         ],
         generated_at=datetime.now(UTC),
         horizon_days=horizon_days,

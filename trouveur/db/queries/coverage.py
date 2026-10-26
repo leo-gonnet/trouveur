@@ -162,6 +162,23 @@ async def report_outcomes(conn: AsyncConnection) -> sa.Row:
     return (await conn.execute(sa.text(_REPORT_OUTCOMES))).one()
 
 
+# Per aggregator, the jobs it showed us this window and how many we already held when it did:
+# recall against what a reader would have found by searching that site. Only judged leads count.
+_RECALL = """
+SELECT origin::text AS origin,
+       count(*) AS seen,
+       count(*) FILTER (WHERE held) AS held
+FROM discovery_lead
+WHERE held IS NOT NULL AND first_seen_at >= now() - make_interval(days => :days)
+GROUP BY origin
+ORDER BY origin
+"""
+
+
+async def recall(conn: AsyncConnection, days: int) -> list[sa.Row]:
+    return list(await conn.execute(sa.text(_RECALL), {"days": days}))
+
+
 # Sources whose latest finished sweep the provider refused.
 _BLOCKED = """
 SELECT source, started_at, error

@@ -188,3 +188,30 @@
   {% endif %}
 </section>
 {% endif %}
+
+{% if coverage.recall %}
+<section class="section">
+  <div class="section-head">
+    <h2>Recall against other sites</h2>
+    <span class="hint">last {{ coverage.recall[0].days }} days</span>
+  </div>
+  <p class="hint">
+    Jobs another site showed for the readers' own searches in their area, and how many we already
+    held at that moment. It is recall against what a reader would find by searching that site,
+    not against the whole market. <em>Only on that site</em> is a job applied to on the site
+    itself: no board will ever bring it, so a high share there is the case for reading the site
+    in full.
+  </p>
+  <table>
+    <tr><th>Site</th><th class="num">Jobs seen</th><th class="num">Already held</th></tr>
+    {% for row in coverage.recall %}
+    <tr>
+      <td>{{ row.origin }}</td>
+      <td class="num">{{ '{:,}'.format(row.seen) }}</td>
+      <td class="num">{{ '{:,}'.format(row.held) }}{% if row.held_share is not none %}
+        ({{ '{:.0%}'.format(row.held_share) }}){% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</section>
+{% endif %}

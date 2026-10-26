@@ -21,6 +21,7 @@ class LeadOrigin(StrEnum):
     USER_REPORT = "user_report"
     LIST = "list"
     FREEHIRE = "freehire"
+    LINKEDIN = "linkedin"
 
 
 class LeadResult(StrEnum):
@@ -62,6 +63,11 @@ class Lead(BaseModel):
     location_text: str | None = None
     # What the source said beyond the link, small fields only, for an origin we do not archive.
     payload: dict | None = None
+    # For an aggregator lead: our open copy of the job when we first saw it there, never judged
+    # again, so a job we collected only later still counts as missed that day. `held` False is a
+    # miss; None means it could not be judged.
+    held: bool | None = None
+    held_job_id: int | None = None
 
 
 class ReportOutcome(StrEnum):
