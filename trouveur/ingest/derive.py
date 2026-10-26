@@ -63,6 +63,11 @@ def derive(item: CanonicalJob) -> JobFacets:
     countries, regions, cities, place_ids, unplaced, location_says_remote = _places(
         item.locations
     )
+    if not (countries or place_ids):
+        # Workday tenants post "Sales Analyst - Austria" with a blank location field.
+        named = _countries_in(item.title)
+        if named:
+            countries, unplaced = named, named
 
     return JobFacets(
         countries=countries,
@@ -112,7 +117,8 @@ def _places(
                 regional.extend(found_regional)
                 unread = unread or not found_regional
 
-    if not unread:
+    # "Frankfurt | DACH Team" is in Frankfurt: a region beside a town names a team or a market.
+    if not unread and not place_ids:
         unplaced.extend(regional)
     if not (countries or place_ids or unplaced):
         unplaced.extend(_hinted(locations))
@@ -120,6 +126,19 @@ def _places(
         _unique(countries), _unique(regions), _unique(cities),
         _unique(place_ids), _unique(unplaced), says_remote,
     )
+
+
+def _countries_in(title: str) -> list[str]:
+    """Countries a title spells out in full. Codes are left out: "US" and "IT" are teams."""
+    words = [match.group() for match in _WORD.finditer(title)]
+    found: list[str] = []
+    for start in range(len(words)):
+        for size in range(min(_LONGEST_NAME, len(words) - start), 0, -1):
+            key = fold(" ".join(words[start : start + size]))
+            if len(key) > 3 and key in vocab.COUNTRIES:
+                found.append(vocab.COUNTRIES[key])
+                break
+    return _unique(found)
 
 
 def _hinted(locations: list[Location]) -> list[str]:
@@ -151,8 +170,9 @@ def _each_named(location: Location) -> list[Location]:
 
 def _place(location: Location) -> tuple[list[str], str | None, list[Place], list[str], bool]:
     """The countries, town, places and unplaced countries one location names."""
-    country = vocab.COUNTRIES.get(fold(location.country)) if location.country else None
+    country = vocab.STATED_COUNTRIES.get(fold(location.country)) if location.country else None
     city = _city(location.city) if location.city else None
+    hint = vocab.COUNTRIES.get(fold(location.country_hint)) if location.country_hint else None
     remote = False
 
     # Only parse free text where the source gave no structure.
@@ -168,6 +188,11 @@ def _place(location: Location) -> tuple[list[str], str | None, list[Place], list
     place = None
     if city and country:
         place = places.resolve(city, country)
+    elif city and hint and places.exists(city, hint):
+        # A market is not a location -- "Vienna" is filed under Germany -- but it does tell
+        # namesakes apart: a "Baden" filed under Switzerland is not Baden bei Wien.
+        country = hint
+        place = places.resolve(city, hint)
     elif city and _names_only_a_town(location):
         place = places.resolve_anywhere(city)
         # A lone region name resolves to the hamlet sharing it: "Sachsen" to Sachsen bei Ansbach,
@@ -212,6 +237,9 @@ def _mentioned(raw: str) -> tuple[list[str], list[Place], list[str]]:
         if found:
             towns.append((part, found))
             continue
+        # "Baden-Württemberg" is not the towns Baden and Württemberg, one of them near Vienna.
+        if fold(part) in vocab.REGION_COUNTRIES:
+            continue
         for text in _names_in(part):
             key = fold(text)
             found = places.named(text)
@@ -220,6 +248,8 @@ def _mentioned(raw: str) -> tuple[list[str], list[Place], list[str]]:
             # "USA" and "AT" are also spellings of towns somewhere; a capital code is the country.
             elif key in vocab.COUNTRIES and (_is_code(text) or not found):
                 stated.append(vocab.COUNTRIES[key])
+            elif _is_code(text) and text in vocab.ISO3_COUNTRIES:
+                stated.append(vocab.ISO3_COUNTRIES[text])
             elif max((p.population for p in found), default=0) >= _PROMINENT:
                 towns.append((text, found))
             else:
@@ -264,6 +294,8 @@ def _names_in(part: str) -> list[str]:
                 continue
             is_code = _is_code(text)
             if (key in vocab.COUNTRIES and (len(key) > 3 or is_code)) or (
+                is_code and text in vocab.ISO3_COUNTRIES
+            ) or (
                 not is_code and len(key) > 2
                 and (key in vocab.US_STATES or places.named(text))
             ):
@@ -315,7 +347,9 @@ def _parse_free_text(raw: str) -> tuple[str | None, str | None, bool]:
 
     country = None
     for index in range(len(named) - 1, -1, -1):
-        code = vocab.COUNTRIES.get(fold(named[index]))
+        code = vocab.COUNTRIES.get(fold(named[index])) or (
+            vocab.ISO3_COUNTRIES.get(named[index]) if _is_code(named[index]) else None
+        )
         if code:
             country = code
             named = named[:index] + named[index + 1 :]
