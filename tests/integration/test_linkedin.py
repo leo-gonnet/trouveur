@@ -3,6 +3,7 @@ judged held or missed at first sight, the number the coverage report shows, and 
 
 from __future__ import annotations
 
+import pytest
 import sqlalchemy as sa
 
 from trouveur.db.engine import connect
@@ -54,7 +55,10 @@ class _Site:
         return _Response(url, self.cards if params["start"] == 0 else linkedin.END_PAGE)
 
 
-async def test_each_job_is_judged_at_first_sight_and_counted_in_the_report(seeded, monkeypatch):
+@pytest.mark.parametrize("named_by", ["company", "slug"])
+async def test_each_job_is_judged_at_first_sight_and_counted_in_the_report(
+    seeded, monkeypatch, named_by
+):
     from trouveur.coverage import report
 
     async with connect() as conn:
@@ -64,6 +68,10 @@ async def test_each_job_is_judged_at_first_sight_and_counted_in_the_report(seede
                 .where(job.c.source == "greenhouse", job.c.title == "Werkstudent Logistik")
             )
         ).one()
+        if named_by == "slug":
+            # As Ashby, Lever and most Personio boards store it: no company, only the board.
+            board = {"company": None, "scope": "beispieltechgmbh"}
+            await conn.execute(job.update().where(job.c.id == ours.id).values(**board))
     site = _Site(ours.company, ours.title)
     monkeypatch.setattr(linkedin, "PoliteClient", lambda: site)
     settings = linkedin.get_settings().model_copy(update={"linkedin_max_requests": 20})

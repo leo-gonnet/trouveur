@@ -335,6 +335,9 @@ async def payload_values(conn: AsyncConnection, *, origin: str, key: str) -> set
 # `[\W_]` and not `[[:alnum:]]`: `sa.text` would read `:alnum` as a bind parameter.
 _GENDER_TAG = r"\(?\m[mwfdix]\s*/\s*[mwfdix](\s*/\s*[mwfdix])?\M\)?"
 _LEGAL_FORM = r"\m(gmbh|mbh|ag|se|kg|kgaa|co|inc|ltd|llc|plc|sa|sas|srl|spa|bv|nv|ab|as|oy)\M"
+# The forms a slug glues on. Cut the same way on both sides, so "Verlag" losing its `ag` still
+# matches itself; the short ones are left out because a glued `as` would make "Atlas" "atl".
+_GLUED_LEGAL_FORM = r"(gmbh|mbh|kgaa|ag|inc|ltd|llc|plc|corp)$"
 
 
 def _fold(expression: str) -> str:
@@ -346,12 +349,19 @@ def _title(column: str) -> str:
 
 
 def _company(column: str) -> str:
+    """Letters and digits only, every legal form dropped, and one more at the very end, where a
+    board slug glues it on: "Nahe GmbH", `nahe-gmbh` and `nahegmbh` are all `nahe`."""
     stripped = f"regexp_replace({_fold(f'lower({column})')}, '{_LEGAL_FORM}', ' ', 'g')"
-    return rf"btrim(regexp_replace({stripped}, '\s+', ' ', 'g'))"
+    squashed = rf"regexp_replace({stripped}, '[\W_]+', '', 'g')"
+    return f"regexp_replace({squashed}, '{_GLUED_LEGAL_FORM}', '')"
 
 
 # A town on the card is matched against our towns near it, a country only when the card names no
 # town. A posting not yet derived has no facets and is not found, which errs the same way.
+#
+# Ashby and Lever never send a company name and Personio rarely does, so for their postings the
+# board's slug is the only company we have. Without it every one of them reads as a miss, and the
+# miss list names boards we already sweep.
 _HELD = f"""
 WITH wanted AS (
     SELECT w.key, {_company("w.company")} AS company, {_title("w.title")} AS title,
@@ -361,7 +371,8 @@ WITH wanted AS (
 )
 SELECT DISTINCT ON (w.key) w.key, j.id
 FROM wanted w
-JOIN job j ON {_company("j.company")} = w.company AND {_title("j.title")} = w.title
+JOIN job j ON {_company("COALESCE(NULLIF(j.company, ''), j.scope)")} = w.company
+          AND {_title("j.title")} = w.title
 JOIN job_facet f ON f.job_id = j.id
 WHERE j.closed_at IS NULL AND w.company <> '' AND w.title <> ''
   AND (f.place_ids && w.place_ids
