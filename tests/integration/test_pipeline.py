@@ -827,8 +827,12 @@ async def test_a_profile_with_nothing_to_search_for_is_skipped_not_failed(
     async def nothing_to_prepare(_settings):
         return 0
 
+    async def no_freehire(_settings):
+        return None
+
     monkeypatch.setattr(service.ingest, "run", no_sweep)
     monkeypatch.setattr(service, "prepare_arrivals", nothing_to_prepare)
+    monkeypatch.setattr(service.freehire, "run", no_freehire)
     async with connect() as conn:
         await admin_q.enqueue_run(conn, trigger=RunTrigger.SCHEDULED)
         run = await admin_q.claim_next_run(conn)

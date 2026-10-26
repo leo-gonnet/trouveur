@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import httpx
 import pytest
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -17,6 +18,20 @@ FIXTURES = Path(__file__).parent / "fixtures"
 
 def load(name: str) -> dict:
     return json.loads((FIXTURES / name).read_text(encoding="utf-8"))
+
+
+# A BaseException, because the runner isolates each stage behind `except Exception` and would log
+# the request away: a test that reached the network once passed while it fetched for ten minutes.
+class NetworkInTest(BaseException):
+    pass
+
+
+@pytest.fixture(autouse=True)
+def no_network(monkeypatch):
+    async def refuse(self, request):
+        raise NetworkInTest(f"A test sent a real request to {request.url}; stub it instead.")
+
+    monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request", refuse)
 
 
 def pytest_addoption(parser):
