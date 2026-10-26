@@ -15,7 +15,7 @@ from typing import Any
 
 from trouveur.models import DocumentKind, RawDocument
 from trouveur.sources.base import DocumentSink, SweepOutcome
-from trouveur.sources.errors import FetchError
+from trouveur.sources.errors import FetchError, SourceBlocked
 from trouveur.sources.http import PoliteClient
 
 log = logging.getLogger(__name__)
@@ -79,6 +79,9 @@ class ArbeitsagenturSource:
         for label in partitions:
             try:
                 seen = await self._sweep_partition(client, sink, label, window, outcome)
+            # A FetchError too: caught below, a block would never stop the source.
+            except SourceBlocked:
+                raise
             except FetchError as exc:
                 outcome.errors.append(f"berufsfeld={label!r}: {exc}")
                 log.warning("arbeitsagentur: partition %r failed: %s", label, exc)

@@ -15,7 +15,7 @@ from typing import Any
 from trouveur.models import DocumentKind, RawDocument
 from trouveur.sources.base import DocumentSink, ScopeResult, SweepOutcome
 from trouveur.sources.board import BATCH, scoped_id
-from trouveur.sources.errors import FetchError
+from trouveur.sources.errors import FetchError, SourceBlocked
 from trouveur.sources.http import PoliteClient
 from trouveur.sources.scopes import split_workday_scope
 
@@ -44,6 +44,9 @@ class WorkdaySource:
         for scope in self.boards:
             try:
                 seen, overflowed = await self._sweep_board(client, sink, scope)
+            # A FetchError too: caught below, a block would never stop the source.
+            except SourceBlocked:
+                raise
             except FetchError as exc:
                 outcome.errors.append(f"scope={scope}: {exc}")
                 outcome.scope_results.append(ScopeResult(scope=scope, ok=False, error=str(exc)))
