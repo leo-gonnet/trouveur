@@ -76,6 +76,10 @@ class Settings(BaseSettings):
     trial_boards_per_run: int = 300
     trial_recheck_days: int = 30
 
+    # Requests per weekly freehire pass, the facet counts included. A third party with limits we
+    # do not control: the pass stops here, or at the first block.
+    freehire_max_requests: int = 500
+
     # How old a posting may be and still be recommended. Measured discovery lag is under 1.3 days
     # at p99 for every source that carries volume, so this drops old inventory, never a posting
     # we were merely slow to find.

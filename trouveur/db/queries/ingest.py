@@ -283,6 +283,7 @@ async def finish_sweep(
     jobs_upserted: int,
     jobs_closed: int,
     error: str | None,
+    blocked: bool = False,
 ) -> None:
     await conn.execute(
         source_sweep.update()
@@ -298,5 +299,55 @@ async def finish_sweep(
             jobs_upserted=jobs_upserted,
             jobs_closed=jobs_closed,
             error=error,
+            blocked=blocked,
+        )
+    )
+
+
+# Per source: its run of blocked sweeps up to now, ended by its last sweep that was not blocked,
+# and its blocks inside the last `days`. A source never blocked in that window is not listed.
+_BLOCK_HISTORY = """
+WITH ranked AS (
+    SELECT source, blocked, finished_at,
+           row_number() OVER (PARTITION BY source ORDER BY started_at DESC) AS n
+    FROM source_sweep
+    WHERE finished_at IS NOT NULL
+),
+streak_end AS (
+    SELECT source, min(n) FILTER (WHERE NOT blocked) AS first_unblocked
+    FROM ranked
+    GROUP BY source
+),
+history AS (
+    SELECT r.source,
+           count(*) FILTER (
+               WHERE r.blocked AND (e.first_unblocked IS NULL OR r.n < e.first_unblocked)
+           ) AS streak,
+           count(*) FILTER (
+               WHERE r.blocked
+                 AND r.finished_at > now() - make_interval(days => CAST(:days AS integer))
+           ) AS recent,
+           max(r.finished_at) FILTER (WHERE r.blocked) AS last_blocked_at
+    FROM ranked r
+    JOIN streak_end e ON e.source = r.source
+    GROUP BY r.source
+)
+SELECT source, streak, recent, last_blocked_at
+FROM history
+WHERE streak > 0 OR recent > 0
+"""
+
+
+async def block_history(conn: AsyncConnection, *, days: int) -> dict[str, sa.Row]:
+    """source -> (streak, recent, last_blocked_at)."""
+    rows = await conn.execute(sa.text(_BLOCK_HISTORY), {"days": days})
+    return {row.source: row for row in rows}
+
+
+async def last_sweep_started(conn: AsyncConnection, source: str) -> datetime | None:
+    """When the latest finished sweep of `source` began, or None if it never finished one."""
+    return await conn.scalar(
+        sa.select(sa.func.max(source_sweep.c.started_at)).where(
+            source_sweep.c.source == source, source_sweep.c.finished_at.is_not(None)
         )
     )

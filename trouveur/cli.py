@@ -282,6 +282,11 @@ def coverage(as_json: bool) -> None:
         click.echo(json.dumps(card.as_dict(), indent=2))
         return
 
+    for row in card.blocked:
+        click.echo(
+            f"BLOCKED: {row.source} since {clock.to_local(row.since):%Y-%m-%d %H:%M}"
+            + (f" ({row.error})" if row.error else "")
+        )
     click.echo(f"Coverage by area  (retrievable = inside a {card.horizon_days}-day horizon)")
     if not card.areas:
         click.echo("No active reader has a profile yet, so there is no area to report on.")
@@ -314,6 +319,13 @@ def coverage(as_json: bool) -> None:
                 f"  still working: {leads.unmined_jobs:,} posting(s) unread for links, "
                 f"{leads.awaiting_resolve:,} lead(s) below the current URL rules"
             )
+        if leads.origins:
+            click.echo(f"  {'origin':<40}{'leads':>9}{'boards':>8}{'tried':>7}{'kept':>6}")
+            for row in leads.origins:
+                click.echo(
+                    f"  {row.label:<40}{row.leads:>9,}{row.boards:>8,}"
+                    f"{row.tried:>7,}{row.kept:>6,}"
+                )
         if leads.hosts:
             click.echo(f"  Links we cannot read  ({leads.unread_host_count:,} host(s))")
             for row in leads.hosts:
@@ -353,6 +365,62 @@ def coverage(as_json: bool) -> None:
         click.echo(
             "  auto-on is part of sweeping: boards the trial switched on with no human."
         )
+
+
+@main.group()
+def discover() -> None:
+    """Feed discovery by hand."""
+
+
+@discover.command("import-list")
+@click.argument(
+    "paths", nargs=-1, required=True, type=click.Path(exists=True, path_type=Path)
+)
+@click.option("--name", "list_name", default=None,
+              help="What the coverage report calls this list. Defaults to the first path's name.")
+@click.option("--url-column", default=None,
+              help="The column holding the link, when the guess picks the wrong one.")
+def discover_import_list(paths: tuple[Path, ...], list_name: str | None,
+                         url_column: str | None) -> None:
+    """File every link of a board list as a lead. CSV, JSON, JSON Lines or one link per line.
+
+    A directory imports every list file inside it. No network: the resolver reads each link, and
+    a new board is proposed for the trial, never switched on. Importing again adds only new links.
+    """
+    from trouveur.discovery.lists import import_files
+
+    name = list_name or paths[0].resolve().stem
+    results = asyncio.run(import_files(paths, name, url_column))
+    for item in results:
+        click.echo(
+            f"{item.path}: {item.rows:,} row(s), {item.new_leads:,} new lead(s)"
+            + (f", {item.without_link:,} without a link" if item.without_link else "")
+        )
+    click.echo(
+        f"list {name}: {sum(item.new_leads for item in results):,} new lead(s) from "
+        f"{len(results)} file(s). `trouveur coverage` shows the boards it brought."
+    )
+
+
+@discover.command("freehire")
+@click.option("--max-requests", type=int, default=None, help="Overrides the configured cap.")
+def discover_freehire(max_requests: int | None) -> None:
+    """Ask freehire for the boards behind recent jobs in the readers' countries. Live API.
+
+    The runner does this weekly on its own; this runs it now, due or not.
+    """
+    from trouveur.discovery import freehire
+
+    settings = get_settings()
+    if max_requests is not None:
+        settings = settings.model_copy(update={"freehire_max_requests": max_requests})
+    found = asyncio.run(freehire.run(settings, force=True))
+    click.echo(
+        f"{found.requests} request(s), {found.jobs:,} job(s) read, "
+        f"{len(found.leads):,} new board(s) as leads"
+    )
+    if found.blocked or found.error:
+        raise SystemExit(f"stopped early: {found.blocked or found.error}")
 
 
 @main.group()

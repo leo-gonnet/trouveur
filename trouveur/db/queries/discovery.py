@@ -278,3 +278,48 @@ async def totals(conn: AsyncConnection, *, resolve_version: int, mine_version: i
         "awaiting_resolve": int(row.awaiting_resolve),
         "unmined_jobs": int(unmined or 0),
     }
+
+
+# Per origin, and per list for an imported one. A board two origins named counts for both: the
+# question is what each origin found, not which found it first. Only discovered boards, so a list
+# naming boards we already swept by hand brings none.
+_BY_ORIGIN = """
+WITH leads AS (
+    SELECT origin::text AS origin, coalesce(list_name, '') AS list_name, count(*) AS leads
+    FROM discovery_lead
+    GROUP BY 1, 2
+),
+boards AS (
+    SELECT DISTINCT l.origin::text AS origin, coalesce(l.list_name, '') AS list_name,
+           t.source, t.scope, t.enabled, h.trial_at IS NOT NULL AS tried
+    FROM discovery_lead l
+    JOIN source_tenant t ON t.source = l.source AND t.scope = l.scope
+    LEFT JOIN source_scope_health h ON h.source = t.source AND h.scope = t.scope
+    WHERE l.result = 'resolved' AND t.origin = 'discovered'
+)
+SELECT d.origin, d.list_name, d.leads,
+       count(b.origin) AS boards,
+       count(b.origin) FILTER (WHERE b.tried) AS tried,
+       count(b.origin) FILTER (WHERE b.enabled) AS kept
+FROM leads d
+LEFT JOIN boards b ON b.origin = d.origin AND b.list_name = d.list_name
+GROUP BY d.origin, d.list_name, d.leads
+ORDER BY d.leads DESC, d.origin, d.list_name
+"""
+
+
+async def by_origin(conn: AsyncConnection) -> list[sa.Row]:
+    """Leads, boards proposed, boards tried and boards kept, per origin and list."""
+    return list(await conn.execute(sa.text(_BY_ORIGIN)))
+
+
+async def payload_values(conn: AsyncConnection, *, origin: str, key: str) -> set[str]:
+    """Every value one origin stored under `key` in its leads' payload."""
+    rows = await conn.execute(
+        sa.text(
+            "SELECT DISTINCT payload->>:key AS value FROM discovery_lead "
+            "WHERE origin = CAST(:origin AS lead_origin)"
+        ),
+        {"origin": origin, "key": key},
+    )
+    return {row.value for row in rows if row.value}

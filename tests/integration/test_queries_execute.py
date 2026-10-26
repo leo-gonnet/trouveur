@@ -132,6 +132,7 @@ def _arguments(ctx: dict) -> dict[str, dict]:
         "coverage.areas": {},
         "coverage.tenant_states": {},
         "coverage.report_outcomes": {},
+        "coverage.blocked_sources": {},
         "coverage.by_source": {"area": ctx["profile"], "fresh_since": _cutoff()},
         # discovery -- the lead is inserted first so every read below has a row to touch.
         "discovery.insert_leads": {"rows": [ctx["lead_row"]]},
@@ -142,6 +143,8 @@ def _arguments(ctx: dict) -> dict[str, dict]:
         "discovery.promote_candidates": {"sources": [source]},
         "discovery.enable_boards_with_local_jobs": {"area": ctx["profile"]},
         "discovery.unread_hosts": {},
+        "discovery.by_origin": {},
+        "discovery.payload_values": {"origin": "freehire", "key": "board"},
         # reports -- a reader's "found it elsewhere". The lookup runs both of its statements:
         # a source and ids for the indexed one, urls for the scan it falls back to.
         "reports.create": {"user_id": user_id, "url": "https://example.test/jobs/1"},
@@ -173,6 +176,8 @@ def _arguments(ctx: dict) -> dict[str, dict]:
         "ingest.close_stale": {"source": source, "older_than": timedelta(days=3650)},
         "ingest.close_retired": {"job_ids": []},
         "ingest.start_sweep": {"source": source},
+        "ingest.block_history": {"days": 14},
+        "ingest.last_sweep_started": {"source": source},
         "ingest.record_sweep_progress": {"sweep_id": ctx["sweep_id"], "documents_seen": 7},
         "ingest.finish_sweep": {
             "sweep_id": ctx["sweep_id"], "ok": True, "complete": False, "partitions_total": 1,

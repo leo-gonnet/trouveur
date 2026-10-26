@@ -24,6 +24,7 @@ class ScopeResult(BaseModel):
     ok: bool
     documents: int = 0
     error: str | None = None
+    blocked: bool = False
 
 
 class SweepOutcome(BaseModel):
@@ -39,10 +40,16 @@ class SweepOutcome(BaseModel):
     scope_results: list[ScopeResult] = Field(default_factory=list)
     expected: int | None = None
     errors: list[str] = Field(default_factory=list)
+    # Why the provider stopped answering us, when it did. A blocked sweep is never "found little".
+    blocked: str | None = None
 
     @property
     def ok(self) -> bool:
-        return not self.errors and self.partitions_done == self.partitions_total
+        return (
+            not self.errors
+            and not self.blocked
+            and self.partitions_done == self.partitions_total
+        )
 
     @property
     def complete(self) -> bool:

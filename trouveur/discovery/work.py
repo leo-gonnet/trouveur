@@ -55,12 +55,14 @@ def _row(lead: Lead) -> dict:
     resolution = resolve(lead.url)
     return {
         "origin": lead.origin.value,
+        "list_name": lead.list_name,
         "url": lead.url or "",
         "host": resolution.host,
         "job_id": lead.job_id,
         "company": lead.company,
         "title": lead.title,
         "location_text": lead.location_text,
+        "payload": lead.payload,
         "result": resolution.result.value,
         "source": resolution.source,
         "scope": resolution.scope,

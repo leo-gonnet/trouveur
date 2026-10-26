@@ -14,7 +14,7 @@ from typing import Any
 
 from trouveur.models import DocumentKind, RawDocument
 from trouveur.sources.base import GLOBAL_SCOPE, DocumentSink, ScopeResult, SweepOutcome
-from trouveur.sources.errors import FetchError
+from trouveur.sources.errors import FetchError, SourceBlocked
 
 log = logging.getLogger(__name__)
 
@@ -144,8 +144,15 @@ def page_params(base: dict[str, Any] | None, extra: dict[str, Any]) -> dict[str,
 
 
 def require_list(payload: Any, key: str | None, *, source: str) -> list[dict]:
-    """The rows of a response, or a complete sentence about why they are not there."""
-    rows = payload if key is None else (payload or {}).get(key)
+    """The rows of a response, or a complete sentence about why they are not there.
+
+    A body without `key` at all is a block, not an empty page: an empty page still names it.
+    """
+    if key is not None and not (isinstance(payload, dict) and key in payload):
+        raise SourceBlocked(
+            f"{source} returned a body without {key!r}, where even an empty page carries it."
+        )
+    rows = payload if key is None else payload[key]
     if rows is None:
         return []
     if not isinstance(rows, list):

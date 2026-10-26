@@ -69,6 +69,10 @@ async def registered_tenants(conn: AsyncConnection) -> dict[str, list[str]]:
 #
 # `sources` is the sources this run can build. One it cannot build is never swept and so never
 # stamped tried, and its candidates would take the cap's slots again on every run.
+#
+# Among the untried, a board only an imported list names goes last, then the oldest first: a list
+# proposes tens of thousands at once, and a board a reader reported or a posting linked would
+# otherwise wait months behind them.
 _TRIAL_DUE = """
 SELECT t.source, t.scope
 FROM source_tenant t
@@ -85,7 +89,13 @@ WHERE t.origin = 'discovered'
   -- Cast, because asyncpg sends a bare parameter with no type context and the server answers
   -- "could not determine data type of parameter $1" rather than ignoring it.
   AND (CAST(:source AS text) IS NULL OR t.source = CAST(:source AS text))
-ORDER BY h.trial_at ASC NULLS FIRST, t.source, t.scope
+ORDER BY h.trial_at ASC NULLS FIRST,
+         NOT EXISTS (
+             SELECT 1 FROM discovery_lead l
+             WHERE l.source = t.source AND l.scope = t.scope
+               AND l.result = 'resolved' AND l.origin <> 'list'
+         ),
+         t.added_at, t.source, t.scope
 LIMIT :limit
 """
 
@@ -380,6 +390,7 @@ async def record_scope_health(
             "last_documents": result.documents,
             "last_error": (result.error or "")[:2000] or None,
             "consecutive_failures": 0 if result.ok else 1,
+            "blocked": result.blocked,
         }
         for result in results
     ]
@@ -395,6 +406,7 @@ async def record_scope_health(
                 ),
                 "last_documents": stmt.excluded.last_documents,
                 "last_error": stmt.excluded.last_error,
+                "blocked": stmt.excluded.blocked,
                 "consecutive_failures": sa.case(
                     (stmt.excluded.consecutive_failures == 0, 0),
                     else_=source_scope_health.c.consecutive_failures + 1,

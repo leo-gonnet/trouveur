@@ -26,7 +26,7 @@ employment_type = _enum(
 )
 work_kind = _enum("work_kind", "detail", "derive", "embed", "dedup")
 tenant_origin = _enum("tenant_origin", "manual", "discovered")
-lead_origin = _enum("lead_origin", "archive", "user_report")
+lead_origin = _enum("lead_origin", "archive", "user_report", "list", "freehire")
 lead_result = _enum("lead_result", "resolved", "unknown_host", "no_url")
 report_outcome = _enum(
     "report_outcome", "had_and_recommended", "had_not_recommended", "missing_job",
@@ -175,6 +175,7 @@ source_sweep = sa.Table(
     sa.Column("jobs_upserted", sa.Integer, nullable=False, server_default="0"),
     sa.Column("jobs_closed", sa.Integer, nullable=False, server_default="0"),
     sa.Column("error", sa.Text),
+    sa.Column("blocked", sa.Boolean, nullable=False, server_default="false"),
 )
 
 # The crawl set. In the database rather than the repository because more than one thing writes
@@ -214,6 +215,7 @@ discovery_lead = sa.Table(
     metadata,
     sa.Column("id", sa.BigInteger, primary_key=True),
     sa.Column("origin", lead_origin, nullable=False),
+    sa.Column("list_name", sa.Text),
     # What we actually saw, never a tidied version of it: the raw link is the input the resolver
     # re-reads, so rewriting it would make a version bump unable to correct its own mistakes.
     sa.Column("url", sa.Text, nullable=False, server_default=""),
@@ -224,6 +226,7 @@ discovery_lead = sa.Table(
     sa.Column("company", sa.Text),
     sa.Column("title", sa.Text),
     sa.Column("location_text", sa.Text),
+    sa.Column("payload", JSONB),
     sa.Column("result", lead_result, nullable=False),
     sa.Column("source", sa.Text),
     sa.Column("scope", sa.Text),
@@ -271,6 +274,7 @@ source_scope_health = sa.Table(
     sa.Column("last_documents", sa.Integer, nullable=False, server_default="0"),
     sa.Column("last_error", sa.Text),
     sa.Column("consecutive_failures", sa.Integer, nullable=False, server_default="0"),
+    sa.Column("blocked", sa.Boolean, nullable=False, server_default="false"),
     # The last time a discovered board was tried AND judged, which is what bounds the trial: due
     # for one is a date comparison and the cap per run is a LIMIT. NULL means never tried, so a
     # freshly proposed board is first in the queue.

@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 from trouveur.config import Settings, get_settings
 from trouveur.db.engine import connect
@@ -21,10 +21,28 @@ from trouveur.ingest.persist import persist
 from trouveur.models import RawDocument
 from trouveur.sources import build_sources
 from trouveur.sources.base import Source, SweepOutcome
+from trouveur.sources.errors import SourceBlocked
 from trouveur.sources.http import PoliteClient
 from trouveur.sources.registry import SOURCES
 
 log = logging.getLogger(__name__)
+
+# A day, not the detail queue's hour: runs are nightly, so a shorter pause never skips one.
+SWEEP_PAUSE = timedelta(days=1)
+# A source stays slow this long after its last block, so one good sweep does not bring back the
+# pace that got it blocked.
+SLOW_DAYS = 14
+MAX_SLOWDOWN = 16
+
+
+def pause_after(blocks: int) -> timedelta:
+    """How long a source is left alone after `blocks` blocked sweeps in a row: doubling, a week
+    at most."""
+    return min(SWEEP_PAUSE * 2 ** min(max(blocks - 1, 0), 8), timedelta(days=7))
+
+
+def slowdown(recent_blocks: int) -> int:
+    return min(2 ** min(recent_blocks, 8), MAX_SLOWDOWN)
 
 
 @dataclass
@@ -39,6 +57,7 @@ class SourceReport:
     partitions_overflowed: int = 0
     complete: bool = False
     error: str | None = None
+    blocked: str | None = None
 
     @property
     def coverage_shortfall(self) -> int:
@@ -66,6 +85,8 @@ class RunControl:
 class IngestReport:
     per_source: dict[str, SourceReport] = field(default_factory=dict)
     skipped: list[str] = field(default_factory=list)
+    # Sources left out of this run because their last sweeps were blocked, and until when.
+    paused: dict[str, datetime] = field(default_factory=dict)
     pruned: int = 0
     # Discovered boards this run swept once. Their verdict comes later, once the derive queue has
     # given their postings facets: see trouveur.discovery.trial.
@@ -78,11 +99,18 @@ class IngestReport:
     def summary(self) -> str:
         parts = []
         for name, report in self.per_source.items():
-            state = "error" if report.error else ("complete" if report.complete else "delta")
+            state = (
+                "blocked" if report.blocked
+                else "error" if report.error
+                else "complete" if report.complete
+                else "delta"
+            )
             parts.append(
                 f"{name}[{state}] docs={report.documents} new/changed={report.changed} "
                 f"closed={report.closed}"
             )
+        if self.paused:
+            parts.append(f"paused after a block: {', '.join(sorted(self.paused))}")
         if self.pruned:
             parts.append(f"pruned {self.pruned} aged-out vector(s)")
         if self.trialled:
@@ -107,6 +135,19 @@ async def run(
     disabled = [name.strip() for name in settings.disabled_sources.split(",") if name.strip()]
     # What the trial queue is restricted to: a disabled source's candidates are never swept, so
     # never stamped, so they would take the cap's slots again on every run.
+    async with connect() as conn:
+        history = await q.block_history(conn, days=SLOW_DAYS)
+    now = datetime.now(UTC)
+    # `--source` is an operator asking for this one source now, so it is not held back.
+    paused = {
+        source: row.last_blocked_at + pause_after(row.streak)
+        for source, row in history.items()
+        if source in SOURCES
+        and only_source is None
+        and row.streak
+        and now < row.last_blocked_at + pause_after(row.streak)
+    }
+    disabled += list(paused)
     askable = sorted(set(SOURCES) - set(disabled))
     async with connect() as conn:
         tenants = await admin_q.enabled_tenants(conn)
@@ -117,8 +158,11 @@ async def run(
             sources=askable,
             source=only_source,
         )
+    # The enabled boards first: a block met on a trial board stops the source, and must not cost
+    # the boards we already sweep their night.
     for source, scopes in trials.items():
-        tenants[source] = sorted(set(tenants.get(source, [])) | set(scopes))
+        enabled = tenants.get(source, [])
+        tenants[source] = enabled + sorted(set(scopes) - set(enabled))
 
     sources = build_sources(tenants=tenants, only=only_source, disabled=disabled)
     # Filtered here as well as in the query, which `--source` and a missing adapter do not reach:
@@ -126,10 +170,18 @@ async def run(
     swept = {source.name for source in sources}
     trials = {source: scopes for source, scopes in trials.items() if source in swept}
 
+    delays = {
+        source.name: (SOURCES[source.name].min_interval or settings.request_delay_seconds)
+        * slowdown(history[source.name].recent if source.name in history else 0)
+        for source in sources
+        if source.name in history or SOURCES[source.name].min_interval is not None
+    }
     async with PoliteClient() as client:
         report = await sweep_sources(
-            client, sources, settings=settings, backfill=backfill, control=control
+            client, sources, settings=settings, backfill=backfill, control=control,
+            delays=delays,
         )
+    report.paused = paused
 
     # Before the verdict and regardless of what it will be: a board that 404s, or a run that dies
     # in the next stage, must not be back in tomorrow's trial queue -- it would be swept every
@@ -156,8 +208,12 @@ async def sweep_sources(
     settings: Settings,
     backfill: bool = False,
     control: RunControl | None = None,
+    delays: dict[str, float] | None = None,
 ) -> IngestReport:
-    """Sweep an already-assembled list of sources, one client shared across all of them."""
+    """Sweep an already-assembled list of sources, one client shared across all of them.
+
+    `delays` paces a source more slowly than the client's default, per provider as always.
+    """
     report = IngestReport()
     if control and control.starting:
         await control.starting(len(sources))
@@ -169,7 +225,9 @@ async def sweep_sources(
             report.skipped = [later.name for later in sources[index:]]
             log.info("run cancelled before %s", report.skipped[0])
             break
-        report.per_source[source.name] = await _sweep_source(client, source, settings, backfill)
+        delay = (delays or {}).get(source.name)
+        paced = client if delay is None else client.paced(delay)
+        report.per_source[source.name] = await _sweep_source(paced, source, settings, backfill)
         if control and control.source_done:
             remaining = sources[index + 1 :]
             await control.source_done(index + 1, remaining[0].name if remaining else None)
@@ -220,7 +278,10 @@ async def _sweep_source(
         outcome = await source.sweep(client, sink, backfill=backfill)
     except Exception as exc:  # noqa: BLE001 - per-source isolation; one dead source is not a run
         error = f"{type(exc).__name__}: {exc}"
+        if isinstance(exc, SourceBlocked):
+            outcome.blocked = str(exc)
         log.warning("source %s failed: %s", source.name, exc, exc_info=True)
+    report.blocked = outcome.blocked
 
     report.error = error or (
         "; ".join(outcome.errors)[:2000] if outcome.errors else None
@@ -257,7 +318,8 @@ async def _sweep_source(
             documents_seen=report.documents,
             jobs_upserted=report.upserted,
             jobs_closed=report.closed,
-            error=report.error,
+            error=report.error or report.blocked,
+            blocked=report.blocked is not None,
         )
     return report
 

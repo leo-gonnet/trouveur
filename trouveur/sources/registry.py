@@ -41,6 +41,8 @@ class SourceSpec:
     build: Callable[[list[str]], Source]
     tenant_scoped: bool
     clean_scope: ScopeCleaner = slug_scope
+    # Seconds between two requests to this source's provider. None keeps the installation default.
+    min_interval: float | None = None
 
 
 SOURCES: dict[str, SourceSpec] = {

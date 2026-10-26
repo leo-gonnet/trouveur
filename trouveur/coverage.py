@@ -4,8 +4,8 @@ Composed here rather than in `db/queries` because grouping profiles into areas i
 read by both Operations and `trouveur coverage` so the page and the command cannot drift apart.
 
 Later tasks add sections to it: one query in `db/queries/coverage.py`, one field on `Report`
-filled in `report()`, one block in `_admin_coverage.html`. Blocked sources come from docs/tasks/06,
-aggregator leads from 07. None of them emits an empty row here yet: a key that is always zero is
+filled in `report()`, one block in `_admin_coverage.html`. Aggregator leads come from
+docs/tasks/07. None of them emits an empty row here yet: a key that is always zero is
 one an agent reads as an answer.
 """
 
@@ -129,6 +129,23 @@ class UnreadHost:
 
 
 @dataclass(frozen=True)
+class OriginCoverage:
+    """What one lead origin brought: boards proposed, swept once on trial, and kept nightly."""
+
+    origin: str
+    # The imported list, for `list` leads; empty for every other origin.
+    list_name: str
+    leads: int
+    boards: int
+    tried: int
+    kept: int
+
+    @property
+    def label(self) -> str:
+        return f"list {self.list_name}" if self.list_name else self.origin.replace("_", " ")
+
+
+@dataclass(frozen=True)
 class LeadCoverage:
     """What discovery has found, and what each of its stages still has to get through.
 
@@ -143,6 +160,7 @@ class LeadCoverage:
     unmined_jobs: int
     awaiting_resolve: int
     hosts: list[UnreadHost] = field(default_factory=list)
+    origins: list[OriginCoverage] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -169,6 +187,15 @@ class ReportCoverage:
 
 
 @dataclass(frozen=True)
+class BlockedSource:
+    """A source whose last sweep the site refused. Its numbers above are not "found nothing"."""
+
+    source: str
+    since: datetime
+    error: str | None
+
+
+@dataclass(frozen=True)
 class Report:
     generated_at: datetime
     horizon_days: int
@@ -178,6 +205,7 @@ class Report:
     leads: LeadCoverage | None = None
     # None until a reader has reported a link, for the same reason.
     reports: ReportCoverage | None = None
+    blocked: list[BlockedSource] = field(default_factory=list)
 
     def as_dict(self) -> dict:
         """The shape `trouveur coverage --json` prints. Plain types only, for an agent to read."""
@@ -204,6 +232,10 @@ class Report:
             "tenants": [asdict(row) for row in self.tenants],
             "leads": asdict(self.leads) if self.leads else None,
             "reports": asdict(self.reports) if self.reports else None,
+            "blocked": [
+                {"source": row.source, "since": row.since.isoformat(), "error": row.error}
+                for row in self.blocked
+            ],
         }
 
 
@@ -264,6 +296,10 @@ async def report(conn: AsyncConnection, horizon_days: int) -> Report:
     return Report(
         leads=await leads(conn),
         reports=await reports(conn),
+        blocked=[
+            BlockedSource(source=row.source, since=row.started_at, error=row.error)
+            for row in await coverage_q.blocked_sources(conn)
+        ],
         generated_at=datetime.now(UTC),
         horizon_days=horizon_days,
         areas=covered,
@@ -301,6 +337,17 @@ async def leads(conn: AsyncConnection) -> LeadCoverage | None:
         hosts=[
             UnreadHost(host=row.host, leads=int(row.leads))
             for row in await discovery_q.unread_hosts(conn)
+        ],
+        origins=[
+            OriginCoverage(
+                origin=row.origin,
+                list_name=row.list_name,
+                leads=int(row.leads),
+                boards=int(row.boards),
+                tried=int(row.tried),
+                kept=int(row.kept),
+            )
+            for row in await discovery_q.by_origin(conn)
         ],
     )
 

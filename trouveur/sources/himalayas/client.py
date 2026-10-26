@@ -43,6 +43,8 @@ class HimalayasSource:
             sink,
             source=SOURCE,
             fetch=fetch,
+            # An empty page still carries `jobs` (probed 2026-10-26), so a body without it is
+            # a block, not "no jobs".
             extract=lambda payload: require_list(payload, "jobs", source=SOURCE),
             next_cursor=lambda payload: (payload or {}).get("nextCursor") or None,
             identify=lambda row: row.get("guid"),

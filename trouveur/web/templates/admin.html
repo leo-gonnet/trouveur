@@ -66,6 +66,8 @@
     source's whole live set, which is the only basis on which a posting may be retired.
     <em>Overflowed</em> counts partitions holding more results than the API will page through —
     those postings were never fetched, and the count is the only place that shows it.
+    <em>Blocked</em> means the site refused us, which is not the same as finding nothing: the
+    source is paused, then swept again more slowly.
   </p>
   {% if health %}
   <table>
@@ -78,7 +80,7 @@
       <td class="num">{{ row.partitions_done }}/{{ row.partitions_total }}</td>
       <td class="num">{% if row.partitions_overflowed %}<span class="pill bad">{{ row.partitions_overflowed }}</span>{% else %}0{% endif %}</td>
       <td>{% if row.complete %}<span class="pill good">yes</span>{% else %}<span class="pill">delta</span>{% endif %}</td>
-      <td>{% if row.ok %}<span class="pill good">ok</span>{% else %}<span class="pill bad">failed</span>{% endif %}</td>
+      <td>{% if row.blocked %}<span class="pill bad">blocked</span>{% elif row.ok %}<span class="pill good">ok</span>{% else %}<span class="pill bad">failed</span>{% endif %}</td>
     </tr>
     {% if row.error %}<tr><td colspan="7" class="hint">{{ row.error }}</td></tr>{% endif %}
     {% endfor %}
