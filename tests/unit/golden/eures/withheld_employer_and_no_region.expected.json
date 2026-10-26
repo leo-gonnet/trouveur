@@ -1,0 +1,49 @@
+{
+  "facets": {
+    "cities": [],
+    "countries": [
+      "GR"
+    ],
+    "employment_type": "unknown",
+    "is_agency": null,
+    "language": "fr",
+    "place_ids": [],
+    "regions": [],
+    "salary_annualised": false,
+    "salary_max_eur_year": null,
+    "salary_min_eur_year": null,
+    "seniority": "unknown",
+    "skills": [],
+    "unplaced_countries": [
+      "GR"
+    ],
+    "work_mode": "unknown"
+  },
+  "job": {
+    "agency_hint": null,
+    "closes_at": null,
+    "company": null,
+    "department_hint": null,
+    "description": "Maintenance préventive et curative des équipements.",
+    "employment_type_hint": "temporary",
+    "external_id": "QkVJU1BJRUwtMDAwMiA5",
+    "language_hint": "fr",
+    "locations": [
+      {
+        "city": null,
+        "country": "Greece",
+        "country_hint": null,
+        "raw": "Greece",
+        "region": null
+      }
+    ],
+    "posted_at": "2026-10-22T08:12:06Z",
+    "remote_hint": null,
+    "salary": null,
+    "source": "eures",
+    "title": "Technicien de maintenance (H/F)",
+    "updated_at": "2026-10-25T11:10:24Z",
+    "url": "https://europa.eu/eures/portal/jv-se/jv-details/QkVJU1BJRUwtMDAwMiA5?lang=en"
+  },
+  "normalize_version": 1
+}

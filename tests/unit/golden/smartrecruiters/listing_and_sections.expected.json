@@ -1,0 +1,54 @@
+{
+  "facets": {
+    "cities": [
+      "Lyon"
+    ],
+    "countries": [
+      "FR"
+    ],
+    "employment_type": "unknown",
+    "is_agency": null,
+    "language": "en",
+    "place_ids": [
+      2996944
+    ],
+    "regions": [],
+    "salary_annualised": false,
+    "salary_max_eur_year": null,
+    "salary_min_eur_year": null,
+    "seniority": "unknown",
+    "skills": [
+      "java",
+      "postgresql"
+    ],
+    "unplaced_countries": [],
+    "work_mode": "unknown"
+  },
+  "job": {
+    "agency_hint": null,
+    "closes_at": null,
+    "company": "Acme Corp",
+    "department_hint": "Engineering",
+    "description": "Company Description\nAcme builds tools.\n\nJob Description\nDesign APIs in Java and PostgreSQL.\n\nQualifications\nThree years of Java",
+    "employment_type_hint": "Full-time",
+    "external_id": "acmecorp:744000100000001",
+    "language_hint": "en",
+    "locations": [
+      {
+        "city": "Lyon",
+        "country": null,
+        "country_hint": null,
+        "raw": "Lyon, ARA, France",
+        "region": "ARA"
+      }
+    ],
+    "posted_at": "2026-10-26T15:23:47.275000Z",
+    "remote_hint": null,
+    "salary": null,
+    "source": "smartrecruiters",
+    "title": "Backend Engineer (F/M/X)",
+    "updated_at": null,
+    "url": "https://jobs.smartrecruiters.com/AcmeCorp/744000100000001-backend-engineer-f-m-x-"
+  },
+  "normalize_version": 1
+}

@@ -15,12 +15,17 @@ from trouveur.sources import (
     arbeitsagentur,
     ashby,
     breezy,
+    eures,
     greenhouse,
     himalayas,
     jobicy,
+    karriere,
     lever,
     personio,
+    recruitee,
     rippling,
+    smartrecruiters,
+    teamtailor,
     workable,
     workday,
 )
@@ -43,6 +48,9 @@ class SourceSpec:
     clean_scope: ScopeCleaner = slug_scope
     # Seconds between two requests to this source's provider. None keeps the installation default.
     min_interval: float | None = None
+    # A global source whose whole corpus is too large to sweep for nobody: it is built with the
+    # countries readers' areas reach as its scopes, and sweeps nothing while there are none.
+    by_reader_country: bool = False
 
 
 SOURCES: dict[str, SourceSpec] = {
@@ -122,6 +130,37 @@ SOURCES: dict[str, SourceSpec] = {
         build=lambda _scopes: jobicy.JobicySource(),
         tenant_scoped=False,
     ),
+    smartrecruiters.SOURCE: SourceSpec(
+        normalize=smartrecruiters.normalize,
+        normalize_version=smartrecruiters.version,
+        build=lambda scopes: smartrecruiters.SmartRecruitersSource(boards=scopes),
+        tenant_scoped=True,
+    ),
+    recruitee.SOURCE: SourceSpec(
+        normalize=recruitee.normalize,
+        normalize_version=recruitee.version,
+        build=lambda scopes: recruitee.RecruiteeSource(boards=scopes),
+        tenant_scoped=True,
+    ),
+    teamtailor.SOURCE: SourceSpec(
+        normalize=teamtailor.normalize,
+        normalize_version=teamtailor.version,
+        build=lambda scopes: teamtailor.TeamtailorSource(boards=scopes),
+        tenant_scoped=True,
+    ),
+    karriere.SOURCE: SourceSpec(
+        normalize=karriere.normalize,
+        normalize_version=karriere.version,
+        build=lambda _scopes: karriere.KarriereSource(),
+        tenant_scoped=False,
+    ),
+    eures.SOURCE: SourceSpec(
+        normalize=eures.normalize,
+        normalize_version=eures.version,
+        build=lambda countries: eures.EuresSource(countries=countries),
+        tenant_scoped=False,
+        by_reader_country=True,
+    ),
 }
 
 NORMALIZERS: dict[str, tuple[NormalizeFn, int]] = {
@@ -167,7 +206,8 @@ def build_sources(
     """Assemble the sources for a run. Does no I/O and reads no settings.
 
     A tenant-scoped source with no tenants is dropped rather than run: sweeping it would make no
-    requests, find nothing, and report a perfectly healthy empty sweep.
+    requests, find nothing, and report a perfectly healthy empty sweep. So is a source swept by
+    reader country while no reader has a country.
     """
     tenants = tenants or {}
     disabled = {name.strip() for name in disabled if name.strip()}
@@ -188,7 +228,7 @@ def build_sources(
         if name in disabled:
             continue
         scopes = tenants.get(name, [])
-        if spec.tenant_scoped and not scopes:
+        if (spec.tenant_scoped or spec.by_reader_country) and not scopes:
             continue
         sources.append(spec.build(scopes))
     return sources

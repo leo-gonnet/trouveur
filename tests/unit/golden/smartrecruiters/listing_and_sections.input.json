@@ -1,0 +1,38 @@
+{
+  "listing": {
+    "id": "744000100000001",
+    "name": "Backend Engineer (F/M/X)",
+    "uuid": "00000000-0000-0000-0000-000000000001",
+    "refNumber": "REF0001",
+    "company": {"identifier": "AcmeCorp", "name": "Acme Corp"},
+    "releasedDate": "2026-10-26T15:23:47.275Z",
+    "location": {
+      "city": "Lyon",
+      "region": "ARA",
+      "country": "fr",
+      "remote": false,
+      "hybrid": true,
+      "fullLocation": "Lyon, ARA, France"
+    },
+    "industry": {"id": "software", "label": "Software"},
+    "department": {},
+    "function": {"id": "engineering", "label": "Engineering"},
+    "typeOfEmployment": {"id": "permanent", "label": "Full-time"},
+    "experienceLevel": {"id": "mid_senior_level", "label": "Mid-Senior Level"}
+  },
+  "detail": {
+    "id": "744000100000001",
+    "name": "Backend Engineer (F/M/X)",
+    "postingUrl": "https://jobs.smartrecruiters.com/AcmeCorp/744000100000001-backend-engineer-f-m-x-",
+    "language": {"code": "en", "label": "English"},
+    "jobAd": {
+      "sections": {
+        "companyDescription": {"title": "Company Description", "text": "<p>Acme builds tools.</p>"},
+        "jobDescription": {"title": "Job Description", "text": "<p>Design APIs in Java and PostgreSQL.</p>"},
+        "qualifications": {"title": "Qualifications", "text": "<ul><li>Three years of Java</li></ul>"},
+        "additionalInformation": {"title": "Additional Information", "text": ""}
+      }
+    }
+  },
+  "external_id": "acmecorp:744000100000001"
+}

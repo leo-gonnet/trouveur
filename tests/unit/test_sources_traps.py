@@ -25,9 +25,11 @@ class StubClient:
         self.responses = responses or {}
         self.default = default
         self.requested: list[tuple[str, str, dict | None, dict | None]] = []
+        self.headers: list[dict | None] = []
 
-    def _respond(self, method, url, params, json):
+    def _respond(self, method, url, params, json, headers=None):
         self.requested.append((method, url, params, json))
+        self.headers.append(headers)
         entry = self.responses.get(url, self.default)
         if callable(entry):
             entry = entry(params, json)
@@ -42,13 +44,16 @@ class StubClient:
         return httpx.Response(status, json=payload, request=request)
 
     async def get(self, url, *, params=None, headers=None):
-        return self._respond("GET", url, params, None)
+        return self._respond("GET", url, params, None, headers)
 
     async def post(self, url, *, json=None, params=None, headers=None):
-        return self._respond("POST", url, params, json)
+        return self._respond("POST", url, params, json, headers)
 
     async def get_json(self, url, *, params=None, headers=None):
-        return self._respond("GET", url, params, None).json()
+        return self._respond("GET", url, params, None, headers).json()
+
+    async def post_json(self, url, *, json=None, params=None, headers=None):
+        return self._respond("POST", url, params, json, headers).json()
 
 
 async def collect(source, client):
@@ -611,3 +616,303 @@ def test_an_empty_disabled_setting_disables_nothing():
     from trouveur.sources.registry import build_sources
 
     assert build_sources(tenants={}, disabled="".split(","))
+
+
+# --------------------------------------------------------------------------- eures
+
+_EURES_URL = "https://europa.eu/eures/api/jv-searchengine/public/jv-search/search"
+
+
+def _eures_page(total, ids, children=None, country="de"):
+    facets = {
+        "POSITION_LOCATION": {
+            "facetEntriesList": [
+                {"code": country, "count": total, "childrenList": children or []}
+            ]
+        }
+    }
+    return {"numberRecords": total, "jvs": [{"id": job_id, "title": "T"} for job_id in ids],
+            "facets": facets}
+
+
+def test_eures_splits_a_country_over_the_window_by_its_regions_and_its_unplaced_bucket():
+    """One query reaches 10,000 rows. A NUTS 3 code filters to nothing rather than failing, and
+    the "<country>-NS" bucket is a region of its own: skip it and those postings are never seen.
+    """
+    from trouveur.sources.eures import EuresSource
+
+    children = [
+        {"code": "de1", "count": 30, "childrenList": []},
+        {"code": "de-NS", "count": 2, "childrenList": []},
+        {"code": "de2", "count": 0, "childrenList": []},
+    ]
+
+    def respond(_params, body):
+        codes = body["locationCodes"]
+        if codes == ["de"]:
+            return 200, _eures_page(12_000, ["x"], children)
+        if codes == ["de1"]:
+            return 200, _eures_page(30, [f"a{n}" for n in range(30)])
+        return 200, _eures_page(2, ["b1", "b2"])
+
+    client = StubClient({_EURES_URL: respond})
+    outcome, seen = asyncio.run(collect(EuresSource(countries=["DE"]), client))
+
+    asked = [body["locationCodes"] for _method, _url, _params, body in client.requested]
+    assert asked == [["de"], ["de1"], ["de-NS"]], "a region with no postings costs no request"
+    assert len(seen) == 32
+    for _method, _url, _params, body in client.requested:
+        assert body["resultsPerPage"] <= 50 and body["page"] <= 200
+    # A delta never saw a whole country.
+    assert outcome.closable_scopes == []
+
+
+def test_eures_pages_a_small_country_from_the_first_answer_and_stops_on_a_short_page():
+    from trouveur.sources.eures import EuresSource
+
+    pages = {1: [f"p1-{n}" for n in range(50)], 2: ["p2-0", "p2-1"]}
+
+    def respond(_params, body):
+        return 200, _eures_page(52, pages[body["page"]], country="pt")
+
+    client = StubClient({_EURES_URL: respond})
+    _outcome, seen = asyncio.run(collect(EuresSource(countries=["PT"]), client))
+
+    assert [body["page"] for *_rest, body in client.requested] == [1, 2]
+    assert len(seen) == 52
+
+
+def test_eures_is_asked_for_greece_by_its_nuts_code_and_never_for_a_country_it_lacks():
+    """EURES writes Greece as EL. Asked for "gr", it answers zero rows and no error."""
+    from trouveur.sources.eures import EuresSource
+
+    def respond(_params, body):
+        return 200, _eures_page(0, [], country=body["locationCodes"][0])
+
+    client = StubClient({_EURES_URL: respond})
+    asyncio.run(collect(EuresSource(countries=["GR", "US"]), client))
+
+    assert [body["locationCodes"] for *_rest, body in client.requested] == [["el"]]
+
+
+def test_a_source_swept_by_reader_country_is_dropped_while_no_reader_has_one():
+    from trouveur.sources.registry import build_sources
+
+    assert "eures" not in {source.name for source in build_sources(tenants={})}
+    built = {source.name: source for source in build_sources(tenants={"eures": ["PT"]})}
+    assert built["eures"].countries == ["PT"]
+
+
+def test_eures_withheld_employer_is_no_company():
+    """A national service writes a placeholder where the employer withheld its name; read as a
+    company, thousands of unrelated postings would share one employer."""
+    from trouveur.sources.eures import normalize
+
+    for placeholder in ("Non renseigné", "siehe Beschreibung"):
+        job = normalize(
+            {"id": "x", "title": "T", "employer": {"name": placeholder}}, external_id="x"
+        )
+        assert job is not None and job.company is None
+
+
+# --------------------------------------------------------------------------- karriere.at
+
+
+def test_karriere_asks_for_json_with_both_headers():
+    """Without them the same URL answers ~200 KB of HTML, which the feed reads as a block."""
+    from trouveur.sources.karriere import KarriereSource
+
+    page = {"data": {"jobsSearchList": {"activeItems": {"items": []},
+                                        "loadMoreJobsButton": {"next": False}}}}
+    client = StubClient({"https://www.karriere.at/jobs": (200, page)})
+    asyncio.run(collect(KarriereSource(), client))
+
+    assert client.headers[0] == {
+        "Accept": "application/json",
+        "X-Requested-With": "XMLHttpRequest",
+    }
+
+
+def test_karriere_reads_its_prose_dates_to_the_day_and_nothing_else():
+    from trouveur.sources.karriere.client import published_at
+
+    now = datetime(2026, 10, 26, 12, tzinfo=UTC)
+    assert published_at("Heute veröffentlicht", now) == now
+    assert published_at("Gestern veröffentlicht", now) == now - timedelta(days=1)
+    assert published_at("vor 3 Tagen veröffentlicht", now) == now - timedelta(days=3)
+    assert published_at("vor 2 Wochen veröffentlicht", now) == now - timedelta(days=14)
+    # Unknown prose is no date, and an undated row is kept rather than taken for an old one.
+    assert published_at("Neu", now) is None
+
+
+def test_karriere_detail_is_the_pages_json_ld_and_a_gone_posting_is_retired():
+    from trouveur.sources.karriere import KarriereSource
+
+    page = (
+        '<html><script type="application/ld+json">{"@type": "BreadcrumbList"}</script>'
+        '<script type="application/ld+json">{"@type": "JobPosting", "title": "T"}</script></html>'
+    )
+    client = StubClient(
+        {
+            "https://www.karriere.at/jobs/1": (200, page),
+            "https://www.karriere.at/jobs/2": (404, "<html>weg</html>"),
+            "https://www.karriere.at/jobs/3": (200, "<html>no data</html>"),
+        }
+    )
+    source = KarriereSource()
+
+    document = asyncio.run(source.fetch_detail(client, "1"))
+    assert document is not None and document.payload == {"@type": "JobPosting", "title": "T"}
+    assert asyncio.run(source.fetch_detail(client, "2")) is None
+    # A page that lost its JSON-LD is a changed page, never a gone posting.
+    with pytest.raises(SourceError):
+        asyncio.run(source.fetch_detail(client, "3"))
+
+
+# --------------------------------------------------------------------------- smartrecruiters
+
+_SR_URL = "https://api.smartrecruiters.com/v1/companies/acme/postings"
+
+
+def test_smartrecruiters_walk_ends_on_a_short_page_not_on_its_moving_total():
+    """`totalFound` moved from 1,149 to 1,151 inside one walk, so the short page is the end."""
+    from trouveur.sources.smartrecruiters import SmartRecruitersSource
+
+    def respond(params, _body):
+        offset = params["offset"]
+        rows = [{"id": str(n)} for n in range(offset, offset + (100 if offset == 0 else 3))]
+        return 200, {"totalFound": 50 if offset == 0 else 999, "content": rows}
+
+    client = StubClient({_SR_URL: respond})
+    outcome, seen = asyncio.run(
+        collect(SmartRecruitersSource(boards=["acme"]), client)
+    )
+
+    assert [params["offset"] for _m, _u, params, _b in client.requested] == [0, 100]
+    assert all(params["limit"] == 100 for _m, _u, params, _b in client.requested)
+    assert len(seen) == 103
+    assert outcome.closable_scopes == ["acme"]
+
+
+def test_smartrecruiters_board_whose_offset_does_not_advance_is_not_closable():
+    from trouveur.sources.smartrecruiters import SmartRecruitersSource
+
+    full = {"totalFound": 1000, "content": [{"id": str(n)} for n in range(100)]}
+    client = StubClient({_SR_URL: (200, full)})
+    outcome, seen = asyncio.run(collect(SmartRecruitersSource(boards=["acme"]), client))
+
+    assert len(client.requested) == 2
+    assert len(seen) == 100
+    assert outcome.closable_scopes == []
+
+
+def test_smartrecruiters_detail_is_addressed_by_company_and_posting():
+    from trouveur.sources.smartrecruiters import SmartRecruitersSource
+
+    client = StubClient({f"{_SR_URL}/7440001": (200, {"id": "7440001"})})
+    source = SmartRecruitersSource()
+
+    document = asyncio.run(source.fetch_detail(client, "acme:7440001"))
+    assert document is not None and document.scope == "acme"
+    assert asyncio.run(source.fetch_detail(client, "acme:404")) is None
+    with pytest.raises(SourceError):
+        asyncio.run(source.fetch_detail(client, "acme"))
+
+
+def test_smartrecruiters_hybrid_posting_is_not_on_site():
+    """`remote` is false on a hybrid posting, and a False hint makes derivation say on-site."""
+    from trouveur.sources.smartrecruiters import normalize
+
+    def hint(location):
+        job = normalize({"id": "1", "name": "T", "location": location}, external_id="a:1")
+        assert job is not None
+        return job.remote_hint
+
+    assert hint({"remote": False, "hybrid": True}) is None
+    assert hint({"remote": False, "hybrid": False}) is False
+    assert hint({"remote": True}) is True
+
+
+# --------------------------------------------------------------------------- recruitee
+
+
+def test_recruitee_body_without_offers_is_a_failed_board_not_an_empty_one():
+    """Read as an empty board, it would close every posting the board holds."""
+    from trouveur.sources.recruitee import RecruiteeSource
+
+    client = StubClient({"https://acme.recruitee.com/api/offers/": (200, {"error": "?"})})
+    outcome, seen = asyncio.run(collect(RecruiteeSource(boards=["acme"]), client))
+
+    assert seen == []
+    assert outcome.errors
+    assert outcome.closable_scopes == []
+
+
+def test_recruitee_dates_with_a_utc_suffix_are_read():
+    from trouveur.sources.recruitee import normalize
+
+    job = normalize(
+        {"id": 1, "title": "T", "published_at": "2026-10-26 19:43:14 UTC"}, external_id="a:1"
+    )
+    assert job is not None
+    assert job.posted_at == datetime(2026, 10, 26, 19, 43, 14, tzinfo=UTC)
+
+
+# --------------------------------------------------------------------------- teamtailor
+
+
+def _rss(guids):
+    items = "".join(
+        f"<item><title>T</title><guid>{guid}</guid><link>https://acme.teamtailor.com/jobs/1</link>"
+        "</item>"
+        for guid in guids
+    )
+    return f'<?xml version="1.0"?><rss version="2.0"><channel>{items}</channel></rss>'
+
+
+def test_teamtailor_pages_past_its_default_hundred_by_offset():
+    """The feed stops at 100 items unless asked for more, and `page` is ignored: one plain request
+    to a 321-job board looks like a complete board of 100 and closes the other 221."""
+    from trouveur.sources.teamtailor import TeamtailorSource
+    from trouveur.sources.teamtailor.client import PAGE_SIZE
+
+    def respond(params, _body):
+        offset = params["offset"]
+        count = PAGE_SIZE if offset == 0 else 21
+        return 200, _rss([f"g{offset + n}" for n in range(count)])
+
+    client = StubClient({"https://acme.teamtailor.com/jobs.rss": respond})
+    outcome, seen = asyncio.run(collect(TeamtailorSource(boards=["acme"]), client))
+
+    assert [(p["per_page"], p["offset"]) for _m, _u, p, _b in client.requested] == [
+        (PAGE_SIZE, 0),
+        (PAGE_SIZE, PAGE_SIZE),
+    ]
+    assert len(seen) == PAGE_SIZE + 21
+    assert outcome.closable_scopes == ["acme"]
+
+
+def test_teamtailor_unknown_board_fails_and_closes_nothing():
+    from trouveur.sources.teamtailor import TeamtailorSource
+
+    client = StubClient({"https://ghost.teamtailor.com/jobs.rss": (404, "<html>404</html>")})
+    outcome, seen = asyncio.run(collect(TeamtailorSource(boards=["ghost"]), client))
+
+    assert seen == []
+    assert outcome.errors and "does not exist" in outcome.errors[0]
+    assert outcome.closable_scopes == []
+
+
+def test_teamtailor_remote_status_none_says_nothing():
+    """"none" is the employer saying nothing, not "on site"."""
+    from trouveur.sources.teamtailor import normalize
+
+    def hint(status):
+        job = normalize({"guid": "g", "title": "T", "remoteStatus": status}, external_id="a:g")
+        assert job is not None
+        return job.remote_hint
+
+    assert hint("none") is None
+    assert hint("hybrid") is None
+    assert hint("onsite") is False
+    assert hint("fully") is True

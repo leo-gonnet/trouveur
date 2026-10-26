@@ -1,0 +1,60 @@
+{
+  "facets": {
+    "cities": [
+      "Graz",
+      "Leoben"
+    ],
+    "countries": [
+      "AT"
+    ],
+    "employment_type": "part_time",
+    "is_agency": null,
+    "language": null,
+    "place_ids": [
+      2778067,
+      2772649
+    ],
+    "regions": [],
+    "salary_annualised": false,
+    "salary_max_eur_year": null,
+    "salary_min_eur_year": null,
+    "seniority": "unknown",
+    "skills": [],
+    "unplaced_countries": [],
+    "work_mode": "unknown"
+  },
+  "job": {
+    "agency_hint": null,
+    "closes_at": null,
+    "company": "Beispiel Logistik GmbH",
+    "department_hint": null,
+    "description": "Kommissionierung und Wareneingang.",
+    "employment_type_hint": "Teilzeit",
+    "external_id": "10000002",
+    "language_hint": null,
+    "locations": [
+      {
+        "city": null,
+        "country": null,
+        "country_hint": "Austria",
+        "raw": "Graz",
+        "region": null
+      },
+      {
+        "city": null,
+        "country": null,
+        "country_hint": "Austria",
+        "raw": "Leoben",
+        "region": null
+      }
+    ],
+    "posted_at": null,
+    "remote_hint": null,
+    "salary": null,
+    "source": "karriere",
+    "title": "Lagerarbeiter (m/w/d)",
+    "updated_at": null,
+    "url": "https://www.karriere.at/jobs/10000002"
+  },
+  "normalize_version": 1
+}

@@ -1,0 +1,27 @@
+{
+  "listing": {
+    "id": 2790001,
+    "slug": "product-designer",
+    "title": "Product Designer",
+    "careers_url": "https://acme.recruitee.com/o/product-designer",
+    "company_name": "Acme",
+    "description": "<p>Shape our mobile app.</p>",
+    "requirements": "<ul><li>Figma</li></ul>",
+    "published_at": "2026-10-26 19:43:14 UTC",
+    "created_at": "2026-10-26 19:29:39 UTC",
+    "updated_at": "2026-10-26 19:43:14 UTC",
+    "close_at": null,
+    "location": "Hamburg, Germany",
+    "locations": [
+      {"id": 1, "name": "HQ", "city": "Hamburg", "state": "Hamburg", "country": "Germany", "country_code": "DE"}
+    ],
+    "remote": false,
+    "hybrid": false,
+    "on_site": true,
+    "employment_type_code": "fulltime_permanent",
+    "department": "Design",
+    "salary": {"min": "4000", "max": "5200", "period": "month", "currency": "EUR"},
+    "status": "published"
+  },
+  "external_id": "acme:2790001"
+}

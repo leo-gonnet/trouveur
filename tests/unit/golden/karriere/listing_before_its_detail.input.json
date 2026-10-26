@@ -1,0 +1,18 @@
+{
+  "listing": {
+    "id": "10000002",
+    "link": "https://www.karriere.at/jobs/10000002",
+    "title": "Lagerarbeiter (m/w/d)",
+    "company": {"slug": "beispiel-logistik", "name": "Beispiel Logistik GmbH", "isChiffre": false},
+    "locations": [
+      {"name": "Graz", "slug": "graz"},
+      {"name": "Leoben", "slug": "leoben"}
+    ],
+    "isHomeOffice": false,
+    "employmentTypes": "Teilzeit",
+    "salary": "ab 2.100 € monatlich",
+    "summary": "Kommissionierung und Wareneingang.",
+    "date": "vor 2 Tagen veröffentlicht"
+  },
+  "external_id": "10000002"
+}

@@ -135,6 +135,34 @@ PORTED: tuple[tuple[str, str | None, str | None], ...] = (
     ('https://acme.breezy.hr', 'breezy', 'acme'),
     ('https://app.breezy.hr/dashboard', None, None),
     ('https://breezy.hr/pricing', None, None),
+    # SmartRecruiters matches its company id without regard to case, and the adapter addresses
+    # it lowercased; a one-click application puts two words of its own before the company.
+    (
+        'https://jobs.smartrecruiters.com/AcmeCorp/744000157845970-data-engineer',
+        'smartrecruiters',
+        'acmecorp',
+    ),
+    (
+        'https://jobs.smartrecruiters.com/oneclick-ui/company/AcmeCorp/publication/0b1c2d3e',
+        'smartrecruiters',
+        'acmecorp',
+    ),
+    ('https://careers.smartrecruiters.com/AcmeCorp', 'smartrecruiters', 'acmecorp'),
+    (
+        'https://api.smartrecruiters.com/v1/companies/AcmeCorp/postings',
+        'smartrecruiters',
+        'acmecorp',
+    ),
+    ('https://www.smartrecruiters.com/', None, None),
+    ('https://acme.recruitee.com/o/data-engineer', 'recruitee', 'acme'),
+    ('https://app.recruitee.com/#/settings', None, None),
+    ('https://gateway.recruitee.com/session', None, None),
+    ('https://acme.teamtailor.com/jobs/8610208-data-engineer', 'teamtailor', 'acme'),
+    ('https://app.teamtailor.com/companies', None, None),
+    ('https://www.karriere.at/jobs/10035051', 'karriere', None),
+    ('https://europa.eu/eures/portal/jv-se/jv-details/ODE2MTU0MiA5?lang=en', 'eures', None),
+    # EURES is one section of europa.eu; the rest of the host is no job platform.
+    ('https://europa.eu/youreurope/citizens/work/', None, None),
 )
 
 
@@ -213,9 +241,9 @@ def test_a_platform_we_hold_no_rule_for_is_counted_by_host():
     and the lead keeps its raw URL, so porting the rule later re-reads every one of these with no
     new request. The host is a platform's, not one company's, which is what the panel shows.
     """
-    got = resolve("https://jobs.smartrecruiters.com/BHFT/744000139104759-senior-officer")
+    got = resolve("https://jobs.jobvite.com/acme/job/oAbC123x")
     assert got.result is LeadResult.UNKNOWN_HOST
-    assert got.host == "jobs.smartrecruiters.com"
+    assert got.host == "jobs.jobvite.com"
     assert (got.source, got.scope) == (None, None)
 
 
