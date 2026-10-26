@@ -326,6 +326,74 @@ def test_a_hint_never_overrides_a_place_the_posting_names():
     assert facets.unplaced_countries == []
 
 
+def test_a_hint_tells_namesakes_apart():
+    """Five towns are called Baden, one of them beside Vienna. Filed under Switzerland, it is not
+    that one."""
+    facets = derive(
+        _job(title="Engineer", locations=[Location(raw="Baden", country_hint="Switzerland")])
+    )
+    assert facets.countries == ["CH"]
+    assert "AT" not in facets.unplaced_countries
+
+
+def test_a_hint_naming_no_such_town_leaves_the_namesakes_open():
+    facets = derive(
+        _job(title="Engineer", locations=[Location(raw="Baden", country_hint="Netherlands")])
+    )
+    assert "AT" in facets.unplaced_countries
+
+
+def test_a_region_name_is_not_read_as_the_towns_inside_it():
+    """"Baden-Württemberg" once added Austria, through Baden bei Wien."""
+    facets = derive(
+        _job(title="Engineer", locations=[Location(raw="Karlsruhe, Baden-Württemberg")])
+    )
+    assert facets.countries == ["DE"]
+    assert facets.unplaced_countries == []
+
+
+def test_a_region_beside_a_placed_town_names_a_team_not_a_place():
+    facets = derive(_job(title="Engineer", locations=[Location(raw="Frankfurt | DACH Team")]))
+    assert facets.countries == ["DE"]
+    assert facets.unplaced_countries == []
+
+
+@pytest.mark.parametrize(
+    ("raw", "country"),
+    [("AUT - Graz - Plant", "AT"), ("FRA-Bas-Rhin-Haguenau", "FR"), ("Escazu, CRI", "CR")],
+)
+def test_a_capital_three_letter_code_is_a_country(raw, country):
+    facets = derive(_job(title="Engineer", locations=[Location(raw=raw)]))
+    assert facets.countries == [country]
+
+
+def test_an_iso_code_in_lower_case_is_a_word():
+    facets = derive(_job(title="Engineer", locations=[Location(raw="Can, Remote")]))
+    assert "CA" not in facets.countries
+
+
+def test_georgia_stated_as_a_country_is_the_country():
+    location = Location(raw="Tbilisi, Tbilisi, Georgia", city="Tbilisi", country="Georgia")
+    facets = derive(_job(title="Engineer", locations=[location]))
+    assert facets.countries == ["GE"]
+
+
+def test_georgia_in_free_text_is_still_not_a_country():
+    facets = derive(_job(title="Engineer", locations=[Location(raw="Atlanta, Georgia")]))
+    assert facets.countries == ["US"]
+
+
+def test_a_posting_that_names_no_place_is_judged_by_the_country_its_title_names():
+    facets = derive(_job(title="Sales Analyst - Austria", locations=[]))
+    assert facets.countries == ["AT"]
+    assert facets.unplaced_countries == ["AT"]
+
+
+def test_a_title_never_overrides_a_place_the_posting_names():
+    facets = derive(_job(title="Head of Sales Austria", locations=[Location(raw="Berlin")]))
+    assert facets.countries == ["DE"]
+
+
 def test_a_region_never_widens_a_town_already_placed():
     facets = derive(_job(title="Engineer", locations=[Location(raw="Munich, Bavaria")]))
     assert facets.unplaced_countries == []
