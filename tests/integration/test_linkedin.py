@@ -29,9 +29,9 @@ class _Site:
     """Our Wien posting seen from a suburb, the same title at the same company in another country,
     a company we have never seen, and two cards nothing can be judged on."""
 
-    def __init__(self, company: str, title: str) -> None:
+    def __init__(self, company: str, title: str, tag: str) -> None:
         self.cards = (
-            _card(1, f"{company} GmbH", f"{title} (m/w/d)", "Schwechat, Österreich")
+            _card(1, f"{company} GmbH", f"{title} {tag}", "Schwechat, Österreich")
             + _card(2, company, title, "München, Bayern, Deutschland")
             + _card(3, "Ferne AG", "Prozessingenieur", "Wien, Wien, Österreich")
             + _card(4, None, "Prozessingenieur", "Wien, Wien, Österreich")
@@ -55,9 +55,10 @@ class _Site:
         return _Response(url, self.cards if params["start"] == 0 else linkedin.END_PAGE)
 
 
+@pytest.mark.parametrize("tag", ["(m/w/d)", "- H/F"])
 @pytest.mark.parametrize("named_by", ["company", "slug"])
 async def test_each_job_is_judged_at_first_sight_and_counted_in_the_report(
-    seeded, monkeypatch, named_by
+    seeded, monkeypatch, named_by, tag
 ):
     from trouveur.coverage import report
 
@@ -72,7 +73,7 @@ async def test_each_job_is_judged_at_first_sight_and_counted_in_the_report(
             # As Ashby, Lever and most Personio boards store it: no company, only the board.
             board = {"company": None, "scope": "beispieltechgmbh"}
             await conn.execute(job.update().where(job.c.id == ours.id).values(**board))
-    site = _Site(ours.company, ours.title)
+    site = _Site(ours.company, ours.title, tag)
     monkeypatch.setattr(linkedin, "PoliteClient", lambda: site)
     settings = linkedin.get_settings().model_copy(update={"linkedin_max_requests": 20})
 

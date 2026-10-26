@@ -328,12 +328,12 @@ async def payload_values(conn: AsyncConnection, *, origin: str, key: str) -> set
 
 # Whether we already hold a job another site showed us, by company, title and place, open copies
 # only. The fold is applied to both sides here and nowhere else, so the two spellings cannot drift
-# apart. It drops a gender tag (`(m/w/d)`, `w/m/d`) from a title and a legal form from a company,
-# which is where one employer's job differs between its board and an aggregator; everything else
-# must match exactly.
+# apart. It drops a gender tag (`(m/w/d)`, `w/m/d`, French `H/F`) from a title and a legal form
+# from a company, which is where one employer's job differs between its board and an aggregator;
+# everything else must match exactly.
 #
 # `[\W_]` and not `[[:alnum:]]`: `sa.text` would read `:alnum` as a bind parameter.
-_GENDER_TAG = r"\(?\m[mwfdix]\s*/\s*[mwfdix](\s*/\s*[mwfdix])?\M\)?"
+_GENDER_TAG = r"\(?\m[mwfdhix]\s*/\s*[mwfdhix](\s*/\s*[mwfdhix])?\M\)?"
 _LEGAL_FORM = r"\m(gmbh|mbh|ag|se|kg|kgaa|co|inc|ltd|llc|plc|sa|sas|srl|spa|bv|nv|ab|as|oy)\M"
 # The forms a slug glues on. Cut the same way on both sides, so "Verlag" losing its `ag` still
 # matches itself; the short ones are left out because a glued `as` would make "Atlas" "atl".
