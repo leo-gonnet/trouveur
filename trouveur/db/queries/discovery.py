@@ -11,6 +11,7 @@ transaction that read it, so it leaves the set and the next page starts where th
 
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
 
 import sqlalchemy as sa
@@ -323,3 +324,73 @@ async def payload_values(conn: AsyncConnection, *, origin: str, key: str) -> set
         {"origin": origin, "key": key},
     )
     return {row.value for row in rows if row.value}
+
+
+# Whether we already hold a job another site showed us, by company, title and place, open copies
+# only. The fold is applied to both sides here and nowhere else, so the two spellings cannot drift
+# apart. It drops a gender tag (`(m/w/d)`, `w/m/d`) from a title and a legal form from a company,
+# which is where one employer's job differs between its board and an aggregator; everything else
+# must match exactly.
+#
+# `[\W_]` and not `[[:alnum:]]`: `sa.text` would read `:alnum` as a bind parameter.
+_GENDER_TAG = r"\(?\m[mwfdix]\s*/\s*[mwfdix](\s*/\s*[mwfdix])?\M\)?"
+_LEGAL_FORM = r"\m(gmbh|mbh|ag|se|kg|kgaa|co|inc|ltd|llc|plc|sa|sas|srl|spa|bv|nv|ab|as|oy)\M"
+# The forms a slug glues on. Cut the same way on both sides, so "Verlag" losing its `ag` still
+# matches itself; the short ones are left out because a glued `as` would make "Atlas" "atl".
+_GLUED_LEGAL_FORM = r"(gmbh|mbh|kgaa|ag|inc|ltd|llc|plc|corp)$"
+
+
+def _fold(expression: str) -> str:
+    return rf"btrim(regexp_replace({expression}, '[\W_]+', ' ', 'g'))"
+
+
+def _title(column: str) -> str:
+    return _fold(f"regexp_replace(lower({column}), '{_GENDER_TAG}', ' ', 'g')")
+
+
+def _company(column: str) -> str:
+    """Letters and digits only, every legal form dropped, and one more at the very end, where a
+    board slug glues it on: "Nahe GmbH", `nahe-gmbh` and `nahegmbh` are all `nahe`."""
+    stripped = f"regexp_replace({_fold(f'lower({column})')}, '{_LEGAL_FORM}', ' ', 'g')"
+    squashed = rf"regexp_replace({stripped}, '[\W_]+', '', 'g')"
+    return f"regexp_replace({squashed}, '{_GLUED_LEGAL_FORM}', '')"
+
+
+# A town on the card is matched against our towns near it, a country only when the card names no
+# town. A posting not yet derived has no facets and is not found, which errs the same way.
+#
+# Ashby and Lever never send a company name and Personio rarely does, so for their postings the
+# board's slug is the only company we have. Without it every one of them reads as a miss, and the
+# miss list names boards we already sweep.
+_HELD = f"""
+WITH wanted AS (
+    SELECT w.key, {_company("w.company")} AS company, {_title("w.title")} AS title,
+           w.place_ids, w.countries
+    FROM jsonb_to_recordset(CAST(:wanted AS jsonb))
+         AS w(key bigint, company text, title text, place_ids integer[], countries text[])
+)
+SELECT DISTINCT ON (w.key) w.key, j.id
+FROM wanted w
+JOIN job j ON {_company("COALESCE(NULLIF(j.company, ''), j.scope)")} = w.company
+          AND {_title("j.title")} = w.title
+JOIN job_facet f ON f.job_id = j.id
+WHERE j.closed_at IS NULL AND w.company <> '' AND w.title <> ''
+  AND (f.place_ids && w.place_ids
+       OR (cardinality(w.place_ids) = 0
+           AND (f.countries && w.countries OR f.unplaced_countries && w.countries)))
+ORDER BY w.key, j.id
+"""
+
+
+async def held_jobs(
+    conn: AsyncConnection, wanted: dict[int, tuple[str, str, list[int], list[str]]]
+) -> dict[int, int]:
+    """Our open copy of each wanted `key: (company, title, place_ids, countries)`."""
+    if not wanted:
+        return {}
+    rows = [
+        {"key": key, "company": company, "title": title, "place_ids": ids, "countries": codes}
+        for key, (company, title, ids, codes) in wanted.items()
+    ]
+    result = await conn.execute(sa.text(_HELD), {"wanted": json.dumps(rows)})
+    return {row.key: row.id for row in result}

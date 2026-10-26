@@ -423,6 +423,30 @@ def discover_freehire(max_requests: int | None) -> None:
         raise SystemExit(f"stopped early: {found.blocked or found.error}")
 
 
+@discover.command("linkedin")
+@click.option("--max-requests", type=int, default=None, help="Overrides the configured cap.")
+def discover_linkedin(max_requests: int | None) -> None:
+    """Search LinkedIn's logged-out job search with the readers' queries. Live site.
+
+    The runner does this daily on its own once `linkedin_max_requests` is set; this runs it now.
+    """
+    from trouveur.discovery import linkedin
+
+    settings = get_settings()
+    if max_requests is not None:
+        settings = settings.model_copy(update={"linkedin_max_requests": max_requests})
+    found = asyncio.run(linkedin.run(settings, force=True))
+    if found is None:
+        raise SystemExit("switched off: set linkedin_max_requests or pass --max-requests")
+    held = sum(bool(lead.held) for lead in found.leads)
+    click.echo(
+        f"{found.requests} request(s), {found.cards:,} card(s) read, "
+        f"{len(found.leads):,} new lead(s), {held:,} already held"
+    )
+    if found.blocked or found.error:
+        raise SystemExit(f"stopped early: {found.blocked or found.error}")
+
+
 @main.group()
 def tenants() -> None:
     """Manage the crawl set: which companies a per-tenant source sweeps.

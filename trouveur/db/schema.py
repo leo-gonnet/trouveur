@@ -26,7 +26,9 @@ employment_type = _enum(
 )
 work_kind = _enum("work_kind", "detail", "derive", "embed", "dedup")
 tenant_origin = _enum("tenant_origin", "manual", "discovered")
-lead_origin = _enum("lead_origin", "archive", "user_report", "list", "freehire")
+lead_origin = _enum(
+    "lead_origin", "archive", "user_report", "list", "freehire", "linkedin"
+)
 lead_result = _enum("lead_result", "resolved", "unknown_host", "no_url")
 report_outcome = _enum(
     "report_outcome", "had_and_recommended", "had_not_recommended", "missing_job",
@@ -234,6 +236,9 @@ discovery_lead = sa.Table(
     sa.Column("first_seen_at", sa.DateTime(timezone=True), nullable=False,
               server_default=sa.func.now()),
     sa.Column("resolved_at", sa.DateTime(timezone=True)),
+    # Frozen at first sight, never recomputed: see `Lead.held`.
+    sa.Column("held", sa.Boolean),
+    sa.Column("held_job_id", sa.BigInteger),
 )
 
 

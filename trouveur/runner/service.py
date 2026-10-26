@@ -16,7 +16,7 @@ from trouveur import clock, versions
 from trouveur.config import Settings, get_settings
 from trouveur.db.engine import connect
 from trouveur.db.queries import admin as admin_q
-from trouveur.discovery import freehire, reports, trial
+from trouveur.discovery import freehire, linkedin, reports, trial
 from trouveur.discovery import work as discovery
 from trouveur.ingest import pipeline as ingest
 from trouveur.ingest import workers
@@ -260,12 +260,17 @@ async def _execute(settings: Settings, run) -> None:
     async with connect() as conn:
         await admin_q.finish_run(conn, run.id, status=status, report=payload, error=error)
 
-    # Last, and only weekly: it feeds discovery, nothing tonight's edition reads.
+    # Last: these feed discovery, nothing tonight's edition reads.
     if run.only_source is None:
         try:
             await freehire.run(settings)
         except Exception:
             log.exception("the freehire pass failed; the next scheduled run retries it")
+        # After the sweep, so a job counts as held only if tonight's corpus already had it.
+        try:
+            await linkedin.run(settings)
+        except Exception:
+            log.exception("the LinkedIn pass failed; the next scheduled run retries it")
 
 
 async def prepare_arrivals(settings: Settings) -> int:

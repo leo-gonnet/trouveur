@@ -67,6 +67,8 @@ def _row(lead: Lead) -> dict:
         "source": resolution.source,
         "scope": resolution.scope,
         "resolve_version": versions.RESOLVE_VERSION,
+        "held": lead.held,
+        "held_job_id": lead.held_job_id,
     }
 
 

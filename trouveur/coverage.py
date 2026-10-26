@@ -21,6 +21,13 @@ from trouveur.db.queries import coverage as coverage_q
 from trouveur.db.queries import discovery as discovery_q
 from trouveur.db.queries import freshness
 from trouveur.ingest import places
+from trouveur.models import LeadOrigin
+
+# One day's searches give a few dozen jobs per site, too few to compare; a week is enough.
+RECALL_DAYS = 7
+# The lead origins that judge whether we held what they saw.
+RECALL_ORIGINS = (LeadOrigin.LINKEDIN.value,)
+MISSES_SHOWN = 100
 
 
 @dataclass(frozen=True)
@@ -187,6 +194,38 @@ class ReportCoverage:
 
 
 @dataclass(frozen=True)
+class RecallCoverage:
+    """How much of what one aggregator showed us this window we already held when it did.
+
+    Recall against the reader's alternative, searching that site with their own queries, judged
+    at first sight so the board a lead brings in cannot make its own job read as held.
+    """
+
+    origin: str
+    days: int
+    seen: int
+    # Seen with a company, a title and a place we can read. Only these are counted held or not.
+    judged: int
+    held: int
+
+    @property
+    def held_share(self) -> float | None:
+        return self.held / self.judged if self.judged else None
+
+
+@dataclass(frozen=True)
+class MissedJob:
+    """A job an aggregator showed that we did not hold. Which companies keep appearing here is
+    where the next board or source is."""
+
+    origin: str
+    company: str
+    title: str
+    location_text: str | None
+    company_misses: int
+
+
+@dataclass(frozen=True)
 class BlockedSource:
     """A source whose last sweep the site refused. Its numbers above are not "found nothing"."""
 
@@ -206,6 +245,9 @@ class Report:
     # None until a reader has reported a link, for the same reason.
     reports: ReportCoverage | None = None
     blocked: list[BlockedSource] = field(default_factory=list)
+    # Empty until an aggregator pass has seen a lead.
+    recall: list[RecallCoverage] = field(default_factory=list)
+    misses: list[MissedJob] = field(default_factory=list)
 
     def as_dict(self) -> dict:
         """The shape `trouveur coverage --json` prints. Plain types only, for an agent to read."""
@@ -236,6 +278,11 @@ class Report:
                 {"source": row.source, "since": row.since.isoformat(), "error": row.error}
                 for row in self.blocked
             ],
+            "recall": [
+                {**asdict(row), "held_share": row.held_share}
+                for row in self.recall
+            ],
+            "misses": [asdict(row) for row in self.misses],
         }
 
 
@@ -299,6 +346,26 @@ async def report(conn: AsyncConnection, horizon_days: int) -> Report:
         blocked=[
             BlockedSource(source=row.source, since=row.started_at, error=row.error)
             for row in await coverage_q.blocked_sources(conn)
+        ],
+        recall=[
+            RecallCoverage(
+                origin=row.origin,
+                days=RECALL_DAYS,
+                seen=int(row.seen),
+                judged=int(row.judged),
+                held=int(row.held),
+            )
+            for row in await coverage_q.recall(conn, RECALL_ORIGINS, RECALL_DAYS)
+        ],
+        misses=[
+            MissedJob(
+                origin=row.origin,
+                company=row.company,
+                title=row.title,
+                location_text=row.location_text,
+                company_misses=int(row.company_misses),
+            )
+            for row in await coverage_q.misses(conn, RECALL_ORIGINS, RECALL_DAYS, MISSES_SHOWN)
         ],
         generated_at=datetime.now(UTC),
         horizon_days=horizon_days,

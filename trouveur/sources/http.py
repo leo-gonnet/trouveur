@@ -53,6 +53,7 @@ class PoliteClient:
         settings = get_settings()
         self._delay = settings.request_delay_seconds if delay is None else delay
         self._timeout = settings.http_timeout_seconds if timeout is None else timeout
+        self._attempts = _MAX_ATTEMPTS
         self._last: dict[str, float] = {}
         self._locks: dict[str, asyncio.Lock] = {}
         self._client: httpx.AsyncClient | None = None
@@ -66,14 +67,18 @@ class PoliteClient:
         )
         return self
 
-    def paced(self, delay: float) -> PoliteClient:
-        """The same client, waiting `delay` between requests to one provider.
+    def paced(self, delay: float, *, attempts: int | None = None) -> PoliteClient:
+        """The same client, waiting `delay` between requests to one provider, and trying each
+        request `attempts` times. One attempt is for a provider that blocks a client for
+        retrying a 429.
 
         Shares the connection pool and the per-provider clock, so two sources on one provider
         still space their requests from each other.
         """
         view = copy.copy(self)
         view._delay = delay
+        if attempts is not None:
+            view._attempts = attempts
         return view
 
     async def __aexit__(self, *exc: object) -> None:
@@ -123,7 +128,7 @@ class PoliteClient:
             raise FetchError("PoliteClient must be used as an async context manager.")
         host = throttle_key(url)
         last_error = ""
-        for attempt in range(1, _MAX_ATTEMPTS + 1):
+        for attempt in range(1, self._attempts + 1):
             await self._throttle(host)
             try:
                 response = await self._client.request(
@@ -140,16 +145,16 @@ class PoliteClient:
                     return response
                 last_error = f"HTTP {response.status_code}"
                 retry_after = _retry_after(response)
-                if retry_after is not None:
+                if retry_after is not None and attempt < self._attempts:
                     await asyncio.sleep(retry_after)
                     continue
-            if attempt < _MAX_ATTEMPTS:
+            if attempt < self._attempts:
                 await asyncio.sleep((2 ** (attempt - 1)) + random.uniform(0, 0.5))
         # Only 429 is a refusal. A 503 can mean "no such board": Traffit answers an unknown
         # company that way.
         error = SourceBlocked if last_error == "HTTP 429" else FetchError
         raise error(
-            f"Giving up on {url} after {_MAX_ATTEMPTS} attempts; last failure was {last_error}."
+            f"Giving up on {url} after {self._attempts} attempt(s); last failure was {last_error}."
         )
 
     async def get_json(

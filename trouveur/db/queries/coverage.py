@@ -7,6 +7,7 @@ per cent. Everything here is read-only.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime
 from typing import Any
 
@@ -160,6 +161,47 @@ FROM user_report
 async def report_outcomes(conn: AsyncConnection) -> sa.Row:
     """Every reported link by what we could tell the reader. The recall measure that counts."""
     return (await conn.execute(sa.text(_REPORT_OUTCOMES))).one()
+
+
+# Per aggregator, the jobs it showed us this window, how many we could judge, and how many we
+# already held when it did: recall against what a reader would have found by searching that site.
+_RECALL = """
+SELECT origin::text AS origin,
+       count(*) AS seen,
+       count(*) FILTER (WHERE held IS NOT NULL) AS judged,
+       count(*) FILTER (WHERE held) AS held
+FROM discovery_lead
+WHERE origin::text = ANY(CAST(:origins AS text[]))
+  AND first_seen_at >= now() - make_interval(days => :days)
+GROUP BY origin
+ORDER BY origin
+"""
+
+
+async def recall(conn: AsyncConnection, origins: Sequence[str], days: int) -> list[sa.Row]:
+    return list(
+        await conn.execute(sa.text(_RECALL), {"origins": list(origins), "days": days})
+    )
+
+
+# The jobs behind the misses, the companies we miss most first: where to look next.
+_MISSES = """
+SELECT origin::text AS origin, company, title, location_text,
+       count(*) OVER (PARTITION BY origin, lower(company)) AS company_misses
+FROM discovery_lead
+WHERE origin::text = ANY(CAST(:origins AS text[]))
+  AND held = false
+  AND first_seen_at >= now() - make_interval(days => :days)
+ORDER BY company_misses DESC, lower(company), title
+LIMIT :limit
+"""
+
+
+async def misses(
+    conn: AsyncConnection, origins: Sequence[str], days: int, limit: int
+) -> list[sa.Row]:
+    params = {"origins": list(origins), "days": days, "limit": limit}
+    return list(await conn.execute(sa.text(_MISSES), params))
 
 
 # Sources whose latest finished sweep the provider refused.

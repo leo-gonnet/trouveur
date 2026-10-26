@@ -133,6 +133,8 @@ def _arguments(ctx: dict) -> dict[str, dict]:
         "coverage.tenant_states": {},
         "coverage.report_outcomes": {},
         "coverage.blocked_sources": {},
+        "coverage.recall": {"origins": ["linkedin"], "days": 7},
+        "coverage.misses": {"origins": ["linkedin"], "days": 7, "limit": 10},
         "coverage.by_source": {"area": ctx["profile"], "fresh_since": _cutoff()},
         # discovery -- the lead is inserted first so every read below has a row to touch.
         "discovery.insert_leads": {"rows": [ctx["lead_row"]]},
@@ -145,6 +147,10 @@ def _arguments(ctx: dict) -> dict[str, dict]:
         "discovery.unread_hosts": {},
         "discovery.by_origin": {},
         "discovery.payload_values": {"origin": "freehire", "key": "board"},
+        "discovery.held_jobs": {
+            "wanted": {0: ("Acme GmbH", "Prozessingenieur (m/w/d)", [2761369], []),
+                       1: ("Acme GmbH", "Prozessingenieur", [], ["AT"])},
+        },
         # reports -- a reader's "found it elsewhere". The lookup runs both of its statements:
         # a source and ids for the indexed one, urls for the scan it falls back to.
         "reports.create": {"user_id": user_id, "url": "https://example.test/jobs/1"},
