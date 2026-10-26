@@ -282,6 +282,11 @@ def coverage(as_json: bool) -> None:
         click.echo(json.dumps(card.as_dict(), indent=2))
         return
 
+    for row in card.blocked:
+        click.echo(
+            f"BLOCKED: {row.source} since {clock.to_local(row.since):%Y-%m-%d %H:%M}"
+            + (f" ({row.error})" if row.error else "")
+        )
     click.echo(f"Coverage by area  (retrievable = inside a {card.horizon_days}-day horizon)")
     if not card.areas:
         click.echo("No active reader has a profile yet, so there is no area to report on.")

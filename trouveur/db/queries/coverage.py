@@ -160,3 +160,21 @@ FROM user_report
 async def report_outcomes(conn: AsyncConnection) -> sa.Row:
     """Every reported link by what we could tell the reader. The recall measure that counts."""
     return (await conn.execute(sa.text(_REPORT_OUTCOMES))).one()
+
+
+# Sources whose latest finished sweep the provider refused.
+_BLOCKED = """
+SELECT source, started_at, error
+FROM (
+    SELECT DISTINCT ON (source) source, started_at, blocked, error
+    FROM source_sweep
+    WHERE finished_at IS NOT NULL
+    ORDER BY source, started_at DESC
+) latest
+WHERE blocked
+ORDER BY source
+"""
+
+
+async def blocked_sources(conn: AsyncConnection) -> list[sa.Row]:
+    return list(await conn.execute(sa.text(_BLOCKED)))

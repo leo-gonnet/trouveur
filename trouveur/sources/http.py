@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import logging
 import random
 import time
@@ -12,12 +13,24 @@ from urllib.parse import urlsplit
 import httpx
 
 from trouveur.config import USER_AGENT, get_settings
-from trouveur.sources.errors import FetchError
+from trouveur.sources.errors import FetchError, SourceBlocked
 
 log = logging.getLogger(__name__)
 
 _RETRY_STATUS = frozenset({429, 500, 502, 503, 504})
 _MAX_ATTEMPTS = 4
+
+# Bot walls, matched only on a refusal or where JSON was expected: Cloudflare injects a
+# `challenge-platform` script into ordinary pages it serves, so that name alone proves nothing.
+_CHALLENGE_MARKERS = (
+    "<title>just a moment...</title>",
+    "_cf_chl_opt",
+    "attention required! | cloudflare",
+    "captcha-delivery.com",
+    "px-captcha",
+    "_incapsula_resource",
+    "pardon our interruption",
+)
 
 
 def throttle_key(url: str) -> str:
@@ -52,6 +65,16 @@ class PoliteClient:
             limits=httpx.Limits(max_connections=16, max_keepalive_connections=8),
         )
         return self
+
+    def paced(self, delay: float) -> PoliteClient:
+        """The same client, waiting `delay` between requests to one provider.
+
+        Shares the connection pool and the per-provider clock, so two sources on one provider
+        still space their requests from each other.
+        """
+        view = copy.copy(self)
+        view._delay = delay
+        return view
 
     async def __aexit__(self, *exc: object) -> None:
         if self._client is not None:
@@ -109,6 +132,10 @@ class PoliteClient:
             except httpx.HTTPError as exc:
                 last_error = f"{type(exc).__name__}: {exc}"
             else:
+                if response.status_code in {403, 429, 503} and is_challenge(response):
+                    raise SourceBlocked(
+                        f"{url} answered HTTP {response.status_code} with a bot challenge page."
+                    )
                 if response.status_code not in _RETRY_STATUS:
                     return response
                 last_error = f"HTTP {response.status_code}"
@@ -118,7 +145,10 @@ class PoliteClient:
                     continue
             if attempt < _MAX_ATTEMPTS:
                 await asyncio.sleep((2 ** (attempt - 1)) + random.uniform(0, 0.5))
-        raise FetchError(
+        # Only 429 is a refusal. A 503 can mean "no such board": Traffit answers an unknown
+        # company that way.
+        error = SourceBlocked if last_error == "HTTP 429" else FetchError
+        raise error(
             f"Giving up on {url} after {_MAX_ATTEMPTS} attempts; last failure was {last_error}."
         )
 
@@ -142,9 +172,20 @@ class PoliteClient:
         return _decode(url, await self.post(url, json=json, params=params, headers=headers))
 
 
+def is_challenge(response: httpx.Response) -> bool:
+    if "html" not in response.headers.get("content-type", "").lower():
+        return False
+    head = response.text[:20_000].lower()
+    return any(marker in head for marker in _CHALLENGE_MARKERS)
+
+
 def _decode(url: str, response: httpx.Response) -> Any:
     if response.status_code != 200:
         raise FetchError(f"{url} returned HTTP {response.status_code}.")
+    if not response.content.strip():
+        raise SourceBlocked(f"{url} returned HTTP 200 with an empty body where JSON was expected.")
+    if is_challenge(response):
+        raise SourceBlocked(f"{url} returned a bot challenge page where JSON was expected.")
     try:
         return response.json()
     except ValueError as exc:

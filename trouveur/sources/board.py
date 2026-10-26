@@ -15,7 +15,7 @@ import httpx
 
 from trouveur.models import DocumentKind, RawDocument
 from trouveur.sources.base import DocumentSink, ScopeResult, SweepOutcome
-from trouveur.sources.errors import FetchError
+from trouveur.sources.errors import SOURCE_BURST, FetchError, SourceBlocked, SourceRefused
 from trouveur.sources.http import PoliteClient
 
 log = logging.getLogger(__name__)
@@ -46,8 +46,9 @@ async def sweep_boards(
     expected_for: Callable[[Any], int | None] | None = None,
     decode: Callable[[httpx.Response], Any] | None = None,
 ) -> SweepOutcome:
-    """Fetch every tenant's complete board once."""
+    """Fetch every tenant's complete board once, stopping at the first sign of a block."""
     outcome = SweepOutcome(partitions_total=len(scopes), expected=0)
+    refused = refused_in_a_row = 0
     for scope in scopes:
         try:
             seen, expected = await _sweep_one(
@@ -63,17 +64,40 @@ async def sweep_boards(
                 expected_for=expected_for,
                 decode=decode,
             )
+        except SourceBlocked as exc:
+            outcome.blocked = str(exc)
+            outcome.errors.append(f"scope={scope}: {exc}")
+            outcome.scope_results.append(
+                ScopeResult(scope=scope, ok=False, error=str(exc), blocked=True)
+            )
+            log.warning("%s: blocked at board %s, stopping: %s", source, scope, exc)
+            break
         except FetchError as exc:
             outcome.errors.append(f"scope={scope}: {exc}")
             outcome.scope_results.append(ScopeResult(scope=scope, ok=False, error=str(exc)))
             log.warning("%s: board %s failed: %s", source, scope, exc)
+            if isinstance(exc, SourceRefused):
+                refused += 1
+                refused_in_a_row += 1
+            else:
+                refused_in_a_row = 0
+            if refused_in_a_row >= SOURCE_BURST:
+                outcome.blocked = (
+                    f"{source}: {refused_in_a_row} boards in a row answered HTTP 403."
+                )
+                log.warning("%s, stopping", outcome.blocked)
+                break
             continue
+        refused_in_a_row = 0
         outcome.documents += seen
         outcome.partitions_done += 1
         outcome.expected = (outcome.expected or 0) + (expected if expected is not None else seen)
         outcome.scope_results.append(ScopeResult(scope=scope, ok=True, documents=seen))
         # Per board, not per source: one tenant's board failing says nothing about another's.
         outcome.closable_scopes.append(scope)
+    tried = len(outcome.scope_results)
+    if not outcome.blocked and refused >= SOURCE_BURST and refused * 2 > tried:
+        outcome.blocked = f"{source}: {refused} of {tried} boards answered HTTP 403."
     return outcome
 
 
@@ -95,6 +119,8 @@ async def _sweep_one(
     # Raises rather than returning zero: a dead board must not read as "this board has no jobs".
     if response.status_code == 404:
         raise FetchError(f"{source} board {scope!r} does not exist (HTTP 404).")
+    if response.status_code == 403:
+        raise SourceRefused(f"{source} board {scope!r} answered HTTP 403.")
     if response.status_code != 200:
         raise FetchError(f"{source} board {scope!r} returned HTTP {response.status_code}.")
 

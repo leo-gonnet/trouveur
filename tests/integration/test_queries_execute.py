@@ -132,6 +132,7 @@ def _arguments(ctx: dict) -> dict[str, dict]:
         "coverage.areas": {},
         "coverage.tenant_states": {},
         "coverage.report_outcomes": {},
+        "coverage.blocked_sources": {},
         "coverage.by_source": {"area": ctx["profile"], "fresh_since": _cutoff()},
         # discovery -- the lead is inserted first so every read below has a row to touch.
         "discovery.insert_leads": {"rows": [ctx["lead_row"]]},
@@ -173,6 +174,7 @@ def _arguments(ctx: dict) -> dict[str, dict]:
         "ingest.close_stale": {"source": source, "older_than": timedelta(days=3650)},
         "ingest.close_retired": {"job_ids": []},
         "ingest.start_sweep": {"source": source},
+        "ingest.block_streaks": {},
         "ingest.record_sweep_progress": {"sweep_id": ctx["sweep_id"], "documents_seen": 7},
         "ingest.finish_sweep": {
             "sweep_id": ctx["sweep_id"], "ok": True, "complete": False, "partitions_total": 1,

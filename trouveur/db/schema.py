@@ -175,6 +175,7 @@ source_sweep = sa.Table(
     sa.Column("jobs_upserted", sa.Integer, nullable=False, server_default="0"),
     sa.Column("jobs_closed", sa.Integer, nullable=False, server_default="0"),
     sa.Column("error", sa.Text),
+    sa.Column("blocked", sa.Boolean, nullable=False, server_default="false"),
 )
 
 # The crawl set. In the database rather than the repository because more than one thing writes
@@ -271,6 +272,7 @@ source_scope_health = sa.Table(
     sa.Column("last_documents", sa.Integer, nullable=False, server_default="0"),
     sa.Column("last_error", sa.Text),
     sa.Column("consecutive_failures", sa.Integer, nullable=False, server_default="0"),
+    sa.Column("blocked", sa.Boolean, nullable=False, server_default="false"),
     # The last time a discovered board was tried AND judged, which is what bounds the trial: due
     # for one is a date comparison and the cap per run is a LIMIT. NULL means never tried, so a
     # freshly proposed board is first in the queue.

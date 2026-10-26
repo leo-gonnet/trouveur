@@ -380,6 +380,7 @@ async def record_scope_health(
             "last_documents": result.documents,
             "last_error": (result.error or "")[:2000] or None,
             "consecutive_failures": 0 if result.ok else 1,
+            "blocked": result.blocked,
         }
         for result in results
     ]
@@ -395,6 +396,7 @@ async def record_scope_health(
                 ),
                 "last_documents": stmt.excluded.last_documents,
                 "last_error": stmt.excluded.last_error,
+                "blocked": stmt.excluded.blocked,
                 "consecutive_failures": sa.case(
                     (stmt.excluded.consecutive_failures == 0, 0),
                     else_=source_scope_health.c.consecutive_failures + 1,

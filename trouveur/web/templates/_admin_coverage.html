@@ -12,6 +12,11 @@
     <em>Found</em> counts postings from a board nobody registered by hand — discovery proposed it
     and its trial sweep kept it.
   </p>
+  {% for row in coverage.blocked %}
+    <p class="notice warn"><strong>{{ row.source }}</strong> is blocked since
+      {{ row.since | localtime('%Y-%m-%d %H:%M') }}: its numbers below are what it held before,
+      not what the site has now.{% if row.error %} <span class="hint">{{ row.error }}</span>{% endif %}</p>
+  {% endfor %}
   {% if coverage.areas %}
     {% for entry in coverage.areas %}
       <div class="section-head">
