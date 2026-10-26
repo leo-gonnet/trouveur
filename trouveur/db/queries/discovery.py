@@ -11,6 +11,7 @@ transaction that read it, so it leaves the set and the next page starts where th
 
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
 
 import sqlalchemy as sa
@@ -325,8 +326,8 @@ async def payload_values(conn: AsyncConnection, *, origin: str, key: str) -> set
     return {row.value for row in rows if row.value}
 
 
-# Whether we already hold a job another site showed us, by company and title, open copies only.
-# The fold is applied to both sides here and nowhere else, so the two spellings cannot drift
+# Whether we already hold a job another site showed us, by company, title and place, open copies
+# only. The fold is applied to both sides here and nowhere else, so the two spellings cannot drift
 # apart. It drops a gender tag (`(m/w/d)`, `w/m/d`) from a title and a legal form from a company,
 # which is where one employer's job differs between its board and an aggregator; everything else
 # must match exactly.
@@ -349,28 +350,36 @@ def _company(column: str) -> str:
     return rf"btrim(regexp_replace({stripped}, '\s+', ' ', 'g'))"
 
 
-_HELD_BY_NAME = f"""
+# A town on the card is matched against our towns near it, a country only when the card names no
+# town. A posting not yet derived has no facets and is not found, which errs the same way.
+_HELD = f"""
 WITH wanted AS (
-    SELECT w.key, {_company("w.company")} AS company, {_title("w.title")} AS title
-    FROM unnest(CAST(:keys AS bigint[]), CAST(:companies AS text[]), CAST(:titles AS text[]))
-         AS w(key, company, title)
+    SELECT w.key, {_company("w.company")} AS company, {_title("w.title")} AS title,
+           w.place_ids, w.countries
+    FROM jsonb_to_recordset(CAST(:wanted AS jsonb))
+         AS w(key bigint, company text, title text, place_ids integer[], countries text[])
 )
 SELECT DISTINCT ON (w.key) w.key, j.id
 FROM wanted w
 JOIN job j ON {_company("j.company")} = w.company AND {_title("j.title")} = w.title
+JOIN job_facet f ON f.job_id = j.id
 WHERE j.closed_at IS NULL AND w.company <> '' AND w.title <> ''
+  AND (f.place_ids && w.place_ids
+       OR (cardinality(w.place_ids) = 0
+           AND (f.countries && w.countries OR f.unplaced_countries && w.countries)))
 ORDER BY w.key, j.id
 """
 
 
 async def held_jobs(
-    conn: AsyncConnection, wanted: Sequence[tuple[int, str, str]]
+    conn: AsyncConnection, wanted: dict[int, tuple[str, str, list[int], list[str]]]
 ) -> dict[int, int]:
-    """Our open copy of each wanted `(key, company, title)`, by the caller's key."""
+    """Our open copy of each wanted `key: (company, title, place_ids, countries)`."""
     if not wanted:
         return {}
-    keys, companies, titles = (list(column) for column in zip(*wanted, strict=True))
-    rows = await conn.execute(
-        sa.text(_HELD_BY_NAME), {"keys": keys, "companies": companies, "titles": titles}
-    )
-    return {row.key: row.id for row in rows}
+    rows = [
+        {"key": key, "company": company, "title": title, "place_ids": ids, "countries": codes}
+        for key, (company, title, ids, codes) in wanted.items()
+    ]
+    result = await conn.execute(sa.text(_HELD), {"wanted": json.dumps(rows)})
+    return {row.key: row.id for row in result}

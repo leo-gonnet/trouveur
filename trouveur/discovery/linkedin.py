@@ -33,9 +33,10 @@ from trouveur.db.queries import match as match_q
 from trouveur.db.queries import users as users_q
 from trouveur.discovery.work import record_leads
 from trouveur.ingest import places
+from trouveur.ingest.derive import derive
 from trouveur.match import expand
 from trouveur.match.pipeline import profile_from_row
-from trouveur.models import COUNTRY_NAMES, Lead, LeadOrigin, UserProfile
+from trouveur.models import COUNTRY_NAMES, CanonicalJob, Lead, LeadOrigin, Location, UserProfile
 from trouveur.sources.errors import FetchError, SourceBlocked
 from trouveur.sources.http import PoliteClient
 
@@ -53,12 +54,19 @@ EVERY = timedelta(hours=20)
 # A query longer than this is a sentence from the profile, which LinkedIn ANDs into nothing.
 MAX_QUERY_CHARS = 60
 MAX_QUERIES = 6
+# A held copy counts if it is within this distance of the town the card names: a suburb on one
+# site is the city on another.
+NEAR_KM = 30
+# A card naming more countries than this ("European Union") does not say where the job is.
+MAX_COUNTRIES = 2
 
 # Any tag: a card is not always a div. The urn is on the card; a card without one is read by its
 # link instead.
 _CARDS = ".base-search-card, [data-entity-urn^='urn:li:jobPosting:']"
 _JOB_ID = re.compile(r"/jobs/view/(?:[^/?#]*-)?(\d+)")
 _WALLS = ("/authwall", "/login", "/checkpoint", "/uas/")
+# What freehire and JobSpy both send; httpx's default `Accept: */*` is not what a page load asks.
+_HEADERS = {"Accept": "text/html", "Accept-Language": "en-US,en;q=0.9"}
 
 
 @dataclass(frozen=True)
@@ -149,7 +157,7 @@ def parse_cards(html: str) -> list[Card]:
 
 async def _page(client: PoliteClient, url: str, params: dict) -> str:
     """One page's HTML. Raises SourceBlocked at the first refusal."""
-    response = await client.get(url, params=params)
+    response = await client.get(url, params=params, headers=_HEADERS)
     final = str(response.url)
     if response.status_code in {403, 429, 999} or any(wall in final for wall in _WALLS):
         raise SourceBlocked(
@@ -223,22 +231,40 @@ async def harvest(
     return found
 
 
-async def judge(conn, leads: list[Lead]) -> list[Lead]:
-    """Mark each lead with our open copy of its job, by company and title, before it is recorded.
+def where(lead: Lead) -> tuple[list[int], list[str]] | None:
+    """Where a held copy may be: the towns near the one the card names, else the countries it
+    names. None when it names neither, or a region too wide for a match to prove anything."""
+    if not lead.location_text:
+        return None
+    facets = derive(
+        CanonicalJob(
+            source=SOURCE, external_id=lead.payload["linkedin_id"], url="",
+            title=lead.title or "", locations=[Location(raw=lead.location_text)],
+        )
+    )
+    if facets.place_ids:
+        return places.area(facets.place_ids, NEAR_KM)[0], []
+    countries = facets.countries or facets.unplaced_countries
+    return ([], countries) if 0 < len(countries) <= MAX_COUNTRIES else None
 
-    Strict on purpose: a false miss lowers the number, a false hit would hide a gap. A lead
-    missing either field is not judged at all, so it cannot count as a miss.
+
+async def judge(conn, leads: list[Lead]) -> list[Lead]:
+    """Mark each lead with our open copy of its job, by company, title and place, before it is
+    recorded.
+
+    Strict on purpose: a false miss lowers the number, a false hit would hide a gap -- a big
+    employer posts one title in many towns, and our Munich copy is not the Vienna job. A lead
+    missing a company, a title or a readable place is not judged, so it cannot count as a miss.
     """
-    by_name = [
-        (key, lead.company, lead.title)
-        for key, lead in enumerate(leads)
-        if lead.company and lead.title
-    ]
-    held = await discovery_q.held_jobs(conn, by_name)
-    judged = {key for key, _, _ in by_name}
+    wanted = {}
+    for key, lead in enumerate(leads):
+        place = where(lead) if lead.company and lead.title else None
+        if place is not None:
+            wanted[key] = (lead.company, lead.title, *place)
+    held = await discovery_q.held_jobs(conn, wanted)
     return [
         lead.model_copy(
-            update={"held": key in held if key in judged else None, "held_job_id": held.get(key)}
+            update={"held": key in held if key in wanted else None, "held_job_id": held.get(key)}
         )
         for key, lead in enumerate(leads)
     ]

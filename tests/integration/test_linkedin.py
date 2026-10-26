@@ -1,5 +1,5 @@
 """The daily LinkedIn pass against a real Postgres, over hand-written search pages: each job
-judged held or missed at first sight, and the number the coverage report shows."""
+judged held or missed at first sight, the number the coverage report shows, and the misses."""
 
 from __future__ import annotations
 
@@ -15,24 +15,26 @@ class _Response:
         self.url, self.text, self.status_code = url, text, 200
 
 
-def _card(job_id: int, company: str | None, title: str) -> str:
+def _card(job_id: int, company: str | None, title: str, place: str) -> str:
     subtitle = f'<h4 class="base-search-card__subtitle">{company}</h4>' if company else ""
     return (
         f'<div class="base-search-card" data-entity-urn="urn:li:jobPosting:{job_id}">'
         f'<h3 class="base-search-card__title">{title}</h3>{subtitle}'
-        '<span class="job-search-card__location">Wien, Österreich</span></div>'
+        f'<span class="job-search-card__location">{place}</span></div>'
     )
 
 
 class _Site:
-    """Job 1 is a posting we hold under a slightly different name, job 2 a company we have never
-    seen, job 3 a card that names no company."""
+    """Our Wien posting seen from a suburb, the same title at the same company in another country,
+    a company we have never seen, and two cards nothing can be judged on."""
 
     def __init__(self, company: str, title: str) -> None:
         self.cards = (
-            _card(1, f"{company} GmbH", f"{title} (m/w/d)")
-            + _card(2, "Ferne AG", "Prozessingenieur")
-            + _card(3, None, "Prozessingenieur")
+            _card(1, f"{company} GmbH", f"{title} (m/w/d)", "Schwechat, Österreich")
+            + _card(2, company, title, "München, Bayern, Deutschland")
+            + _card(3, "Ferne AG", "Prozessingenieur", "Wien, Wien, Österreich")
+            + _card(4, None, "Prozessingenieur", "Wien, Wien, Österreich")
+            + _card(5, company, title, "European Union")
         )
         self.asked: list[dict] = []
         self.attempts = None
@@ -59,9 +61,7 @@ async def test_each_job_is_judged_at_first_sight_and_counted_in_the_report(seede
         ours = (
             await conn.execute(
                 sa.select(job.c.id, job.c.company, job.c.title)
-                .where(job.c.source == "greenhouse", job.c.company.is_not(None))
-                .order_by(job.c.id)
-                .limit(1)
+                .where(job.c.source == "greenhouse", job.c.title == "Werkstudent Logistik")
             )
         ).one()
     site = _Site(ours.company, ours.title)
@@ -83,17 +83,25 @@ async def test_each_job_is_judged_at_first_sight_and_counted_in_the_report(seede
                 ).order_by(discovery_lead.c.id)
             )
         ).all()
-        recall = (await report(conn, horizon_days=7)).recall
+        card = await report(conn, horizon_days=7)
+    recall, missed = card.recall, card.misses
     assert [(row.linkedin_id, row.held, row.held_job_id) for row in leads] == [
         ("1", True, ours.id),
         ("2", False, None),
-        ("3", None, None),
-    ]
+        ("3", False, None),
+        ("4", None, None),
+        ("5", None, None),
+    ], "our Wien copy is not the München job, and a wide region proves nothing"
     assert {row.result for row in leads} == {"no_url"}
-    assert [(row.origin, row.seen, row.held) for row in recall] == [("linkedin", 2, 1)]
+    assert [(row.origin, row.seen, row.judged, row.held) for row in recall] == [
+        ("linkedin", 5, 3, 1)
+    ]
+    assert sorted((row.company, row.title) for row in missed) == [
+        ("Beispiel Tech", "Werkstudent Logistik"), ("Ferne AG", "Prozessingenieur")
+    ]
 
     assert await linkedin.run(settings) is None, "a second pass inside the day asks nothing"
     again = await linkedin.run(settings, force=True)
     assert again is not None and again.leads == [], "a job seen before is not judged again"
     async with connect() as conn:
-        assert await conn.scalar(sa.select(sa.func.count()).select_from(discovery_lead)) == 3
+        assert await conn.scalar(sa.select(sa.func.count()).select_from(discovery_lead)) == 5

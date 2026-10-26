@@ -10,9 +10,16 @@ import pytest
 
 from trouveur.config import Settings, get_settings
 from trouveur.discovery import linkedin
-from trouveur.discovery.linkedin import END_PAGE, Search, harvest, parse_cards, searches_for
+from trouveur.discovery.linkedin import (
+    END_PAGE,
+    Search,
+    harvest,
+    parse_cards,
+    searches_for,
+    where,
+)
 from trouveur.ingest import places
-from trouveur.models import UserProfile
+from trouveur.models import Lead, LeadOrigin, UserProfile
 from trouveur.sources import http
 from trouveur.sources.errors import FetchError
 
@@ -61,6 +68,23 @@ def test_towns_are_searched_before_countries_and_a_sentence_is_no_query(monkeypa
     ]
 
 
+def _lead(place: str | None) -> Lead:
+    return Lead(origin=LeadOrigin.LINKEDIN, company="Nahe", title="Prozessingenieur",
+                location_text=place, payload={"linkedin_id": "1"})
+
+
+def test_a_held_copy_must_be_near_the_town_the_card_names_or_in_its_country():
+    vienna = where(_lead("Wien, Wien, Österreich"))
+    assert vienna is not None and vienna[1] == []
+    near = set(vienna[0])
+    assert {place.id for place in places.named("Schwechat")} & near, "a suburb is the city"
+    assert not {place.id for place in places.named("München")} & near
+
+    assert where(_lead("Austria")) == ([], ["AT"])
+    assert where(_lead("European Union")) is None, "a wide region says nowhere"
+    assert where(_lead(None)) is None
+
+
 @pytest.fixture(autouse=True)
 def _no_sleep(monkeypatch):
     async def instant(_seconds):
@@ -83,6 +107,7 @@ class _Site:
             return httpx.Response(200, text="<html>Sign in</html>")
         start = int(parse_qs(urlsplit(str(request.url)).query)["start"][0])
         self.asked.append(start)
+        self.accept = request.headers.get("accept")
         if self.refuse_at is not None and len(self.asked) > self.refuse_at:
             return self.refusal(request)
         page = self.ids[start : start + 10]
@@ -104,6 +129,7 @@ async def test_a_search_runs_to_its_end_page_and_a_job_seen_before_is_no_new_lea
     found = await harvest(site.client(), _TWO, max_requests=30, known={"2"})
 
     assert found.error is None and found.searches_done == 2
+    assert site.accept == "text/html"
     assert site.asked == [0, 10, 20, 0, 10, 20]
     assert len(found.leads) == 19, "a job both searches show is one lead"
     assert "2" not in {lead.payload["linkedin_id"] for lead in found.leads}

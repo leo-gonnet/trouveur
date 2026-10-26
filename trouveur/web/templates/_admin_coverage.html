@@ -198,20 +198,39 @@
   <p class="hint">
     Jobs another site showed for the readers' own searches in their area, and how many we already
     held at that moment. It is recall against what a reader would find by searching that site,
-    not against the whole market. <em>Only on that site</em> is a job applied to on the site
-    itself: no board will ever bring it, so a high share there is the case for reading the site
-    in full.
+    not against the whole market. A job counts as held only when its company, title and town
+    match one of ours, so the share errs low. <em>Judged</em> leaves out jobs with no company or
+    no place we can read.
   </p>
   <table>
-    <tr><th>Site</th><th class="num">Jobs seen</th><th class="num">Already held</th></tr>
+    <tr><th>Site</th><th class="num">Jobs seen</th><th class="num">Judged</th>
+        <th class="num">Already held</th></tr>
     {% for row in coverage.recall %}
     <tr>
       <td>{{ row.origin }}</td>
       <td class="num">{{ '{:,}'.format(row.seen) }}</td>
+      <td class="num">{{ '{:,}'.format(row.judged) }}</td>
       <td class="num">{{ '{:,}'.format(row.held) }}{% if row.held_share is not none %}
         ({{ '{:.0%}'.format(row.held_share) }}){% endif %}</td>
     </tr>
     {% endfor %}
   </table>
+  {% if coverage.misses %}
+  <div class="section-head">
+    <h2>Jobs we did not have</h2>
+    <span class="hint">companies we miss most first</span>
+  </div>
+  <table>
+    <tr><th>Site</th><th>Company</th><th>Title</th><th>Place</th></tr>
+    {% for row in coverage.misses %}
+    <tr>
+      <td>{{ row.origin }}</td>
+      <td>{{ row.company }}{% if row.company_misses > 1 %} ({{ row.company_misses }}){% endif %}</td>
+      <td>{{ row.title }}</td>
+      <td>{{ row.location_text or '' }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% endif %}
 </section>
 {% endif %}
