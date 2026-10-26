@@ -158,8 +158,11 @@ async def run(
             sources=askable,
             source=only_source,
         )
+    # The enabled boards first: a block met on a trial board stops the source, and must not cost
+    # the boards we already sweep their night.
     for source, scopes in trials.items():
-        tenants[source] = sorted(set(tenants.get(source, [])) | set(scopes))
+        enabled = tenants.get(source, [])
+        tenants[source] = enabled + sorted(set(scopes) - set(enabled))
 
     sources = build_sources(tenants=tenants, only=only_source, disabled=disabled)
     # Filtered here as well as in the query, which `--source` and a missing adapter do not reach:

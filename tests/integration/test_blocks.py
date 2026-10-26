@@ -81,3 +81,20 @@ async def test_a_blocked_sweep_is_recorded_shown_and_then_paused(clean_db, monke
     client.delay = None
     await pipeline.run(settings=_only_greenhouse())
     assert client.delay == slower, "one good sweep does not bring back the pace that was blocked"
+
+
+async def test_a_block_on_a_trial_board_does_not_cost_the_enabled_boards_their_night(
+    clean_db, monkeypatch
+):
+    from trouveur.models import TenantOrigin
+
+    async with connect() as conn:
+        await admin_q.add_tenants(conn, "greenhouse", ["zzz-ours"], enabled=True)
+        await admin_q.add_tenants(
+            conn, "greenhouse", ["aaa-trial"], enabled=False, origin=TenantOrigin.DISCOVERED
+        )
+    client = _WallClient()
+    monkeypatch.setattr(pipeline, "PoliteClient", lambda: client)
+
+    await pipeline.run(settings=_only_greenhouse())
+    assert "zzz-ours" in client.requested[0], "the board we sweep is asked before the trial"
