@@ -98,3 +98,33 @@ async def test_a_block_on_a_trial_board_does_not_cost_the_enabled_boards_their_n
 
     await pipeline.run(settings=_only_greenhouse())
     assert "zzz-ours" in client.requested[0], "the board we sweep is asked before the trial"
+
+
+async def test_a_block_marks_tried_only_the_trial_boards_that_answered(clean_db, monkeypatch):
+    from trouveur.models import TenantOrigin
+
+    trials = ["t1", "t2", "t3", "t4"]
+    async with connect() as conn:
+        await admin_q.add_tenants(conn, "greenhouse", ["zzz-ours"], enabled=True)
+        await admin_q.add_tenants(
+            conn, "greenhouse", trials, enabled=False, origin=TenantOrigin.DISCOVERED
+        )
+
+    class _WallAtT2(_WallClient):
+        async def get(self, url, *, params=None, headers=None):
+            self.walled = "/t2/" in url
+            return await super().get(url, params=params, headers=headers)
+
+    client = _WallAtT2()
+    monkeypatch.setattr(pipeline, "PoliteClient", lambda: client)
+    await pipeline.run(settings=_only_greenhouse())
+
+    async with connect() as conn:
+        tried = (await conn.exec_driver_sql(
+            "SELECT scope FROM source_scope_health WHERE trial_at IS NOT NULL ORDER BY scope"
+        )).scalars().all()
+        due = await admin_q.tenants_due_for_trial(
+            conn, limit=10, recheck_days=30, sources=["greenhouse"]
+        )
+    assert tried == ["t1"]
+    assert sorted(due["greenhouse"]) == ["t2", "t3", "t4"]

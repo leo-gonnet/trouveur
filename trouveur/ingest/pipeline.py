@@ -58,6 +58,7 @@ class SourceReport:
     complete: bool = False
     error: str | None = None
     blocked: str | None = None
+    answered: set[str] = field(default_factory=set)
 
     @property
     def coverage_shortfall(self) -> int:
@@ -187,10 +188,16 @@ async def run(
     # in the next stage, must not be back in tomorrow's trial queue -- it would be swept every
     # night for ever, which is the one failure the cap exists to prevent. Only the sources a
     # cancelled run never reached are left unstamped; the boards of a source it did sweep were
-    # asked, and asking them again tomorrow would spend the cap twice over.
-    tried = {
-        source: scopes for source, scopes in trials.items() if source not in set(report.skipped)
-    }
+    # asked, and asking them again tomorrow would spend the cap twice over. A block stops the sweep
+    # partway, so there only the boards that answered were asked.
+    tried = {}
+    for source, scopes in trials.items():
+        if source in report.skipped:
+            continue
+        swept = report.per_source.get(source)
+        if swept and swept.blocked:
+            scopes = [scope for scope in scopes if scope in swept.answered]
+        tried[source] = scopes
     if tried:
         async with connect() as conn:
             report.trialled = await admin_q.record_trials(conn, tried)
@@ -282,6 +289,7 @@ async def _sweep_source(
             outcome.blocked = str(exc)
         log.warning("source %s failed: %s", source.name, exc, exc_info=True)
     report.blocked = outcome.blocked
+    report.answered = {result.scope for result in outcome.scope_results if not result.blocked}
 
     report.error = error or (
         "; ".join(outcome.errors)[:2000] if outcome.errors else None
