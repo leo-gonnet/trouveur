@@ -176,7 +176,7 @@ def _arguments(ctx: dict) -> dict[str, dict]:
         "ingest.close_stale": {"source": source, "older_than": timedelta(days=3650)},
         "ingest.close_retired": {"job_ids": []},
         "ingest.start_sweep": {"source": source},
-        "ingest.block_streaks": {},
+        "ingest.block_history": {"days": 14},
         "ingest.last_sweep_started": {"source": source},
         "ingest.record_sweep_progress": {"sweep_id": ctx["sweep_id"], "documents_seen": 7},
         "ingest.finish_sweep": {

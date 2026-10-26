@@ -13,6 +13,8 @@ from trouveur.sources.registry import SOURCES
 class _WallClient:
     def __init__(self) -> None:
         self.requested: list[str] = []
+        self.walled = True
+        self.delay = None
 
     async def __aenter__(self):
         return self
@@ -25,8 +27,12 @@ class _WallClient:
         return self
 
     async def get(self, url, *, params=None, headers=None):
+        import httpx
+
         self.requested.append(url)
-        raise SourceBlocked(f"{url} answered HTTP 429 after every retry.")
+        if self.walled:
+            raise SourceBlocked(f"{url} answered HTTP 429 after every retry.")
+        return httpx.Response(200, json={"jobs": []}, request=httpx.Request("GET", url))
 
 
 def _only_greenhouse():
@@ -63,9 +69,15 @@ async def test_a_blocked_sweep_is_recorded_shown_and_then_paused(clean_db, monke
 
     async with connect() as conn:
         await conn.exec_driver_sql(
-            "UPDATE source_sweep SET finished_at = now() - interval '2 hours', "
-            "started_at = now() - interval '2 hours'"
+            "UPDATE source_sweep SET finished_at = now() - interval '2 days', "
+            "started_at = now() - interval '2 days'"
         )
+    client.walled = False
+    slower = get_settings().request_delay_seconds * 2
     await pipeline.run(settings=_only_greenhouse())
-    assert len(client.requested) == 2, "after the pause the source is swept again"
-    assert client.delay == get_settings().request_delay_seconds * 2, "and more slowly"
+    assert len(client.requested) == 3, "after the pause the source is swept again"
+    assert client.delay == slower, "and more slowly"
+
+    client.delay = None
+    await pipeline.run(settings=_only_greenhouse())
+    assert client.delay == slower, "one good sweep does not bring back the pace that was blocked"

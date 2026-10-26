@@ -5,10 +5,10 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from trouveur.ingest.pipeline import pause_after, slowdown
+from trouveur.ingest.pipeline import SWEEP_PAUSE, pause_after, slowdown
 from trouveur.sources import http
 from trouveur.sources.board import sweep_boards
-from trouveur.sources.errors import SOURCE_BURST, SOURCE_PAUSE, FetchError, SourceBlocked
+from trouveur.sources.errors import SOURCE_BURST, FetchError, SourceBlocked
 from trouveur.sources.feed import require_list
 
 _CLOUDFLARE_WALL = (
@@ -126,7 +126,7 @@ async def test_one_private_board_is_not_a_block():
 
 
 def test_each_block_in_a_row_waits_longer_and_sweeps_slower():
-    assert pause_after(1) == SOURCE_PAUSE
-    assert pause_after(3) == SOURCE_PAUSE * 4
+    assert pause_after(1) == SWEEP_PAUSE, "a nightly source skips the next night"
+    assert pause_after(3) == SWEEP_PAUSE * 4
     assert pause_after(50).days == 7
     assert [slowdown(n) for n in (0, 1, 2, 9)] == [1, 2, 4, 16]

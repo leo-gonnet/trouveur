@@ -39,6 +39,8 @@ class ArbeitnowSource:
             sink,
             source=SOURCE,
             fetch=fetch,
+            # An empty page still carries `data` (probed 2026-10-26), so a body without it is
+            # a block, not "no jobs".
             extract=lambda payload: require_list(payload, "data", source=SOURCE),
             next_cursor=_next_url,
             identify=lambda row: row.get("slug"),

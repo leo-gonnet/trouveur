@@ -21,24 +21,28 @@ from trouveur.ingest.persist import persist
 from trouveur.models import RawDocument
 from trouveur.sources import build_sources
 from trouveur.sources.base import Source, SweepOutcome
-from trouveur.sources.errors import SOURCE_PAUSE, SourceBlocked
+from trouveur.sources.errors import SourceBlocked
 from trouveur.sources.http import PoliteClient
 from trouveur.sources.registry import SOURCES
 
 log = logging.getLogger(__name__)
 
-# How much slower a source is swept after each block in a row, at most.
+# A day, not the detail queue's hour: runs are nightly, so a shorter pause never skips one.
+SWEEP_PAUSE = timedelta(days=1)
+# A source stays slow this long after its last block, so one good sweep does not bring back the
+# pace that got it blocked.
+SLOW_DAYS = 14
 MAX_SLOWDOWN = 16
 
 
 def pause_after(blocks: int) -> timedelta:
     """How long a source is left alone after `blocks` blocked sweeps in a row: doubling, a week
     at most."""
-    return min(SOURCE_PAUSE * 2 ** min(max(blocks - 1, 0), 8), timedelta(days=7))
+    return min(SWEEP_PAUSE * 2 ** min(max(blocks - 1, 0), 8), timedelta(days=7))
 
 
-def slowdown(blocks: int) -> int:
-    return min(2 ** min(blocks, 8), MAX_SLOWDOWN)
+def slowdown(recent_blocks: int) -> int:
+    return min(2 ** min(recent_blocks, 8), MAX_SLOWDOWN)
 
 
 @dataclass
@@ -132,13 +136,16 @@ async def run(
     # What the trial queue is restricted to: a disabled source's candidates are never swept, so
     # never stamped, so they would take the cap's slots again on every run.
     async with connect() as conn:
-        streaks = await q.block_streaks(conn)
+        history = await q.block_history(conn, days=SLOW_DAYS)
     now = datetime.now(UTC)
     # `--source` is an operator asking for this one source now, so it is not held back.
     paused = {
-        source: last + pause_after(blocks)
-        for source, (blocks, last) in streaks.items()
-        if source in SOURCES and only_source is None and now < last + pause_after(blocks)
+        source: row.last_blocked_at + pause_after(row.streak)
+        for source, row in history.items()
+        if source in SOURCES
+        and only_source is None
+        and row.streak
+        and now < row.last_blocked_at + pause_after(row.streak)
     }
     disabled += list(paused)
     askable = sorted(set(SOURCES) - set(disabled))
@@ -162,9 +169,9 @@ async def run(
 
     delays = {
         source.name: (SOURCES[source.name].min_interval or settings.request_delay_seconds)
-        * slowdown(streaks[source.name][0] if source.name in streaks else 0)
+        * slowdown(history[source.name].recent if source.name in history else 0)
         for source in sources
-        if source.name in streaks or SOURCES[source.name].min_interval is not None
+        if source.name in history or SOURCES[source.name].min_interval is not None
     }
     async with PoliteClient() as client:
         report = await sweep_sources(
