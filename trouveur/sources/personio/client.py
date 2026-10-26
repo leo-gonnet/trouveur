@@ -11,7 +11,6 @@ before the status gate the shared sweep applies first.
 
 from __future__ import annotations
 
-from typing import Any
 from xml.etree import ElementTree
 
 from trouveur.models import DocumentKind, RawDocument
@@ -19,6 +18,7 @@ from trouveur.sources.base import DocumentSink, ScopeResult, SweepOutcome
 from trouveur.sources.board import BATCH, scoped_id
 from trouveur.sources.errors import FetchError
 from trouveur.sources.http import PoliteClient
+from trouveur.sources.parse import element_to_dict
 
 SOURCE = "personio"
 
@@ -100,22 +100,3 @@ def _positions(text: str, scope: str) -> list[dict]:
         if isinstance(record, dict) and str(record.get("id") or "").strip():
             records.append(record)
     return records
-
-
-def element_to_dict(node: ElementTree.Element) -> Any:
-    """One XML element as JSON-compatible data. Repeated sibling tags become a list, so a board
-    with one section and a board with several decode to the same shape."""
-    children = list(node)
-    if not children:
-        return (node.text or "").strip()
-
-    record: dict[str, Any] = {}
-    for child in children:
-        value = element_to_dict(child)
-        if child.tag in record:
-            existing = record[child.tag]
-            record[child.tag] = existing if isinstance(existing, list) else [existing]
-            record[child.tag].append(value)
-        else:
-            record[child.tag] = value
-    return record
