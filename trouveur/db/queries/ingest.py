@@ -330,3 +330,12 @@ async def block_streaks(conn: AsyncConnection) -> dict[str, tuple[int, datetime]
     """source -> (blocked sweeps in a row, when the last one finished)."""
     rows = await conn.execute(sa.text(_BLOCK_STREAKS))
     return {row.source: (int(row.blocks), row.last_blocked_at) for row in rows}
+
+
+async def last_sweep_started(conn: AsyncConnection, source: str) -> datetime | None:
+    """When the latest finished sweep of `source` began, or None if it never finished one."""
+    return await conn.scalar(
+        sa.select(sa.func.max(source_sweep.c.started_at)).where(
+            source_sweep.c.source == source, source_sweep.c.finished_at.is_not(None)
+        )
+    )

@@ -101,8 +101,8 @@
       {{ '{:,}'.format(coverage.leads.resolved) }} on a board we can sweep</span>
   </div>
   <p class="hint">
-    A <em>lead</em> is one job seen somewhere, with its link, found by reading the postings we
-    already hold. The link is read as a board, so one lead can bring that company's whole board
+    A <em>lead</em> is one job seen somewhere, with its link, found in the postings we already
+    hold, in a link a reader reported, or in a board list somebody else collected. The link is read as a board, so one lead can bring that company's whole board
     with it: a board we can sweep is added to the crawl set above, swept once on trial, and kept
     for every night if it had an open posting in a reader's area.
   </p>
@@ -112,6 +112,18 @@
       coverage.leads.unmined_jobs == 1 else 's' }} not yet read for links,
       {{ '{:,}'.format(coverage.leads.awaiting_resolve) }} lead{{ '' if
       coverage.leads.awaiting_resolve == 1 else 's' }} waiting for the current URL rules.</p>
+  {% endif %}
+  {% if coverage.leads.origins %}
+  <table>
+    <tr><th>Found by</th><th class="num">Leads</th><th class="num">New boards</th>
+        <th class="num">Tried</th><th class="num">Kept</th></tr>
+    {% for row in coverage.leads.origins %}
+    <tr><td>{{ row.label }}</td><td class="num">{{ '{:,}'.format(row.leads) }}</td>
+        <td class="num">{{ '{:,}'.format(row.boards) }}</td>
+        <td class="num">{{ '{:,}'.format(row.tried) }}</td>
+        <td class="num">{{ '{:,}'.format(row.kept) }}</td></tr>
+    {% endfor %}
+  </table>
   {% endif %}
   <div class="section-head">
     <h2>Links we cannot read</h2>

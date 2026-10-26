@@ -19,6 +19,8 @@ class LeadOrigin(StrEnum):
 
     ARCHIVE = "archive"
     USER_REPORT = "user_report"
+    LIST = "list"
+    FREEHIRE = "freehire"
 
 
 class LeadResult(StrEnum):
@@ -49,6 +51,8 @@ class Lead(BaseModel):
     """
 
     origin: LeadOrigin
+    # Which imported list, for a LIST lead: the coverage report counts boards per list.
+    list_name: str | None = None
     url: str | None = None
     # The posting the link was found in, for an archive lead. Its raw documents are the input the
     # lead was derived from, and they are kept for ever, so a re-mine needs no new request.
@@ -56,6 +60,8 @@ class Lead(BaseModel):
     company: str | None = None
     title: str | None = None
     location_text: str | None = None
+    # What the source said beyond the link, small fields only, for an origin we do not archive.
+    payload: dict | None = None
 
 
 class ReportOutcome(StrEnum):

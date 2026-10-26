@@ -129,6 +129,23 @@ class UnreadHost:
 
 
 @dataclass(frozen=True)
+class OriginCoverage:
+    """What one lead origin brought: boards proposed, swept once on trial, and kept nightly."""
+
+    origin: str
+    # The imported list, for `list` leads; empty for every other origin.
+    list_name: str
+    leads: int
+    boards: int
+    tried: int
+    kept: int
+
+    @property
+    def label(self) -> str:
+        return f"list {self.list_name}" if self.list_name else self.origin.replace("_", " ")
+
+
+@dataclass(frozen=True)
 class LeadCoverage:
     """What discovery has found, and what each of its stages still has to get through.
 
@@ -143,6 +160,7 @@ class LeadCoverage:
     unmined_jobs: int
     awaiting_resolve: int
     hosts: list[UnreadHost] = field(default_factory=list)
+    origins: list[OriginCoverage] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -319,6 +337,17 @@ async def leads(conn: AsyncConnection) -> LeadCoverage | None:
         hosts=[
             UnreadHost(host=row.host, leads=int(row.leads))
             for row in await discovery_q.unread_hosts(conn)
+        ],
+        origins=[
+            OriginCoverage(
+                origin=row.origin,
+                list_name=row.list_name,
+                leads=int(row.leads),
+                boards=int(row.boards),
+                tried=int(row.tried),
+                kept=int(row.kept),
+            )
+            for row in await discovery_q.by_origin(conn)
         ],
     )
 
