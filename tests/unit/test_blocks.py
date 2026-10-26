@@ -7,9 +7,11 @@ import pytest
 
 from trouveur.ingest.pipeline import SWEEP_PAUSE, pause_after, slowdown
 from trouveur.sources import http
+from trouveur.sources.arbeitsagentur.client import ArbeitsagenturSource
 from trouveur.sources.board import sweep_boards
 from trouveur.sources.errors import SOURCE_BURST, FetchError, SourceBlocked
 from trouveur.sources.feed import require_list
+from trouveur.sources.workday.client import WorkdaySource
 
 _CLOUDFLARE_WALL = (
     "<!DOCTYPE html><html><head><title>Just a moment...</title></head>"
@@ -123,6 +125,38 @@ async def test_one_private_board_is_not_a_block():
     assert outcome.blocked is None
     assert outcome.closable_scopes == ["eins", "zwei"]
     assert requested == ["eins", "privat", "zwei"]
+
+
+async def _nowhere(_documents):
+    return None
+
+
+async def test_a_block_stops_a_partitioned_sweep_instead_of_failing_each_partition():
+    asked = []
+
+    def handler(request):
+        if "berufsfeld" not in request.url.params:
+            facet = {"berufsfeld": {"counts": {"Bau": 1, "Pflege": 1}}}
+            return httpx.Response(200, json={"maxErgebnisse": 2, "facetten": facet})
+        asked.append(request.url.params["berufsfeld"])
+        return httpx.Response(429)
+
+    with pytest.raises(SourceBlocked):
+        await ArbeitsagenturSource().sweep(_client(handler), _nowhere)
+    assert set(asked) == {"Bau"}, "the partitions after the block are not asked"
+
+
+async def test_a_block_stops_a_workday_sweep_instead_of_failing_each_board():
+    asked = []
+
+    def handler(request):
+        asked.append(request.url.host)
+        return httpx.Response(429)
+
+    boards = ["eins:wd3:Karriere", "zwei:wd3:Karriere"]
+    with pytest.raises(SourceBlocked):
+        await WorkdaySource(boards=boards).sweep(_client(handler), _nowhere)
+    assert set(asked) == {"eins.wd3.myworkdayjobs.com"}, "the boards after the block are not asked"
 
 
 def test_each_block_in_a_row_waits_longer_and_sweeps_slower():
