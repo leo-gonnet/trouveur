@@ -250,7 +250,10 @@ async def _execute(settings: Settings, run) -> None:
     status, error = _match_verdict(matches)
     payload = {
         "summary": report.summary(),
-        "sources": {name: asdict(item) for name, item in report.per_source.items()},
+        "sources": {
+            name: {key: value for key, value in asdict(item).items() if key != "answered"}
+            for name, item in report.per_source.items()
+        },
         "matches": _match_payload(matches),
         "unprepared": unprepared,
         "boards_tried": report.trialled,

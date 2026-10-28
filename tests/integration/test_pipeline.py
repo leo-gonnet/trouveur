@@ -844,6 +844,44 @@ async def test_a_profile_with_nothing_to_search_for_is_skipped_not_failed(
     assert "no search queries" in finished.report["matches"][0]["skipped"]
 
 
+async def test_a_run_whose_sweep_answered_boards_records_its_report(
+    clean_db, gh_board, aa_listing, aa_detail, monkeypatch
+):
+    """The set of boards that answered went into the report as it was, which JSON cannot hold, so
+    two nightly runs failed after matching and skipped freehire and LinkedIn."""
+    from trouveur.config import get_settings
+    from trouveur.db.engine import connect
+    from trouveur.db.queries import admin as admin_q
+    from trouveur.ingest.pipeline import IngestReport, SourceReport
+    from trouveur.models import RunStatus, RunTrigger
+    from trouveur.runner import service
+
+    await seed_corpus(gh_board, aa_listing, aa_detail)
+
+    async def board_sweep(**kwargs):
+        return IngestReport(per_source={"greenhouse": SourceReport(answered={"acme"})})
+
+    async def nothing_to_prepare(_settings):
+        return 0
+
+    async def no_discovery(_settings):
+        return None
+
+    monkeypatch.setattr(service.ingest, "run", board_sweep)
+    monkeypatch.setattr(service, "prepare_arrivals", nothing_to_prepare)
+    monkeypatch.setattr(service.freehire, "run", no_discovery)
+    monkeypatch.setattr(service.linkedin, "run", no_discovery)
+    async with connect() as conn:
+        await admin_q.enqueue_run(conn, trigger=RunTrigger.SCHEDULED)
+        run = await admin_q.claim_next_run(conn)
+    await service._execute(get_settings(), run)
+    async with connect() as conn:
+        finished = (await admin_q.recent_runs(conn, limit=1))[0]
+
+    assert finished.status == RunStatus.SUCCESS.value
+    assert "greenhouse" in finished.report["sources"]
+
+
 async def test_a_round_that_moves_nothing_ends_the_wait(clean_db, gh_board, aa_listing, aa_detail,
                                                        monkeypatch):
     """A detail half that raised on every round moved nothing, and the run waited out its whole
