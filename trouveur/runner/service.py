@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 
@@ -22,7 +22,7 @@ from trouveur.ingest import pipeline as ingest
 from trouveur.ingest import workers
 from trouveur.match import pipeline as matching
 from trouveur.match import retrieve
-from trouveur.models import RunStatus, RunTrigger
+from trouveur.models import RunStage, RunStatus, RunTrigger
 from trouveur.notify import send_digests
 from trouveur.sources import build_sources
 from trouveur.sources.http import PoliteClient
@@ -214,25 +214,25 @@ async def _execute(settings: Settings, run) -> None:
     if run.match_user_id is not None:
         await _execute_match_only(settings, run)
         return
+    control = _progress_control(run.id)
     report = await ingest.run(
         only_source=run.only_source,
         backfill=run.backfill,
         settings=settings,
-        control=_progress_control(run.id),
+        control=control,
     )
     if report.cancelled:
-        # Before matching and digests: cancelling must not still spend a user's LLM credit.
-        async with connect() as conn:
-            await admin_q.finish_run(
-                conn,
-                run.id,
-                status=RunStatus.CANCELLED,
-                report={"summary": report.summary(), "skipped": report.skipped},
-            )
-        log.info("run %s cancelled after %d source(s)", run.id, len(report.per_source))
+        await _finish_cancelled(run.id, report)
         return
 
-    unprepared = await prepare_arrivals(settings)
+    await _set_stage(run.id, RunStage.PREPARE)
+    unprepared = await prepare_arrivals(settings, should_stop=control.should_stop)
+    # Before matching and digests: cancelling must not still spend a user's LLM credit.
+    if await control.should_stop():
+        await _finish_cancelled(run.id, report)
+        return
+
+    await _set_stage(run.id, RunStage.MATCH)
     # After the queues and before matching: a board on trial is judged on derived facets, and a
     # board switched on now has its postings already in the corpus for this run's match.
     # Isolated, because the next line is every reader's edition: a verdict about tomorrow's
@@ -245,12 +245,16 @@ async def _execute(settings: Settings, run) -> None:
     matches = await matching.run_all(settings)
     notified = 0
     if settings.smtp_host:
+        await _set_stage(run.id, RunStage.EMAIL)
         notified = await send_digests(settings)
 
     status, error = _match_verdict(matches)
     payload = {
         "summary": report.summary(),
-        "sources": {name: asdict(item) for name, item in report.per_source.items()},
+        "sources": {
+            name: {key: value for key, value in asdict(item).items() if key != "answered"}
+            for name, item in report.per_source.items()
+        },
         "matches": _match_payload(matches),
         "unprepared": unprepared,
         "boards_tried": report.trialled,
@@ -273,7 +277,25 @@ async def _execute(settings: Settings, run) -> None:
             log.exception("the LinkedIn pass failed; the next scheduled run retries it")
 
 
-async def prepare_arrivals(settings: Settings) -> int:
+async def _set_stage(run_id: int, stage: RunStage) -> None:
+    async with connect() as conn:
+        await admin_q.set_run_stage(conn, run_id, stage)
+
+
+async def _finish_cancelled(run_id: int, report: ingest.IngestReport) -> None:
+    async with connect() as conn:
+        await admin_q.finish_run(
+            conn,
+            run_id,
+            status=RunStatus.CANCELLED,
+            report={"summary": report.summary(), "skipped": report.skipped},
+        )
+    log.info("run %s cancelled after %d source(s)", run_id, len(report.per_source))
+
+
+async def prepare_arrivals(
+    settings: Settings, should_stop: Callable[[], Awaitable[bool]] | None = None
+) -> int:
     """Work the queues until every posting the match is about to consider has its facets and its
     vector, or MATCH_WAIT_LIMIT passes. Returns how many were still waiting.
 
@@ -291,6 +313,8 @@ async def prepare_arrivals(settings: Settings) -> int:
             waiting = await waiting_since(conn, since)
         if not waiting:
             return 0
+        if should_stop is not None and await should_stop():
+            return waiting
         drained = await drain_queues(settings)
         if datetime.now(UTC) >= deadline or not any(
             drained[kind.value] for kind in WorkKind
@@ -309,6 +333,7 @@ async def _execute_match_only(settings: Settings, run) -> None:
     switched back on -- means nothing has been judged under the terms that now apply. A run held
     after a sweep looks at that sweep's additions instead.
     """
+    await _set_stage(run.id, RunStage.MATCH)
     match = await matching.run_for_user(run.match_user_id, settings, whole_horizon=True)
     status, error = _match_verdict([match])
     payload = {"summary": match.summary(), "matches": _match_payload([match])}
@@ -319,6 +344,7 @@ async def _execute_match_only(settings: Settings, run) -> None:
 async def _tick(settings: Settings) -> None:
     async with connect() as conn:
         await admin_q.fail_orphaned_runs(conn)
+        await admin_q.fail_orphaned_sweeps(conn)
         await release_stale(conn)
         await _maybe_enqueue_scheduled(conn)
 

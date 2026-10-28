@@ -14,7 +14,7 @@ from trouveur.models.job import (
     dedup_key,
 )
 from trouveur.models.match import Expansion, RerankResult, UserState
-from trouveur.models.operations import RunStatus, RunTrigger, TenantOrigin
+from trouveur.models.operations import RunStage, RunStatus, RunTrigger, TenantOrigin
 from trouveur.models.profile import (
     BACKGROUND_MAX_CHARS,
     COUNTRY_NAMES,
@@ -47,6 +47,7 @@ __all__ = [
     "Location",
     "RawDocument",
     "RerankResult",
+    "RunStage",
     "RunStatus",
     "RunTrigger",
     "SalaryPeriod",

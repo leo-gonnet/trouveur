@@ -5,7 +5,14 @@
   {%- else %}{{ s }}s{%- endif -%}
 {% endmacro %}
 
+{% set stage_labels = {
+  'prepare': 'waiting for new postings to get a description, facets and a vector.',
+  'match': 'scoring postings for each reader.',
+  'email': 'sending the digest emails.',
+} %}
+
 {% if active_run %}
+  {% set stage = active_run.stage %}
   {% set total = active_run.sources_total or 0 %}
   {% set done = active_run.sources_done or 0 %}
   <div class="run-live">
@@ -17,11 +24,15 @@
         <span class="hint">waiting for the runner to pick it up</span>
       {% endif %}
       <span class="hint">{% if active_run.match_user_id %}match only · user {{ active_run.match_user_id }}{% else %}{{ active_run.only_source or 'all sources' }}{% if active_run.backfill %} · backfill{% endif %}{% endif %}</span>
+      {% if stage in (none, 'fetch', 'prepare') %}
       <form method="post" action="/admin/run/{{ active_run.id }}/cancel" class="inline">
         <button type="submit" {% if active_run.cancel_requested %}disabled{% endif %}>
-          {% if active_run.cancel_requested %}stopping after this source…{% else %}Cancel{% endif %}
+          {% if not active_run.cancel_requested %}Cancel
+          {%- elif stage == 'prepare' %}stopping…
+          {%- else %}stopping after this source…{% endif %}
         </button>
       </form>
+      {% endif %}
     </div>
 
     {% if total %}
@@ -33,10 +44,14 @@
         {% if eta_seconds %}
           about {{ duration(eta_seconds) }} left{% if eta_partial %} for the sources we have timings for{% endif %},
           based on how long each took before.
-        {% else %}
+        {% elif done < total %}
           No estimate yet — that needs at least one finished sweep per source to measure against.
         {% endif %}
       </p>
+    {% endif %}
+
+    {% if stage in stage_labels %}
+      <p class="hint">{% if total %}Fetching is over. {% endif %}Now: {{ stage_labels[stage] }}</p>
     {% endif %}
 
     {% if running_sweeps %}
@@ -65,7 +80,7 @@
     {% endfor %}
   </div>
   <p class="hint">
-    Work left over after fetching: descriptions to fetch, facets to derive, vectors to build.
-    These drain continuously and are not part of the run above.
+    Postings still waiting for a description, facets or a vector. The runner works on them all the
+    time, and a run waits for them before matching.
   </p>
 {% endif %}

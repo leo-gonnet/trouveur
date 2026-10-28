@@ -34,7 +34,7 @@ from trouveur.db.queries import (
     reports,
     users,
 )
-from trouveur.models import DocumentKind, Expansion, RawDocument, RunStatus, RunTrigger
+from trouveur.models import DocumentKind, Expansion, RawDocument, RunStage, RunStatus, RunTrigger
 
 MODULES = {
     "admin": admin, "archive": archive, "coverage": coverage, "discovery": discovery,
@@ -119,12 +119,14 @@ def _arguments(ctx: dict) -> dict[str, dict]:
         "admin.advance_run_progress": {
             "run_id": ctx["run_id"], "done": 1, "current_source": source,
         },
-        "admin.running_sweeps": {},
+        "admin.set_run_stage": {"run_id": ctx["run_id"], "stage": RunStage.PREPARE},
+        "admin.running_sweeps": {"since": _cutoff()},
         "admin.typical_sweep_seconds": {},
         "admin.recent_runs": {},
         "admin.active_run": {},
         "admin.pending_match_run": {"user_id": user_id},
         "admin.fail_orphaned_runs": {},
+        "admin.fail_orphaned_sweeps": {},
         "admin.facet_breakdown": {},
         "admin.queue_depth": {},
         # coverage -- the area carries the same four fields a profile does, so the location

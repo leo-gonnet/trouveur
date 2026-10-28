@@ -19,7 +19,7 @@ from trouveur.db.schema import (
     source_tenant,
     work_item,
 )
-from trouveur.models import RunStatus, RunTrigger, TenantOrigin
+from trouveur.models import RunStage, RunStatus, RunTrigger, TenantOrigin
 
 
 async def enabled_tenants(conn: AsyncConnection) -> dict[str, list[str]]:
@@ -723,7 +723,16 @@ async def start_run_progress(conn: AsyncConnection, run_id: int, sources_total: 
     await conn.execute(
         pipeline_run.update()
         .where(pipeline_run.c.id == run_id)
-        .values(sources_total=sources_total, sources_done=0, current_source=None)
+        .values(
+            sources_total=sources_total, sources_done=0, current_source=None,
+            stage=RunStage.FETCH.value,
+        )
+    )
+
+
+async def set_run_stage(conn: AsyncConnection, run_id: int, stage: RunStage) -> None:
+    await conn.execute(
+        pipeline_run.update().where(pipeline_run.c.id == run_id).values(stage=stage.value)
     )
 
 
@@ -737,8 +746,8 @@ async def advance_run_progress(
     )
 
 
-async def running_sweeps(conn: AsyncConnection) -> list[sa.Row]:
-    """Sweeps with no verdict yet -- the ones happening right now."""
+async def running_sweeps(conn: AsyncConnection, since: datetime) -> list[sa.Row]:
+    """Sweeps with no verdict yet that started since `since` -- the ones happening right now."""
     return list(
         await conn.execute(
             sa.select(
@@ -746,7 +755,7 @@ async def running_sweeps(conn: AsyncConnection) -> list[sa.Row]:
                 source_sweep.c.started_at,
                 source_sweep.c.documents_seen,
             )
-            .where(source_sweep.c.ok.is_(None))
+            .where(source_sweep.c.ok.is_(None), source_sweep.c.started_at >= since)
             .order_by(source_sweep.c.started_at)
         )
     )
@@ -793,6 +802,23 @@ async def fail_orphaned_runs(conn: AsyncConnection) -> int:
             status=RunStatus.FAILED.value,
             finished_at=sa.func.now(),
             error="The runner process disappeared while this run was in progress.",
+        )
+    )
+    return result.rowcount or 0
+
+
+async def fail_orphaned_sweeps(conn: AsyncConnection) -> int:
+    """Fail sweeps a dead process left without a verdict. The longest on record took two hours."""
+    result = await conn.execute(
+        source_sweep.update()
+        .where(
+            source_sweep.c.ok.is_(None),
+            source_sweep.c.started_at < sa.func.now() - sa.text("interval '1 day'"),
+        )
+        .values(
+            ok=False,
+            finished_at=sa.func.now(),
+            error="The process running this sweep disappeared before it finished.",
         )
     )
     return result.rowcount or 0
