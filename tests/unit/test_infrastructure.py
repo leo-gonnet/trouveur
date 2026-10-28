@@ -330,13 +330,17 @@ async def test_a_match_only_run_sweeps_nothing_and_matches_one_user(monkeypatch)
 
     monkeypatch.setattr(service.ingest, "run", fake_ingest_run)
     monkeypatch.setattr(service.matching, "run_for_user", fake_run_for_user)
+    async def fake_set_run_stage(conn, run_id, stage):
+        calls.append(f"stage:{stage}")
+
     monkeypatch.setattr(service.admin_q, "finish_run", fake_finish_run)
+    monkeypatch.setattr(service.admin_q, "set_run_stage", fake_set_run_stage)
     monkeypatch.setattr(service, "connect", lambda: _Conn())
 
     run = SimpleNamespace(id=7, match_user_id=42, only_source=None, backfill=False)
     await service._execute(None, run)
 
-    assert calls == ["match:42:wide"]
+    assert calls == ["stage:match", "match:42:wide"]
     assert finished["run_id"] == 7 and finished["status"] == service.RunStatus.SUCCESS
     assert finished["report"]["matches"][0]["scored"] == 2
 

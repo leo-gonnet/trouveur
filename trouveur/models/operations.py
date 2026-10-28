@@ -13,6 +13,13 @@ class RunStatus(StrEnum):
     CANCELLED = "cancelled"
 
 
+class RunStage(StrEnum):
+    FETCH = "fetch"
+    PREPARE = "prepare"
+    MATCH = "match"
+    EMAIL = "email"
+
+
 class RunTrigger(StrEnum):
     SCHEDULED = "scheduled"
     MANUAL = "manual"

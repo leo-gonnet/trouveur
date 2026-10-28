@@ -610,6 +610,31 @@ async def test_the_live_panel_renders_a_run_in_flight(admin):
     assert f"/admin/run/{run_id}/cancel" in body
 
 
+async def test_the_live_panel_shows_only_this_runs_sweeps_and_its_stage(admin):
+    """A sweep a crashed runner left open was listed as fetching for weeks, and a run past its
+    sweep read "10 of 10 sources done" for hours with nothing saying what it was doing."""
+    from trouveur.db.queries import admin as admin_q
+    from trouveur.db.queries import ingest as ingest_q
+    from trouveur.models import RunStage, RunTrigger
+
+    async with connect() as conn:
+        ghost_id, _ = await ingest_q.start_sweep(conn, "himalayas")
+        await conn.exec_driver_sql(
+            "UPDATE source_sweep SET started_at = now() - interval '40 days' WHERE id = $1",
+            (ghost_id,),
+        )
+        await admin_q.enqueue_run(conn, trigger=RunTrigger.MANUAL)
+        claimed = await admin_q.claim_next_run(conn)
+        await admin_q.start_run_progress(conn, claimed.id, 2)
+        await admin_q.advance_run_progress(conn, claimed.id, done=2, current_source=None)
+        await admin_q.set_run_stage(conn, claimed.id, RunStage.PREPARE)
+
+    body = (await admin.get("/admin/status")).text
+    assert "himalayas" not in body
+    assert "Fetching is over" in body
+    assert "No estimate yet" not in body
+
+
 async def test_cancelling_a_running_run_asks_rather_than_kills(admin):
     """A running sweep must not be torn down mid-source: it would look complete when it is not."""
     from trouveur.db.queries import admin as admin_q

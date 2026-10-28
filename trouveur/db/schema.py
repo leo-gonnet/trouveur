@@ -498,4 +498,5 @@ pipeline_run = sa.Table(
     sa.Column("sources_done", sa.SmallInteger, nullable=False, server_default="0"),
     sa.Column("current_source", sa.Text),
     sa.Column("match_user_id", sa.BigInteger),
+    sa.Column("stage", sa.Text),
 )

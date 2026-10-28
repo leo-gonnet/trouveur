@@ -747,7 +747,7 @@ async def test_a_scheduled_run_fails_and_records_why_when_the_key_is_rejected(
     async def no_sweep(**kwargs):
         return IngestReport()
 
-    async def nothing_to_prepare(_settings):
+    async def nothing_to_prepare(_settings, **_kwargs):
         return 0
 
     monkeypatch.setattr(llm.httpx, "AsyncClient", RejectingClient)
@@ -824,7 +824,7 @@ async def test_a_profile_with_nothing_to_search_for_is_skipped_not_failed(
     async def no_sweep(**kwargs):
         return IngestReport()
 
-    async def nothing_to_prepare(_settings):
+    async def nothing_to_prepare(_settings, **_kwargs):
         return 0
 
     async def no_freehire(_settings):
@@ -861,7 +861,7 @@ async def test_a_run_whose_sweep_answered_boards_records_its_report(
     async def board_sweep(**kwargs):
         return IngestReport(per_source={"greenhouse": SourceReport(answered={"acme"})})
 
-    async def nothing_to_prepare(_settings):
+    async def nothing_to_prepare(_settings, **_kwargs):
         return 0
 
     async def no_discovery(_settings):
@@ -880,6 +880,44 @@ async def test_a_run_whose_sweep_answered_boards_records_its_report(
 
     assert finished.status == RunStatus.SUCCESS.value
     assert "greenhouse" in finished.report["sources"]
+
+
+async def test_cancelling_while_preparing_stops_before_matching(
+    clean_db, gh_board, aa_listing, aa_detail, monkeypatch
+):
+    """Cancel was read only between sources, so once the sweep was over the button did nothing
+    and the run still spent every reader's credit."""
+    from trouveur.config import get_settings
+    from trouveur.db.engine import connect
+    from trouveur.db.queries import admin as admin_q
+    from trouveur.ingest.pipeline import IngestReport
+    from trouveur.models import RunStatus, RunTrigger
+    from trouveur.runner import service
+
+    await seed_corpus(gh_board, aa_listing, aa_detail)
+    async with connect() as conn:
+        await admin_q.enqueue_run(conn, trigger=RunTrigger.SCHEDULED)
+        run = await admin_q.claim_next_run(conn)
+
+    async def no_sweep(**kwargs):
+        return IngestReport()
+
+    async def cancelled_while_preparing(_settings, **_kwargs):
+        async with connect() as conn:
+            await admin_q.request_cancel(conn, run.id)
+        return 0
+
+    async def must_not_match(_settings):
+        raise AssertionError("a cancelled run must not match")
+
+    monkeypatch.setattr(service.ingest, "run", no_sweep)
+    monkeypatch.setattr(service, "prepare_arrivals", cancelled_while_preparing)
+    monkeypatch.setattr(service.matching, "run_all", must_not_match)
+    await service._execute(get_settings(), run)
+    async with connect() as conn:
+        finished = (await admin_q.recent_runs(conn, limit=1))[0]
+
+    assert finished.status == RunStatus.CANCELLED.value
 
 
 async def test_a_round_that_moves_nothing_ends_the_wait(clean_db, gh_board, aa_listing, aa_detail,

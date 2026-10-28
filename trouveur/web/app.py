@@ -933,17 +933,28 @@ async def _run_status() -> dict:
     """
     async with connect() as conn:
         active = await admin_q.active_run(conn)
-        running = await admin_q.running_sweeps(conn)
+        running = []
+        if active is not None and active.started_at:
+            running = await admin_q.running_sweeps(conn, since=active.started_at)
         queues = await backlog(conn)
         typical = await admin_q.typical_sweep_seconds(conn)
         done_sources = set()
         remaining_estimate = None
         unknown_sources = 0
-        if active is not None and active.sources_total:
-            done_sources = {row.source for row in await admin_q.recent_sweeps(conn, limit=40)}
+        if active is not None and active.sources_total and active.started_at:
+            done_sources = {
+                row.source
+                for row in await admin_q.recent_sweeps(conn, limit=40)
+                if row.started_at >= active.started_at
+            }
             pending = max(active.sources_total - (active.sources_done or 0), 0)
             if pending:
-                known = [typical[name] for name in typical if name not in done_sources]
+                candidates = [active.only_source] if active.only_source else typical
+                known = [
+                    typical[name]
+                    for name in candidates
+                    if name in typical and name not in done_sources
+                ]
                 unknown_sources = max(pending - len(known), 0)
                 remaining_estimate = sum(sorted(known, reverse=True)[:pending]) or None
     now = datetime.now(UTC)
