@@ -60,8 +60,10 @@ def lexical_position(
     def before(other_rank: float, other_posted: datetime | None) -> bool:
         if other_rank != rank:
             return other_rank > rank
+        # SQL orders ties by posted_at alone, so undated peers come in no fixed order: placing the
+        # job behind them never claims a find that search may not repeat.
         if other_posted is None:
-            return False
+            return posted_at is None
         return posted_at is None or other_posted > posted_at
 
     return sum(before(other_rank, other_posted) for other_rank, other_posted in pool)
