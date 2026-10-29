@@ -262,10 +262,9 @@ async def test_the_page_shows_the_same_numbers_as_the_command(admin):  # noqa: F
         for row in card.areas[0].sources
     ), "no row holds three different numbers, so a wrong column would still read correctly"
 
-    response = await admin.get("/admin/coverage")
+    response = await admin.get("/admin/coverage/areas")
     assert response.status_code == 200
-    # Both tables name a source in the first cell, so only the coverage one is read.
-    body = response.text.split("Crawl set by source")[0]
+    body = response.text
     assert card.areas[0].area.label in body
     for row in card.areas[0].sources:
         assert _rendered_row(body, row.source)[:3] == [
@@ -284,5 +283,5 @@ async def test_an_area_we_collected_nothing_for_says_so(admin):  # noqa: F811
         )
     assert (await _report()).areas[0].open_jobs == 0, "the fixture left postings in the area"
 
-    body = (await admin.get("/admin/coverage")).text
-    assert "Nothing at all has been collected for this area" in body
+    body = (await admin.get("/admin/coverage/areas")).text
+    assert "We hold nothing for this area" in body

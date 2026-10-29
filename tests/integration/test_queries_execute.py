@@ -31,6 +31,7 @@ from trouveur.db.queries import (
     ingest,
     jobs,
     match,
+    quality,
     reports,
     users,
 )
@@ -38,7 +39,8 @@ from trouveur.models import DocumentKind, Expansion, RawDocument, RunStage, RunS
 
 MODULES = {
     "admin": admin, "archive": archive, "coverage": coverage, "discovery": discovery,
-    "ingest": ingest, "jobs": jobs, "match": match, "reports": reports, "users": users,
+    "ingest": ingest, "jobs": jobs, "match": match, "quality": quality, "reports": reports,
+    "users": users,
 }
 
 
@@ -107,12 +109,10 @@ def _arguments(ctx: dict) -> dict[str, dict]:
         "admin.system_overview": {"fresh_since": _cutoff()},
         "admin.tenants_needing_attention": {},
         "admin.description_coverage": {},
-        "admin.ensure_schedule": {},
-        "admin.get_schedule": {},
-        "admin.update_schedule": {"values": {"enabled": True, "run_hour": 6, "run_minute": 30}},
-        "admin.enqueue_run": {"trigger": RunTrigger.MANUAL, "only_source": source},
+        "admin.enqueue_run": {"trigger": RunTrigger.MANUAL},
         "admin.claim_next_run": {},
         "admin.finish_run": {"run_id": ctx["run_id"], "status": RunStatus.SUCCESS, "report": {}},
+        "admin.record_run_report": {"run_id": ctx["run_id"], "report": {}},
         "admin.request_cancel": {"run_id": ctx["run_id"]},
         "admin.cancel_requested": {"run_id": ctx["run_id"]},
         "admin.start_run_progress": {"run_id": ctx["run_id"], "sources_total": 3},
@@ -211,6 +211,17 @@ def _arguments(ctx: dict) -> dict[str, dict]:
             "profile": ctx["profile"], "query": "ingenieur", "limit": 5,
             "fresh_since": _cutoff(), "seen_since": _cutoff(),
         },
+        "match.dense_distances": {
+            "profile": ctx["profile"], "vector": [0.01] * 768, "limit": 5,
+            "fresh_since": _cutoff(), "seen_since": _cutoff(),
+        },
+        "match.distances_to": {"vector": [0.01] * 768, "vectors": [[0.02] * 768]},
+        "match.lexical_ranks": {
+            "profile": ctx["profile"], "query": "ingenieur", "limit": 5,
+            "fresh_since": _cutoff(), "seen_since": _cutoff(),
+        },
+        "match.lexical_for": {"query": "ingenieur", "job_ids": [job_id]},
+        "match.in_area": {"profile": ctx["profile"], "job_ids": [job_id]},
         "match.editions": {"user_id": user_id},
         "match.edition": {
             "user_id": user_id, "day": _today(), "profile_version": 1, "limit": 50,
@@ -246,6 +257,12 @@ def _arguments(ctx: dict) -> dict[str, dict]:
         "users.get_user_by_email": {"email": ctx["email"]},
         "users.get_user": {"user_id": user_id},
         "users.list_users": {},
+        "quality.needles": {"user_id": user_id},
+        "quality.needle_texts": {"job_ids": [job_id]},
+        "quality.record_check": {"user_id": user_id, "profile_version": 1, "ranks": {job_id: 3}},
+        "quality.checks": {"user_id": user_id, "since": _cutoff()},
+        "quality.needle_jobs": {"user_id": user_id, "job_ids": [job_id]},
+        "quality.scores": {"user_id": user_id, "since": _cutoff()},
         "users.create_user": {"email": "probe@example.test", "password_hash": "argon2$probe"},
         "users.record_login_result": {
             "user_id": user_id, "success": False, "lockout_minutes": 15, "max_attempts": 5,

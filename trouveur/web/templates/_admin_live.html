@@ -1,0 +1,59 @@
+{% import "_ops.html" as ops %}
+{% set step_names = dict(ops.RUN_STEPS) %}
+{% if active_run %}
+  {% set stage = active_run.stage %}
+  {% set total = active_run.sources_total or 0 %}
+  {% set done = active_run.sources_done or 0 %}
+  <div class="run-live">
+    <div class="run-line">
+      {{ ops.run_status(active_run.status) }}
+      <span>{% if active_run.match_user_id %}scoring only · user {{ active_run.match_user_id }}{% else %}daily run{% endif %}</span>
+      {% if active_run.started_at %}
+        <span class="hint">for {{ ops.duration(elapsed_seconds) }}{% if stage in step_names %} · now: {{ step_names[stage] }}{% endif %}</span>
+      {% else %}
+        <span class="hint">starts within seconds</span>
+      {% endif %}
+      {% if stage in (none, 'fetch', 'prepare') %}
+      <form method="post" action="/admin/run/{{ active_run.id }}/cancel" class="inline">
+        <button type="submit" {% if active_run.cancel_requested %}disabled{% endif %}>
+          {% if not active_run.cancel_requested %}Cancel
+          {%- elif stage == 'prepare' %}stopping…
+          {%- else %}stopping after this source…{% endif %}
+        </button>
+      </form>
+      {% endif %}
+    </div>
+
+    {% if total and stage in (none, 'fetch') %}
+      <div class="bar" role="progressbar" aria-valuenow="{{ done }}" aria-valuemin="0" aria-valuemax="{{ total }}">
+        <span style="width: {{ (100 * done / total) | round(1) }}%"></span>
+      </div>
+      <p class="hint">
+        {{ done }} of {{ total }} sources done.
+        {% if eta_seconds %}
+          About {{ ops.duration(eta_seconds) }} left{% if eta_partial %}, maybe more{% endif %}.
+        {% elif done < total %}
+          No time estimate yet.
+        {% endif %}
+      </p>
+    {% endif %}
+
+    {% if running_sweeps %}
+      <table class="compact">
+        <tr><th>Fetching now</th><th class="num">Postings read</th><th class="num">For</th></tr>
+        {% for s in running_sweeps %}
+          <tr>
+            <td>{{ s.source }}</td>
+            <td class="num">{{ ops.count(s.documents_seen) }}</td>
+            <td class="num">{{ ops.duration(sweep_elapsed.get(s.source, 0)) }}</td>
+          </tr>
+        {% endfor %}
+      </table>
+    {% endif %}
+
+    {% set waiting = queues | sum(attribute='waiting') %}
+    {% if stage == 'prepare' and waiting %}
+      <p class="hint">Waiting for {{ ops.count(waiting) }} postings to get their description, facets and vector.</p>
+    {% endif %}
+  </div>
+{% endif %}

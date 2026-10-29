@@ -6,6 +6,7 @@ read a secret from a file inside the repo (see AGENTS.md).
 
 from __future__ import annotations
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 USER_AGENT = "trouveur/0.2 (+self-hosted job search; contact via repository owner)"
@@ -19,6 +20,13 @@ class Settings(BaseSettings):
     # operator typed, and the day an edition is published into. Not per user: the nightly scan is
     # shared, so its hour needs one answer, and the corpus is one region's boards.
     timezone: str = "Europe/Vienna"
+
+    # The daily run, a wall-clock time in `timezone`. Early, so the run is over and the emails
+    # are out before the reader's morning, and the sources are swept while their own traffic is
+    # lowest, which is when a block is least likely.
+    run_daily: bool = True
+    run_hour: int = Field(3, ge=0, le=23)
+    run_minute: int = Field(30, ge=0, le=59)
 
     # What the deploy pulled. deploy.yml rewrites this in .env to the pushed commit and compose
     # resolves the image tag from it, so it cannot disagree with the code that is running: a

@@ -1,0 +1,11 @@
+{% extends "base.html" %}{% import "_ops.html" as ops %}
+{% block title %}{{ ops.PAGES[admin_page][1] }} · Operations · Trouveur{% endblock %}
+{% block subbar %}
+<nav class="subbar"><div class="band">
+  <span class="label">Operations</span>
+  {% for key, (href, name) in ops.PAGES.items() %}
+    <a href="{{ href }}" {% if key == admin_page %}aria-current="page"{% endif %}>{{ name }}</a>
+  {% endfor %}
+</div></nav>
+{% endblock %}
+{% block content %}{% block admin %}{% endblock %}{% endblock %}

@@ -47,18 +47,20 @@
       <a href="/settings" {% if active == 'settings' %}aria-current="page"{% endif %}>Settings</a>
       {% if request.state.is_admin %}
         <span class="label menu-group">Admin</span>
-        <a href="/admin" {% if active == 'admin' %}aria-current="page"{% endif %}>Operations</a>
-        <a href="/users" {% if active == 'users' %}aria-current="page"{% endif %}>Users</a>
+        <a href="/admin" {% if active in ('admin', 'users') %}aria-current="page"{% endif %}>Operations</a>
       {% endif %}
       <form method="post" action="/logout"><button type="submit" class="ghost">Log out</button></form>
     </div>
   </details>
  </div>
 </header>
+{# Only where it explains something: the empty Recommendations page. #}
 {% if request.state.scoring_unconfigured %}
+{% if active == 'recommendations' %}
 <div class="banner warn"><div class="band">This installation has no
   <code>OPENROUTER_API_KEY</code>, so nothing is scored and Recommendations stays empty. Search
   and the free stages still work.</div></div>
+{% endif %}
 {% elif request.state.out_of_credit %}
 {# "Ask an administrator" would be telling an admin to ask themselves. #}
 <div class="banner warn"><div class="band">Your credit is used up, so nothing new will be
@@ -67,6 +69,7 @@
   Search and the free stages still work.</div></div>
 {% endif %}
 {% endif %}
+{% block subbar %}{% endblock %}
 <main>{% block content %}{% endblock %}</main>
 <footer class="foot">
  <div class="band">

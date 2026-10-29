@@ -1,4 +1,4 @@
-"""Operational SQL: the board registry, the run queue, the schedule and the health panels."""
+"""Operational SQL: the board registry, the run queue and the health panels."""
 
 from __future__ import annotations
 
@@ -13,13 +13,13 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from trouveur.db.schema import (
     job,
     pipeline_run,
-    pipeline_schedule,
     source_scope_health,
     source_sweep,
     source_tenant,
     work_item,
 )
 from trouveur.models import RunStage, RunStatus, RunTrigger, TenantOrigin
+from trouveur.work.queue import MAX_ATTEMPTS
 
 
 async def enabled_tenants(conn: AsyncConnection) -> dict[str, list[str]]:
@@ -470,11 +470,14 @@ async def recent_sweeps(conn: AsyncConnection, limit: int = 20) -> list[sa.Row]:
 async def source_health(conn: AsyncConnection) -> list[sa.Row]:
     """Latest sweep per source, with completeness and partition overflow -- not just success. A
     sweep that reached only the first 10000 rows of a partition looks healthy by any count."""
+    # Finished sweeps only: one still running has `ok` NULL, which read as "failed" for as long
+    # as it ran, and hid the previous verdict that is the actual answer.
     latest = (
         sa.select(
             source_sweep.c.source,
             sa.func.max(source_sweep.c.started_at).label("started_at"),
         )
+        .where(source_sweep.c.finished_at.isnot(None))
         .group_by(source_sweep.c.source)
         .subquery()
     )
@@ -565,40 +568,14 @@ async def description_coverage(conn: AsyncConnection) -> int:
     )
 
 
-async def ensure_schedule(conn: AsyncConnection) -> None:
-    await conn.execute(
-        pg_insert(pipeline_schedule)
-        .values(id=1)
-        .on_conflict_do_nothing(index_elements=[pipeline_schedule.c.id])
-    )
-
-
-async def get_schedule(conn: AsyncConnection) -> sa.Row:
-    await ensure_schedule(conn)
-    return (
-        await conn.execute(pipeline_schedule.select().where(pipeline_schedule.c.id == 1))
-    ).one()
-
-
-async def update_schedule(conn: AsyncConnection, values: dict[str, Any]) -> None:
-    await conn.execute(
-        pipeline_schedule.update()
-        .where(pipeline_schedule.c.id == 1)
-        .values(**values, updated_at=sa.func.now())
-    )
-
-
 async def enqueue_run(
-    conn: AsyncConnection, *, trigger: RunTrigger, only_source: str | None = None,
-    backfill: bool = False, match_user_id: int | None = None,
+    conn: AsyncConnection, *, trigger: RunTrigger, match_user_id: int | None = None
 ) -> int:
     return (
         await conn.execute(
             pipeline_run.insert()
             .values(
                 trigger=RunTrigger(trigger).value,
-                only_source=only_source,
-                backfill=backfill,
                 match_user_id=match_user_id,
             )
             .returning(pipeline_run.c.id)
@@ -660,6 +637,16 @@ async def finish_run(
             status=RunStatus(status).value, finished_at=sa.func.now(), report=report,
             error=(error or "")[:4000] or None,
         )
+    )
+
+
+async def record_run_report(
+    conn: AsyncConnection, run_id: int, *, report: dict, error: str | None = None
+) -> None:
+    await conn.execute(
+        pipeline_run.update()
+        .where(pipeline_run.c.id == run_id)
+        .values(report=report, error=(error or "")[:4000] or None)
     )
 
 
@@ -725,15 +712,25 @@ async def start_run_progress(conn: AsyncConnection, run_id: int, sources_total: 
         .where(pipeline_run.c.id == run_id)
         .values(
             sources_total=sources_total, sources_done=0, current_source=None,
-            stage=RunStage.FETCH.value,
+            **_entering(RunStage.FETCH),
         )
     )
 
 
 async def set_run_stage(conn: AsyncConnection, run_id: int, stage: RunStage) -> None:
     await conn.execute(
-        pipeline_run.update().where(pipeline_run.c.id == run_id).values(stage=stage.value)
+        pipeline_run.update().where(pipeline_run.c.id == run_id).values(**_entering(stage))
     )
+
+
+def _entering(stage: RunStage) -> dict[str, Any]:
+    """The stage, and when it began. A stage ends when the next one begins or the run finishes."""
+    return {
+        "stage": stage.value,
+        "stage_started": pipeline_run.c.stage_started.op("||")(
+            sa.func.jsonb_build_object(stage.value, sa.func.now())
+        ),
+    }
 
 
 async def advance_run_progress(
@@ -844,13 +841,25 @@ async def facet_breakdown(conn: AsyncConnection, limit: int = 12) -> list[sa.Row
 
 
 async def queue_depth(conn: AsyncConnection) -> list[sa.Row]:
+    """Per kind: items waiting, being worked on, and stuck, which are three disjoint counts.
+
+    `oldest` is the oldest waiting item. A stuck one is never retried, so counting it made the
+    queue look as if it had stopped moving when it had not.
+    """
+    stuck = work_item.c.attempts >= MAX_ATTEMPTS
+    working = sa.and_(~stuck, work_item.c.claimed_at.isnot(None))
+    waiting = sa.and_(~stuck, work_item.c.claimed_at.is_(None))
     return list(
         await conn.execute(
             sa.select(
                 work_item.c.kind,
-                sa.func.count().label("total"),
-                sa.func.min(work_item.c.created_at).label("oldest"),
-            ).group_by(work_item.c.kind)
+                sa.func.count().filter(waiting).label("waiting"),
+                sa.func.count().filter(working).label("working"),
+                sa.func.count().filter(stuck).label("stuck"),
+                sa.func.min(work_item.c.created_at).filter(waiting).label("oldest"),
+            )
+            .group_by(work_item.c.kind)
+            .order_by(work_item.c.kind)
         )
     )
 

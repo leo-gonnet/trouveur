@@ -1,0 +1,6 @@
+{% extends "admin_base.html" %}
+{% block admin %}
+<div class="stack" hx-get="/admin/runs/live" hx-trigger="every 3s" hx-swap="innerHTML">
+  {% include "_admin_runs.html" %}
+</div>
+{% endblock %}

@@ -12,7 +12,7 @@ import logging
 import re
 import subprocess
 from collections.abc import Iterable
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -29,6 +29,7 @@ from trouveur.db.engine import connect
 from trouveur.db.queries import admin as admin_q
 from trouveur.db.queries import freshness
 from trouveur.db.queries import match as match_q
+from trouveur.db.queries import quality as quality_q
 from trouveur.db.queries import reports as reports_q
 from trouveur.db.queries import users as users_q
 from trouveur.ingest import places
@@ -44,8 +45,7 @@ from trouveur.models import (
     UserState,
 )
 from trouveur.sources.registry import NORMALIZERS
-from trouveur.web import auth
-from trouveur.work import backlog
+from trouveur.web import auth, linechart, outcome, quality, timeline
 
 log = logging.getLogger(__name__)
 
@@ -237,8 +237,8 @@ PUBLIC_PREFIXES = ("/static/",)
 
 # Admin by prefix rather than per route, for the same reason the session check is middleware: a
 # per-route check is a line somebody forgets on the next route, and the route that leaks is always
-# the newest one. Operations owns the shared schedule and queues real sweeps, so it is not one
-# reader's to retime; Users creates accounts and grants credit.
+# the newest one. Operations can cancel the shared run, so it is not one reader's to stop; Users
+# creates accounts and grants credit.
 ADMIN_PREFIXES = ("/admin", "/users")
 
 
@@ -901,6 +901,7 @@ async def _users_response(
         "users.html",
         {
             "active": "users",
+            "admin_page": "users",
             "users": users,
             "error": error,
             # The generated password, shown exactly once: in this response and nowhere after it.
@@ -936,7 +937,7 @@ async def _run_status() -> dict:
         running = []
         if active is not None and active.started_at:
             running = await admin_q.running_sweeps(conn, since=active.started_at)
-        queues = await backlog(conn)
+        queues = await admin_q.queue_depth(conn)
         typical = await admin_q.typical_sweep_seconds(conn)
         done_sources = set()
         remaining_estimate = None
@@ -949,11 +950,8 @@ async def _run_status() -> dict:
             }
             pending = max(active.sources_total - (active.sources_done or 0), 0)
             if pending:
-                candidates = [active.only_source] if active.only_source else typical
                 known = [
-                    typical[name]
-                    for name in candidates
-                    if name in typical and name not in done_sources
+                    seconds for name, seconds in typical.items() if name not in done_sources
                 ]
                 unknown_sources = max(pending - len(known), 0)
                 remaining_estimate = sum(sorted(known, reverse=True)[:pending]) or None
@@ -977,76 +975,179 @@ async def _run_status() -> dict:
     }
 
 
+def _admin_page(request: Request, page: str, context: dict) -> HTMLResponse:
+    return templates.TemplateResponse(
+        request, f"admin_{page}.html", {"active": "admin", "admin_page": page, **context}
+    )
+
+
 @app.get("/admin", response_class=HTMLResponse)
 async def admin(request: Request):
-    """The operations console: what the pipeline is doing, and what it has produced.
+    """Is everything OK: one verdict per area, each linking to the page that explains it.
 
-    One page rather than two. Everything on it answers the same question -- is the corpus being
-    collected properly -- and the operator who reads it is the only person who can act on any of
-    it, so splitting it meant checking two pages to answer one question.
+    Built from the same queries as those pages, never a second count of the same thing. The
+    coverage report is left out: it is the one slow query, and this page must always load.
     """
     async with connect() as conn:
-        schedule = await admin_q.get_schedule(conn)
-        runs = await admin_q.recent_runs(conn)
-        sweeps = await admin_q.recent_sweeps(conn)
+        health = await admin_q.source_health(conn)
+        _, tenant_totals = await admin_q.tenants_needing_attention(conn, limit=0)
+        queues = await admin_q.queue_depth(conn)
         overview = await admin_q.system_overview(
             conn, freshness.fresh_since(get_settings().retrieval_horizon_days)
         )
-        health = await admin_q.source_health(conn)
-        # NOT `queues`: _run_status() spreads one of its own, keyed by kind, into this context.
-        queue_ages = await admin_q.queue_depth(conn)
-        countries = await admin_q.facet_breakdown(conn)
-        tenants, tenant_totals = await admin_q.tenants_needing_attention(conn)
-    return templates.TemplateResponse(
+        active = await admin_q.active_run(conn)
+    last_runs = await _last_runs()
+    finished = [
+        run for run in last_runs["runs"]
+        if run.finished_at is not None and run.match_user_id is None
+    ]
+    return _admin_page(
         request,
-        "admin.html",
+        "overview",
         {
-            "active": "admin",
-            "schedule": schedule,
-            "runs": runs,
-            "sweeps": sweeps,
-            "overview": overview,
+            "active_run": active,
+            "last_run": finished[0] if finished else None,
+            "timeline": last_runs["timeline"],
+            "steps": last_runs["steps"],
             "health": health,
-            "queue_ages": queue_ages,
-            "countries": countries,
-            "tenants": tenants,
-            "tenant_totals": tenant_totals,
             "sources": sorted(NORMALIZERS),
-            **await _run_status(),
+            "tenant_totals": tenant_totals,
+            "queues": queues,
+            "overview": overview,
+            "horizon_days": get_settings().retrieval_horizon_days,
         },
     )
 
 
-@app.post("/admin/schedule")
-async def admin_schedule(
-    request: Request,
-    enabled: bool = Form(False),
-    run_hour: int = Form(7),
-    run_minute: int = Form(0),
-):
-    async with connect() as conn:
-        await admin_q.update_schedule(
-            conn,
-            {
-                "enabled": enabled,
-                "run_hour": min(max(run_hour, 0), 23),
-                "run_minute": min(max(run_minute, 0), 59),
-            },
-        )
-    return RedirectResponse("/admin", status_code=303)
+@app.get("/admin/runs", response_class=HTMLResponse)
+async def admin_runs(request: Request):
+    return _admin_page(request, "runs", await _runs_cards())
 
 
-@app.post("/admin/run")
-async def admin_run(request: Request, only_source: str = Form(""), backfill: bool = Form(False)):
-    """Enqueue a run. The web app never executes one; the runner owns that entirely."""
+@app.get("/admin/sources", response_class=HTMLResponse)
+async def admin_sources(request: Request):
     async with connect() as conn:
-        await admin_q.enqueue_run(
-            conn,
-            trigger=RunTrigger.MANUAL,
-            only_source=only_source or None,
-            backfill=backfill,
+        health = await admin_q.source_health(conn)
+        tenants, tenant_totals = await admin_q.tenants_needing_attention(conn)
+        crawl_set = await coverage.tenants(conn)
+    return _admin_page(
+        request,
+        "sources",
+        {
+            "health": health,
+            "tenants": tenants,
+            "tenant_totals": tenant_totals,
+            "crawl_set": crawl_set,
+            "sources": sorted(NORMALIZERS),
+        },
+    )
+
+
+@app.get("/admin/quality", response_class=HTMLResponse)
+async def admin_quality(request: Request, reader: str = "all", good: int = quality.GOOD):
+    """The scores of the last nights and the recall checks, for every reader at once or one.
+
+    Readers with neither a score nor a check in the window are left out of the choice: there is
+    nothing of theirs to show.
+    """
+    now = datetime.now(UTC)
+    since = now - timedelta(days=quality.DAYS + 1)
+    good = min(max(good, 1), 100)
+    readers = []
+    async with connect() as conn:
+        for user in await users_q.list_users(conn):
+            if not user.is_active:
+                continue
+            checks = await quality_q.checks(conn, user.id, since)
+            scores = await quality_q.scores(conn, user.id, since)
+            if not checks and not scores:
+                continue
+            job_ids = {row.job_id for row in checks if row.job_id is not None}
+            jobs = {
+                row.job_id: row for row in await quality_q.needle_jobs(conn, user.id, job_ids)
+            }
+            readers.append(
+                {
+                    "user": user,
+                    "scores": quality.score_nights(scores, now, good),
+                    "recall": quality.recall_nights(checks, jobs, now),
+                    "jobs": jobs,
+                }
+            )
+    shown = [row for row in readers if reader == "all" or str(row["user"].id) == reader]
+    recall = quality.pooled([row["recall"] for row in shown]) if shown else []
+    scores = quality.median_nights([row["scores"] for row in shown]) if shown else []
+    days = quality.days(now)
+    if not shown:
+        return _admin_page(
+            request, "quality", {"readers": readers, "reader": reader, "good": good, "scores": []}
         )
-    return RedirectResponse("/admin", status_code=303)
+    start = linechart.trim(
+        days,
+        [night.scored for night in scores],
+        [night.needles for night in recall],
+    )
+    days, scores, recall = days[start:], scores[start:], recall[start:]
+
+    def wide(series, **options):
+        return linechart.build(days, series, width=1200, height=180, **options)
+
+    return _admin_page(
+        request,
+        "quality",
+        {
+            "readers": readers,
+            "reader": reader,
+            "good": good,
+            "scores": scores,
+            "recall": recall,
+            "good_chart": wide(
+                [("good", "good jobs", [night.good for night in scores])]
+            ),
+            "share_chart": wide(
+                [("share", "share good", [night.share_good for night in scores])],
+                percent=True,
+            ),
+            "dismissed_chart": wide(
+                [("dismissed", "good, dismissed", [night.dismissed_good for night in scores])],
+                ranges=[night.dismissed_range for night in scores],
+                percent=True,
+            ),
+            "recall_chart": wide(
+                [
+                    ("kept", "kept jobs", [night.needles for night in recall]),
+                    ("found", "found", [
+                        night.found if night.needles is not None else None for night in recall
+                    ]),
+                ],
+            ),
+            "found_week": quality.last_week(recall),
+            "agreement_nights": quality.AGREEMENT_NIGHTS,
+        },
+    )
+
+
+@app.get("/admin/coverage", response_class=HTMLResponse)
+async def admin_coverage(request: Request):
+    async with connect() as conn:
+        countries = await admin_q.facet_breakdown(conn)
+        recall, misses = await coverage.recall(conn)
+        parts = {
+            "recall": recall,
+            "misses": misses,
+            "reports": await coverage.reports(conn),
+            "leads": await coverage.leads(conn),
+        }
+    return _admin_page(
+        request,
+        "coverage",
+        {
+            "countries": countries,
+            "coverage": parts,
+            "recall_days": coverage.RECALL_DAYS,
+            "linkedin_on": get_settings().linkedin_max_requests > 0,
+        },
+    )
 
 
 @app.post("/admin/run/{run_id}/cancel")
@@ -1054,36 +1155,51 @@ async def admin_cancel_run(request: Request, run_id: int):
     """Ask a run to stop. A queued one ends at once; a running one stops between sources."""
     async with connect() as conn:
         await admin_q.request_cancel(conn, run_id)
-    return RedirectResponse("/admin", status_code=303)
+    return RedirectResponse("/admin/runs", status_code=303)
 
 
-@app.get("/admin/status", response_class=HTMLResponse)
-async def admin_status_fragment(request: Request):
-    return templates.TemplateResponse(request, "_admin_status.html", await _run_status())
-
-
-@app.get("/admin/coverage", response_class=HTMLResponse)
-async def admin_coverage_fragment(request: Request):
-    """The coverage report, fetched after the page rather than with it.
-
-    One filtered pass over the open corpus per area, and the location filter is the most
-    expensive predicate the system has. Loaded as a fragment so a large corpus cannot make
-    Operations unreachable -- a run has to stay watchable while it runs, and everything above
-    this section answers that.
-    """
+@app.get("/admin/coverage/areas", response_class=HTMLResponse)
+async def admin_coverage_areas(request: Request):
+    """Fetched after the page rather than with it: one filtered pass over the open corpus per
+    area, and the location filter is the most expensive predicate the system has."""
+    horizon_days = get_settings().retrieval_horizon_days
     async with connect() as conn:
-        card = await coverage.report(conn, get_settings().retrieval_horizon_days)
-    return templates.TemplateResponse(request, "_admin_coverage.html", {"coverage": card})
+        parts = {
+            "areas": await coverage.by_area(conn, horizon_days),
+            "blocked": await coverage.blocked(conn),
+        }
+    return templates.TemplateResponse(request, "_coverage_areas.html", {"coverage": parts})
 
 
-@app.get("/admin/runs", response_class=HTMLResponse)
+RUNS_SHOWN = 10
+
+
+async def _last_runs() -> dict:
+    async with connect() as conn:
+        runs = await admin_q.recent_runs(conn, limit=RUNS_SHOWN)
+    now = datetime.now(UTC)
+    return {
+        "runs": runs,
+        "step_seconds": {run.id: timeline.step_seconds(run, now) for run in runs},
+        "outcomes": {run.id: outcome.of(run.report) for run in runs},
+        "timeline": timeline.build(runs, now),
+        "steps": [step.value for step in timeline.STEPS],
+    }
+
+
+async def _runs_cards() -> dict:
+    settings = get_settings()
+    return {
+        **await _last_runs(),
+        **await _run_status(),
+        "run_daily": settings.run_daily,
+        "run_time": f"{settings.run_hour:02d}:{settings.run_minute:02d}",
+    }
+
+
+@app.get("/admin/runs/live", response_class=HTMLResponse)
 async def admin_runs_fragment(request: Request):
-    async with connect() as conn:
-        runs = await admin_q.recent_runs(conn)
-        active = await admin_q.active_run(conn)
-    return templates.TemplateResponse(
-        request, "_admin_runs.html", {"runs": runs, "active_run": active}
-    )
+    return templates.TemplateResponse(request, "_admin_runs.html", await _runs_cards())
 
 
 @app.get("/healthz")

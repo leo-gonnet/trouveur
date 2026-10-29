@@ -1,0 +1,99 @@
+{% extends "admin_base.html" %}{% import "_ops.html" as ops %}
+{% block admin %}
+<section class="section">
+  <div class="section-head"><h2>Each source, last fetch</h2></div>
+  {% if health %}
+  <table>
+    <tr><th>Source</th><th>When</th><th>State</th><th>Got</th>
+        <th class="num">Postings read</th><th class="num">Parts read</th>
+        <th class="num">Parts too big</th></tr>
+    {% for row in health %}
+    <tr>
+      <td>{{ row.source }}</td>
+      <td>{{ row.started_at | localtime('%a %d %b, %H:%M') }}</td>
+      <td>{{ ops.fetch_status(row) }}</td>
+      <td>{{ ops.fetch_scope(row) }}</td>
+      <td class="num">{{ ops.count(row.documents_seen) }}</td>
+      <td class="num">{{ row.partitions_done }}/{{ row.partitions_total }}</td>
+      <td class="num">{% if row.partitions_overflowed %}<span class="pill bad">{{ row.partitions_overflowed }}</span>{% else %}0{% endif %}</td>
+    </tr>
+    {% if row.error %}<tr><td colspan="7" class="hint">{{ row.error }}</td></tr>{% endif %}
+    {% endfor %}
+  </table>
+  <p class="hint">Full list: missing postings get closed. Parts too big: some postings were never read.</p>
+  {% else %}<p class="empty">No source was ever fetched.</p>{% endif %}
+  {% set never = sources | reject('in', health | map(attribute='source') | list) | list %}
+  {% if never %}
+    <p class="notice warn">Never fetched: {{ never | join(', ') }}.</p>
+  {% endif %}
+</section>
+
+<section class="section">
+  <div class="section-head">
+    <h2>Failing company boards</h2>
+    <span class="hint">{{ ops.count(tenant_totals.failing) }} failing</span>
+  </div>
+  {% if tenants %}
+  <table>
+    <tr><th>Source</th><th>Board</th><th>State</th>
+        <th class="num">Postings</th><th>Last success</th>
+        <th class="num">Failures in a row</th></tr>
+    {% for row in tenants %}
+    <tr>
+      <td>{{ row.source }}</td>
+      <td><code>{{ row.scope }}</code></td>
+      {# The query lists a board only when it is on or a person decided about it, so a board
+         that is not on here was switched off by a person. #}
+      <td>{% if row.enabled %}{{ ops.status('on', 'good') }}{% else %}{{ ops.status('off') }}{% endif %}</td>
+      <td class="num">{{ ops.count(row.last_documents) }}</td>
+      <td>{{ row.last_ok_at | localtime('%Y-%m-%d %H:%M') if row.last_ok_at else 'never' }}</td>
+      <td class="num"><span class="pill bad">{{ row.consecutive_failures }}</span></td>
+    </tr>
+    {% if row.last_error %}<tr><td colspan="6" class="hint">{{ row.last_error }}</td></tr>{% endif %}
+    {% endfor %}
+  </table>
+  {% if tenants | length < tenant_totals.failing %}
+    <p class="hint">The worst {{ tenants | length }} are shown.
+      <code>trouveur tenants list --failing</code> lists all.</p>
+  {% endif %}
+  <p class="hint">Nothing is switched off on its own. Use <code>trouveur tenants disable|drop</code>.</p>
+  {% elif tenant_totals.tenants %}
+    <p class="empty">No board is failing.</p>
+  {% else %}
+    <p class="empty">No board registered. Add one with <code>trouveur tenants add</code>.</p>
+  {% endif %}
+</section>
+
+<section class="section">
+  <div class="section-head"><h2>Company boards per source</h2></div>
+  {% if crawl_set %}
+  <ol class="flow">
+    <li><span>Discovery finds a board</span></li>
+    <li><span>To try</span></li>
+    <li><span>Fetched once</span></li>
+    <li class="done"><span>On: had a job in a reader's area</span></li>
+  </ol>
+  <p class="hint">No job in any reader's area: retried monthly.</p>
+  <table>
+    <tr><th>Source</th><th class="num">On</th>
+        <th class="num">On, found by discovery</th><th class="num">To try</th>
+        <th class="num">Retried monthly</th><th class="num">Off, by a person</th>
+        <th class="num">Rejected, by a person</th></tr>
+    {% for row in crawl_set %}
+    <tr>
+      <td>{{ row.source }}</td>
+      <td class="num">{{ ops.count(row.sweeping) }}</td>
+      <td class="num">{{ ops.count(row.auto_on) }}</td>
+      <td class="num">{{ ops.count(row.to_try) }}</td>
+      <td class="num">{{ ops.count(row.monthly) }}</td>
+      <td class="num">{{ ops.count(row.disabled) }}</td>
+      <td class="num">{{ ops.count(row.dropped) }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+    <p class="empty">No board registered.</p>
+  {% endif %}
+</section>
+
+{% endblock %}

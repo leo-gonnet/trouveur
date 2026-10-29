@@ -21,7 +21,7 @@ from trouveur.discovery import work as discovery
 from trouveur.ingest import pipeline as ingest
 from trouveur.ingest import workers
 from trouveur.match import pipeline as matching
-from trouveur.match import retrieve
+from trouveur.match import recall, retrieve
 from trouveur.models import RunStage, RunStatus, RunTrigger
 from trouveur.notify import send_digests
 from trouveur.sources import build_sources
@@ -45,42 +45,43 @@ _REFILLED_AT_START = {
 }
 
 
-def slot_today(schedule, now: datetime) -> datetime:
-    """The instant today's slot falls at, from the wall-clock hour the operator typed.
+def slot_today(settings: Settings, now: datetime) -> datetime:
+    """The instant today's slot falls at, from the wall-clock hour in the settings.
 
     Resolved in the installation's timezone rather than in UTC: `run_hour = 7` is "seven in the
     morning", and computed on a UTC clock it drifts to eight when the clocks change -- twice a
-    year, silently, on a page whose only label is "Hour".
+    year, silently.
 
     On the spring-forward day an hour that does not exist locally resolves to the instant after
     the gap. The slot still passes exactly once, which is all this has to guarantee.
     """
     local = clock.to_local(now).replace(
-        hour=schedule.run_hour, minute=schedule.run_minute, second=0, microsecond=0
+        hour=settings.run_hour, minute=settings.run_minute, second=0, microsecond=0
     )
     return local.astimezone(UTC)
 
 
-def is_scheduled_run_due(schedule, now: datetime, last_queued_at: datetime | None) -> bool:
+def is_scheduled_run_due(
+    settings: Settings, now: datetime, last_queued_at: datetime | None
+) -> bool:
     """Whether today's slot has passed without a scheduled run being queued for it.
 
     Compared against the slot rather than against an interval, so a runner that was down over its
     slot still runs once when it comes back, and does not then run repeatedly to "catch up".
     """
-    if not schedule.enabled:
+    if not settings.run_daily:
         return False
-    slot = slot_today(schedule, now)
+    slot = slot_today(settings, now)
     if now < slot:
         return False
     return last_queued_at is None or last_queued_at < slot
 
 
-async def _maybe_enqueue_scheduled(conn) -> None:
-    schedule = await admin_q.get_schedule(conn)
+async def _maybe_enqueue_scheduled(conn, settings: Settings) -> None:
     runs = await admin_q.recent_runs(conn, limit=50)
     scheduled = [run for run in runs if run.trigger == RunTrigger.SCHEDULED]
     last = scheduled[0].queued_at if scheduled else None
-    if is_scheduled_run_due(schedule, datetime.now(UTC), last):
+    if is_scheduled_run_due(settings, datetime.now(UTC), last):
         run_id = await admin_q.enqueue_run(conn, trigger=RunTrigger.SCHEDULED)
         log.info("queued scheduled run %s", run_id)
 
@@ -177,6 +178,7 @@ def _match_payload(matches: Sequence[matching.MatchReport]) -> list[dict]:
             "user_id": match.user_id,
             "retrieved": match.retrieved,
             "scored": match.scored,
+            "published": match.published,
             "cost_usd": str(match.cost_usd),
             "stopped_on_ceiling": match.stopped_on_ceiling,
             "stopped_on_credit": match.stopped_on_credit,
@@ -215,12 +217,7 @@ async def _execute(settings: Settings, run) -> None:
         await _execute_match_only(settings, run)
         return
     control = _progress_control(run.id)
-    report = await ingest.run(
-        only_source=run.only_source,
-        backfill=run.backfill,
-        settings=settings,
-        control=control,
-    )
+    report = await ingest.run(settings=settings, control=control)
     if report.cancelled:
         await _finish_cancelled(run.id, report)
         return
@@ -243,6 +240,12 @@ async def _execute(settings: Settings, run) -> None:
     except Exception:
         log.exception("the board trial failed; matching continues and the next run re-judges")
     matches = await matching.run_all(settings)
+    # After matching, so it reads tonight's corpus and tonight's saved jobs. Free, and never part
+    # of the verdict: a failed check costs one point on a chart, not anybody's edition.
+    try:
+        await recall.check_all(settings)
+    except Exception:
+        log.exception("the recall check failed; the next run checks again")
     notified = 0
     if settings.smtp_host:
         await _set_stage(run.id, RunStage.EMAIL)
@@ -261,20 +264,26 @@ async def _execute(settings: Settings, run) -> None:
         "boards_promoted": promoted,
         "digests_sent": notified,
     }
+    # Stored before discovery: a restart during the slow LinkedIn pass must not lose the report
+    # of a night that already delivered its emails.
+    async with connect() as conn:
+        await admin_q.record_run_report(conn, run.id, report=payload, error=error)
+
+    # Last: these feed discovery, nothing tonight's edition reads. Inside the run, so their time
+    # shows on Operations; their failures are caught, so they never change the verdict above.
+    await _set_stage(run.id, RunStage.DISCOVER)
+    try:
+        await freehire.run(settings)
+    except Exception:
+        log.exception("the freehire pass failed; the next scheduled run retries it")
+    # After the sweep, so a job counts as held only if tonight's corpus already had it.
+    try:
+        await linkedin.run(settings)
+    except Exception:
+        log.exception("the LinkedIn pass failed; the next scheduled run retries it")
+
     async with connect() as conn:
         await admin_q.finish_run(conn, run.id, status=status, report=payload, error=error)
-
-    # Last: these feed discovery, nothing tonight's edition reads.
-    if run.only_source is None:
-        try:
-            await freehire.run(settings)
-        except Exception:
-            log.exception("the freehire pass failed; the next scheduled run retries it")
-        # After the sweep, so a job counts as held only if tonight's corpus already had it.
-        try:
-            await linkedin.run(settings)
-        except Exception:
-            log.exception("the LinkedIn pass failed; the next scheduled run retries it")
 
 
 async def _set_stage(run_id: int, stage: RunStage) -> None:
@@ -346,7 +355,7 @@ async def _tick(settings: Settings) -> None:
         await admin_q.fail_orphaned_runs(conn)
         await admin_q.fail_orphaned_sweeps(conn)
         await release_stale(conn)
-        await _maybe_enqueue_scheduled(conn)
+        await _maybe_enqueue_scheduled(conn, settings)
 
     drained = await drain_queues(settings)
     if any(drained.values()):

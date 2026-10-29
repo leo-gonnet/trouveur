@@ -97,7 +97,10 @@ async def test_page_renders(client, path):
     assert "<main>" in response.text
 
 
-@pytest.mark.parametrize("path", ["/admin", "/users"])
+@pytest.mark.parametrize(
+    "path",
+    ["/admin", "/admin/runs", "/admin/sources", "/admin/coverage", "/admin/quality", "/users"],
+)
 async def test_admin_page_renders(admin, path):
     response = await admin.get(path)
     assert response.status_code == 200, f"{path} returned {response.status_code}"
@@ -106,14 +109,13 @@ async def test_admin_page_renders(admin, path):
 
 @pytest.mark.parametrize(
     ("method", "path"),
-    [("GET", "/admin"), ("POST", "/admin/run"), ("GET", "/users"), ("POST", "/users")],
+    [("GET", "/admin"), ("POST", "/admin/run/1/cancel"), ("GET", "/users"), ("POST", "/users")],
 )
 async def test_an_admin_route_refuses_an_ordinary_user(client, method, path):
     """Checked by prefix in the middleware, not per handler: a per-route check is the line somebody
     forgets on the next route, and the route that leaks is always the newest one.
 
-    Operations owns the SHARED schedule and queues real sweeps, so it is not one reader's
-    to retime.
+    Operations can cancel the SHARED run, so it is not one reader's to stop.
     """
     response = await client.request(method, path)
     assert response.status_code == 303, f"{method} {path} answered an ordinary user"
@@ -188,6 +190,19 @@ async def test_the_out_of_credit_banner_is_on_every_page_until_credit_is_granted
             note="test",
         )
     assert 'class="banner warn"' not in (await client.get("/recommendations")).text
+
+
+async def test_the_missing_key_banner_is_only_on_recommendations(client, seeded, monkeypatch):
+    """It explains why that page is empty. Anywhere else it is noise above a page that works."""
+    async with connect() as conn:
+        await users_q.grant_credit(
+            conn, seeded["user_id"], amount_usd=Decimal("5"), granted_by=seeded["user_id"],
+            note="test",
+        )
+    monkeypatch.setenv("OPENROUTER_API_KEY", "")
+    assert "OPENROUTER_API_KEY" in (await client.get("/recommendations")).text
+    for path in ("/search", "/profile", "/settings"):
+        assert 'class="banner warn"' not in (await client.get(path)).text, path
 
 
 async def test_the_balance_is_readable_from_the_topbar(client, seeded):
@@ -454,9 +469,8 @@ async def test_a_profile_change_queues_one_match_run_for_this_user_only(client, 
         pending = await admin_q.pending_match_run(conn, seeded["user_id"])
     mine = [run for run in runs if run.match_user_id == seeded["user_id"]]
     assert len(mine) == 1, "a second edit must not queue a second paid run"
-    assert mine[0].only_source is None and not mine[0].backfill
     assert pending is not None and pending.id == mine[0].id
-    assert "match only" in (await admin.get("/admin")).text
+    assert "scoring only" in (await admin.get("/admin/runs")).text
 
 
 async def test_granting_credit_queues_a_match_so_a_new_user_sees_something(client, admin, seeded):
@@ -603,11 +617,84 @@ async def test_the_live_panel_renders_a_run_in_flight(admin):
         sweep_id, _ = await ingest_q.start_sweep(conn, "greenhouse")
         await ingest_q.record_sweep_progress(conn, sweep_id, documents_seen=1234)
 
-    body = (await admin.get("/admin/status")).text
+    body = (await admin.get("/admin/runs/live")).text
     assert 'role="progressbar"' in body
     assert "1 of 4 sources done" in body
     assert "greenhouse" in body and "1,234" in body
     assert f"/admin/run/{run_id}/cancel" in body
+
+
+async def test_a_source_still_fetching_keeps_its_last_verdict(admin):
+    """A sweep has no `ok` until it ends, and the health table read that as "failed" for the
+    whole length of the fetch, hiding the verdict of the one before."""
+    from trouveur.db.queries import ingest as ingest_q
+
+    async with connect() as conn:
+        done_id, _ = await ingest_q.start_sweep(conn, "greenhouse")
+        await ingest_q.finish_sweep(
+            conn, done_id, ok=True, complete=True, partitions_total=1, partitions_done=1,
+            partitions_overflowed=0, documents_seen=7, jobs_upserted=7, jobs_closed=0, error=None,
+        )
+        await conn.exec_driver_sql(
+            "UPDATE source_sweep SET started_at = now() - interval '1 day' WHERE id = $1",
+            (done_id,),
+        )
+        await ingest_q.start_sweep(conn, "greenhouse")
+
+    body = (await admin.get("/admin/sources")).text
+    health = body.split("Failing")[0]
+    assert ">done<" in health
+    assert ">failed<" not in health and ">running<" not in health
+
+
+async def test_last_runs_draws_each_step_from_the_stamps_the_runner_writes(admin):
+    """The bars are computed from `stage_started`, which only the database fills in. A run
+    with no stamps draws one grey bar, so an empty or unparsed column would look like old data."""
+    from trouveur.db.queries import admin as admin_q
+    from trouveur.models import RunStage, RunStatus, RunTrigger
+
+    async with connect() as conn:
+        await admin_q.enqueue_run(conn, trigger=RunTrigger.SCHEDULED)
+        claimed = await admin_q.claim_next_run(conn)
+        await admin_q.start_run_progress(conn, claimed.id, 1)
+        await admin_q.set_run_stage(conn, claimed.id, RunStage.PREPARE)
+        await admin_q.set_run_stage(conn, claimed.id, RunStage.MATCH)
+        await admin_q.finish_run(conn, claimed.id, status=RunStatus.SUCCESS, report={})
+        stamps = (await admin_q.recent_runs(conn, limit=1))[0].stage_started
+
+    assert set(stamps) == {"fetch", "prepare", "match"}
+    body = (await admin.get("/admin/runs/live")).text
+    for step in ("s1", "s2", "s3"):
+        assert f'<span class="{step}" style="left:' in body, step
+    assert 'class="s0"' not in body
+
+
+async def test_the_quality_page_draws_a_recall_check_on_a_kept_job(admin, seeded):
+    """The check runs retrieval for real and stores the needle, and the page reads it back: an
+    empty page proves only that the route answered."""
+    from trouveur.config import get_settings
+    from trouveur.match import recall
+
+    async with connect() as conn:
+        await conn.exec_driver_sql(
+            "UPDATE user_job_match SET state = 'saved' WHERE user_id = $1 AND job_id = $2",
+            (seeded["user_id"], seeded["job_id"]),
+        )
+    assert await recall.check_user(seeded["user_id"], get_settings()) is not None
+
+    body = " ".join((await admin.get("/admin/quality")).text.split())
+    assert "Good jobs per night" in body, "the scored match must be drawn"
+    assert 'of 1 <span class="hint">last 7 nights</span>' in body, (
+        "the check must show its one needle"
+    )
+
+
+async def test_quality_with_nothing_to_show_renders_its_empty_state(admin):
+    """The early return left `scores` out of the context, and StrictUndefined turned a reader
+    with no data into a 500."""
+    response = await admin.get("/admin/quality?reader=0")
+    assert response.status_code == 200
+    assert "<main>" in response.text
 
 
 async def test_the_live_panel_shows_only_this_runs_sweeps_and_its_stage(admin):
@@ -629,10 +716,10 @@ async def test_the_live_panel_shows_only_this_runs_sweeps_and_its_stage(admin):
         await admin_q.advance_run_progress(conn, claimed.id, done=2, current_source=None)
         await admin_q.set_run_stage(conn, claimed.id, RunStage.PREPARE)
 
-    body = (await admin.get("/admin/status")).text
+    body = (await admin.get("/admin/runs/live")).text
     assert "himalayas" not in body
-    assert "Fetching is over" in body
-    assert "No estimate yet" not in body
+    assert "now: Prepare" in body
+    assert "No time estimate yet" not in body
 
 
 async def test_cancelling_a_running_run_asks_rather_than_kills(admin):
@@ -1158,7 +1245,8 @@ async def test_the_coverage_fragment_renders_the_discovery_panels(admin, seeded)
     assert response.status_code == 200
     said = response.text
     assert "Discovery" in said
-    assert "personio" in said, "the platform panel must list the platform a lead named"
+    sources = (await admin.get("/admin/sources")).text
+    assert "personio" in sources, "the boards table must list the platform a lead named"
     assert "karriere.beispiel-gmbh.de" in said, (
         "an unreadable host must be shown; the count is the whole case for writing a rule"
     )
@@ -1409,7 +1497,8 @@ def _bottom_chain_in_cards(html: str) -> list[tuple[str, str]]:
 
 _SPACING_PAGES = ["/recommendations", "/search", "/profile", "/settings", "/how-it-works",
                   "/elsewhere"]
-_SPACING_ADMIN = ["/admin", "/users", "/admin/coverage"]
+_SPACING_ADMIN = ["/admin", "/admin/runs", "/admin/sources", "/admin/quality", "/admin/coverage",
+                  "/admin/coverage/areas", "/users"]
 
 
 async def _assert_no_dead_space_under_cards(fetch, paths):

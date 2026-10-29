@@ -15,8 +15,8 @@ from trouveur.work.queue import _stale_query
 
 
 class _Schedule:
-    def __init__(self, enabled=True, run_hour=7, run_minute=0):
-        self.enabled = enabled
+    def __init__(self, run_daily=True, run_hour=7, run_minute=0):
+        self.run_daily = run_daily
         self.run_hour = run_hour
         self.run_minute = run_minute
 
@@ -172,7 +172,7 @@ def test_schedule_does_not_fire_before_its_slot(vienna):
 
 
 def test_disabled_schedule_never_fires():
-    schedule = _Schedule(enabled=False)
+    schedule = _Schedule(run_daily=False)
     now = datetime.now(UTC) + timedelta(hours=1)
     assert is_scheduled_run_due(schedule, now, None) is False
 
@@ -337,7 +337,7 @@ async def test_a_match_only_run_sweeps_nothing_and_matches_one_user(monkeypatch)
     monkeypatch.setattr(service.admin_q, "set_run_stage", fake_set_run_stage)
     monkeypatch.setattr(service, "connect", lambda: _Conn())
 
-    run = SimpleNamespace(id=7, match_user_id=42, only_source=None, backfill=False)
+    run = SimpleNamespace(id=7, match_user_id=42)
     await service._execute(None, run)
 
     assert calls == ["stage:match", "match:42:wide"]

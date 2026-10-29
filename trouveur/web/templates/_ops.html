@@ -1,0 +1,68 @@
+{# The Operations status words and step names. One word keeps one meaning on every page:
+   "waiting" is "not started yet" for a run and for a queue item alike. #}
+
+{% set PAGES = {
+  'overview': ('/admin', 'Overview'),
+  'runs': ('/admin/runs', 'Runs'),
+  'sources': ('/admin/sources', 'Sources'),
+  'coverage': ('/admin/coverage', 'Coverage'),
+  'quality': ('/admin/quality', 'Quality'),
+  'users': ('/users', 'Users'),
+} %}
+
+{% set TERMS = {
+  'waiting': 'waiting',
+  'running': 'running',
+  'done': 'done',
+  'failed': 'failed',
+  'cancelled': 'cancelled',
+  'blocked': 'blocked',
+  'stuck': 'stuck',
+
+  'full': 'full list',
+  'partial': 'changes only',
+
+  'on': 'on',
+  'off': 'off',
+
+  'detail': 'description',
+  'derive': 'facets',
+  'embed': 'vector',
+  'dedup': 'duplicates',
+} %}
+
+{# The steps of a run, in order. #}
+{% set RUN_STEPS = [('fetch', 'Fetch'), ('prepare', 'Prepare'), ('match', 'Score'), ('email', 'Email'), ('discover', 'Discover')] %}
+
+{% macro status(key, tone='') -%}
+  <span class="pill {{ tone }}">{{ TERMS[key] }}</span>
+{%- endmacro %}
+
+{% macro run_status(value) -%}
+  {%- if value == 'queued' %}{{ status('waiting') }}
+  {%- elif value == 'running' %}{{ status('running', 'live') }}
+  {%- elif value == 'success' %}{{ status('done', 'good') }}
+  {%- elif value == 'failed' %}{{ status('failed', 'bad') }}
+  {%- else %}{{ status('cancelled', 'warn') }}{% endif -%}
+{%- endmacro %}
+
+{# A sweep row: `ok` is NULL until it finishes. #}
+{% macro fetch_status(row) -%}
+  {%- if row.ok is none %}{{ status('running', 'live') }}
+  {%- elif row.blocked %}{{ status('blocked', 'bad') }}
+  {%- elif row.ok %}{{ status('done', 'good') }}
+  {%- else %}{{ status('failed', 'bad') }}{% endif -%}
+{%- endmacro %}
+
+{% macro fetch_scope(row) -%}
+  {%- if row.complete %}{{ status('full', 'good') }}{% else %}{{ status('partial') }}{% endif -%}
+{%- endmacro %}
+
+{% macro duration(seconds) %}
+  {%- set s = seconds | int -%}
+  {%- if s >= 3600 %}{{ s // 3600 }}h {{ '%02d' % ((s % 3600) // 60) }}m
+  {%- elif s >= 60 %}{{ s // 60 }}m
+  {%- else %}{{ s }}s{%- endif -%}
+{% endmacro %}
+
+{% macro count(n) -%}{{ '{:,}'.format(n or 0) }}{%- endmacro %}

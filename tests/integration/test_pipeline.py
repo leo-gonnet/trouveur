@@ -10,6 +10,8 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
+import pytest
+
 from tests.integration.seed import seed_corpus, seed_user
 from trouveur import clock
 
@@ -844,6 +846,46 @@ async def test_a_profile_with_nothing_to_search_for_is_skipped_not_failed(
     assert "no search queries" in finished.report["matches"][0]["skipped"]
 
 
+async def test_a_runner_killed_during_discovery_keeps_the_nights_report(
+    clean_db, gh_board, aa_listing, aa_detail, monkeypatch
+):
+    """Discovery runs after the emails and takes the longest, so a restart there lost the report of
+    a night that had already delivered."""
+    import asyncio
+
+    from trouveur.config import get_settings
+    from trouveur.db.engine import connect
+    from trouveur.db.queries import admin as admin_q
+    from trouveur.ingest.pipeline import IngestReport
+    from trouveur.models import RunStatus, RunTrigger
+    from trouveur.runner import service
+
+    await seed_corpus(gh_board, aa_listing, aa_detail)
+
+    async def no_sweep(**kwargs):
+        return IngestReport()
+
+    async def nothing_to_prepare(_settings, **_kwargs):
+        return 0
+
+    async def killed(_settings):
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(service.ingest, "run", no_sweep)
+    monkeypatch.setattr(service, "prepare_arrivals", nothing_to_prepare)
+    monkeypatch.setattr(service.freehire, "run", killed)
+    async with connect() as conn:
+        await admin_q.enqueue_run(conn, trigger=RunTrigger.SCHEDULED)
+        run = await admin_q.claim_next_run(conn)
+    with pytest.raises(asyncio.CancelledError):
+        await service._execute(get_settings(), run)
+    async with connect() as conn:
+        orphan = (await admin_q.recent_runs(conn, limit=1))[0]
+
+    assert orphan.status == RunStatus.RUNNING.value
+    assert orphan.report is not None and "matches" in orphan.report
+
+
 async def test_a_run_whose_sweep_answered_boards_records_its_report(
     clean_db, gh_board, aa_listing, aa_detail, monkeypatch
 ):
@@ -880,6 +922,8 @@ async def test_a_run_whose_sweep_answered_boards_records_its_report(
 
     assert finished.status == RunStatus.SUCCESS.value
     assert "greenhouse" in finished.report["sources"]
+    # Discovery is the run's last step, so its time is part of the run on Operations.
+    assert "discover" in finished.stage_started
 
 
 async def test_cancelling_while_preparing_stops_before_matching(

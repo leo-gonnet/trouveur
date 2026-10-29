@@ -4,7 +4,7 @@ Composed here rather than in `db/queries` because grouping profiles into areas i
 read by both Operations and `trouveur coverage` so the page and the command cannot drift apart.
 
 Later tasks add sections to it: one query in `db/queries/coverage.py`, one field on `Report`
-filled in `report()`, one block in `_admin_coverage.html`. Aggregator leads come from
+filled in `report()`, one block in `admin_coverage.html`. Aggregator leads come from
 docs/tasks/07. None of them emits an empty row here yet: a key that is always zero is
 one an agent reads as an answer.
 """
@@ -315,7 +315,24 @@ async def areas(conn: AsyncConnection) -> list[Area]:
 
 
 async def report(conn: AsyncConnection, horizon_days: int) -> Report:
-    """The whole report: one filtered pass over the corpus per area, plus the crawl set once.
+    """The whole report, for `trouveur coverage`. Operations reads the parts on their own, so the
+    slow one -- `by_area` -- cannot hold the rest of the page back."""
+    recall_rows, missed = await recall(conn)
+    return Report(
+        leads=await leads(conn),
+        reports=await reports(conn),
+        blocked=await blocked(conn),
+        recall=recall_rows,
+        misses=missed,
+        generated_at=datetime.now(UTC),
+        horizon_days=horizon_days,
+        areas=await by_area(conn, horizon_days),
+        tenants=await tenants(conn),
+    )
+
+
+async def by_area(conn: AsyncConnection, horizon_days: int) -> list[AreaCoverage]:
+    """One filtered pass over the corpus per area: the slow part of the report.
 
     Per area rather than per row, and areas are few -- one query each is the shape, not a loop
     that should have been a batch. The filter parameters differ for every area, so one statement
@@ -340,14 +357,20 @@ async def report(conn: AsyncConnection, horizon_days: int) -> Report:
                 ],
             )
         )
-    return Report(
-        leads=await leads(conn),
-        reports=await reports(conn),
-        blocked=[
-            BlockedSource(source=row.source, since=row.started_at, error=row.error)
-            for row in await coverage_q.blocked_sources(conn)
-        ],
-        recall=[
+    return covered
+
+
+async def blocked(conn: AsyncConnection) -> list[BlockedSource]:
+    return [
+        BlockedSource(source=row.source, since=row.started_at, error=row.error)
+        for row in await coverage_q.blocked_sources(conn)
+    ]
+
+
+async def recall(conn: AsyncConnection) -> tuple[list[RecallCoverage], list[MissedJob]]:
+    """What the aggregators showed us this window, and the jobs among it we did not hold."""
+    return (
+        [
             RecallCoverage(
                 origin=row.origin,
                 days=RECALL_DAYS,
@@ -357,7 +380,7 @@ async def report(conn: AsyncConnection, horizon_days: int) -> Report:
             )
             for row in await coverage_q.recall(conn, RECALL_ORIGINS, RECALL_DAYS)
         ],
-        misses=[
+        [
             MissedJob(
                 origin=row.origin,
                 company=row.company,
@@ -367,22 +390,23 @@ async def report(conn: AsyncConnection, horizon_days: int) -> Report:
             )
             for row in await coverage_q.misses(conn, RECALL_ORIGINS, RECALL_DAYS, MISSES_SHOWN)
         ],
-        generated_at=datetime.now(UTC),
-        horizon_days=horizon_days,
-        areas=covered,
-        tenants=[
-            TenantCoverage(
-                source=row.source,
-                sweeping=int(row.sweeping),
-                auto_on=int(row.auto_on),
-                to_try=int(row.to_try),
-                monthly=int(row.monthly),
-                disabled=int(row.disabled),
-                dropped=int(row.dropped),
-            )
-            for row in await coverage_q.tenant_states(conn)
-        ],
     )
+
+
+async def tenants(conn: AsyncConnection) -> list[TenantCoverage]:
+    """The crawl set per source by state. Cheap, so Operations reads it without the report."""
+    return [
+        TenantCoverage(
+            source=row.source,
+            sweeping=int(row.sweeping),
+            auto_on=int(row.auto_on),
+            to_try=int(row.to_try),
+            monthly=int(row.monthly),
+            disabled=int(row.disabled),
+            dropped=int(row.dropped),
+        )
+        for row in await coverage_q.tenant_states(conn)
+    ]
 
 
 async def leads(conn: AsyncConnection) -> LeadCoverage | None:
