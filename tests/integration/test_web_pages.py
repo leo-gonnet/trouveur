@@ -684,7 +684,9 @@ async def test_the_quality_page_draws_a_recall_check_on_a_kept_job(admin, seeded
 
     body = " ".join((await admin.get("/admin/quality")).text.split())
     assert "Good jobs per night" in body, "the scored match must be drawn"
-    assert "of 1</strong>" in body, "the check must show its one needle"
+    assert 'of 1 <span class="hint">last 7 nights</span>' in body, (
+        "the check must show its one needle"
+    )
 
 
 async def test_quality_with_nothing_to_show_renders_its_empty_state(admin):
