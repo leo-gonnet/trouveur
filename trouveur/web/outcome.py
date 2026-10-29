@@ -56,6 +56,7 @@ def _total(rows, key: str) -> int | None:
 
 
 def unknown_location_nights(rows, days: list[date]) -> list[dict[str, int] | None]:
-    """Per night, the count of the night's last run, by source. None where no run counted."""
-    by_day = {clock.to_local(row.finished_at).date(): row.unknown_location for row in rows}
+    """Per night, the count of the night's last run, by source. None where no run counted. A run
+    belongs to the night it started, as on the runs chart."""
+    by_day = {clock.to_local(row.started_at).date(): row.unknown_location for row in rows}
     return [by_day.get(day) for day in days]

@@ -267,10 +267,15 @@ async def _execute(settings: Settings, run) -> None:
     }
     # Stored before discovery: a restart during the slow LinkedIn pass must not lose the report
     # of a night that already delivered its emails.
+    # A diagnostic, never part of the verdict: a failed count costs one point on a chart.
+    try:
+        async with connect() as conn:
+            payload["unknown_location"] = await admin_q.unknown_location(
+                conn, freshness.fresh_since(settings.retrieval_horizon_days)
+            )
+    except Exception:
+        log.exception("counting postings of unknown location failed; the next run counts again")
     async with connect() as conn:
-        payload["unknown_location"] = await admin_q.unknown_location(
-            conn, freshness.fresh_since(settings.retrieval_horizon_days)
-        )
         await admin_q.record_run_report(conn, run.id, report=payload, error=error)
 
     # Last: these feed discovery, nothing tonight's edition reads. Inside the run, so their time
