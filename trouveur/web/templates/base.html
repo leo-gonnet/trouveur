@@ -55,10 +55,13 @@
   </details>
  </div>
 </header>
+{# Only where it explains something: the empty Recommendations page. #}
 {% if request.state.scoring_unconfigured %}
+{% if active == 'recommendations' %}
 <div class="banner warn"><div class="band">This installation has no
   <code>OPENROUTER_API_KEY</code>, so nothing is scored and Recommendations stays empty. Search
   and the free stages still work.</div></div>
+{% endif %}
 {% elif request.state.out_of_credit %}
 {# "Ask an administrator" would be telling an admin to ask themselves. #}
 <div class="banner warn"><div class="band">Your credit is used up, so nothing new will be

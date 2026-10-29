@@ -190,6 +190,19 @@ async def test_the_out_of_credit_banner_is_on_every_page_until_credit_is_granted
     assert 'class="banner warn"' not in (await client.get("/recommendations")).text
 
 
+async def test_the_missing_key_banner_is_only_on_recommendations(client, seeded, monkeypatch):
+    """It explains why that page is empty. Anywhere else it is noise above a page that works."""
+    async with connect() as conn:
+        await users_q.grant_credit(
+            conn, seeded["user_id"], amount_usd=Decimal("5"), granted_by=seeded["user_id"],
+            note="test",
+        )
+    monkeypatch.setenv("OPENROUTER_API_KEY", "")
+    assert "OPENROUTER_API_KEY" in (await client.get("/recommendations")).text
+    for path in ("/search", "/profile", "/settings"):
+        assert 'class="banner warn"' not in (await client.get(path)).text, path
+
+
 async def test_the_balance_is_readable_from_the_topbar(client, seeded):
     """The one number that decides whether tomorrow's scan scores anything."""
     async with connect() as conn:
