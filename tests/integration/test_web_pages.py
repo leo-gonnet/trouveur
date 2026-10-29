@@ -687,6 +687,14 @@ async def test_the_quality_page_draws_a_recall_check_on_a_kept_job(admin, seeded
     assert "of 1</strong>" in body, "the check must show its one needle"
 
 
+async def test_quality_with_nothing_to_show_renders_its_empty_state(admin):
+    """The early return left `scores` out of the context, and StrictUndefined turned a reader
+    with no data into a 500."""
+    response = await admin.get("/admin/quality?reader=0")
+    assert response.status_code == 200
+    assert "<main>" in response.text
+
+
 async def test_the_live_panel_shows_only_this_runs_sweeps_and_its_stage(admin):
     """A sweep a crashed runner left open was listed as fetching for weeks, and a run past its
     sweep read "10 of 10 sources done" for hours with nothing saying what it was doing."""

@@ -1079,7 +1079,9 @@ async def admin_quality(request: Request, reader: str = "all", good: int = quali
     scores = quality.median_nights([row["scores"] for row in shown]) if shown else []
     days = quality.days(now)
     if not shown:
-        return _admin_page(request, "quality", {"readers": readers, "reader": reader, "good": good})
+        return _admin_page(
+            request, "quality", {"readers": readers, "reader": reader, "good": good, "scores": []}
+        )
     start = linechart.trim(
         days,
         [night.scored for night in scores],
