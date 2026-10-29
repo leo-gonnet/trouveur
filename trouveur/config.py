@@ -20,6 +20,13 @@ class Settings(BaseSettings):
     # shared, so its hour needs one answer, and the corpus is one region's boards.
     timezone: str = "Europe/Vienna"
 
+    # The daily run, a wall-clock time in `timezone`. Early, so the run is over and the emails
+    # are out before the reader's morning, and the sources are swept while their own traffic is
+    # lowest, which is when a block is least likely.
+    run_daily: bool = True
+    run_hour: int = 3
+    run_minute: int = 30
+
     # What the deploy pulled. deploy.yml rewrites this in .env to the pushed commit and compose
     # resolves the image tag from it, so it cannot disagree with the code that is running: a
     # footer showing the wrong commit would mean the wrong container is up.

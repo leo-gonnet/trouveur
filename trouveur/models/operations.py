@@ -18,6 +18,7 @@ class RunStage(StrEnum):
     PREPARE = "prepare"
     MATCH = "match"
     EMAIL = "email"
+    DISCOVER = "discover"
 
 
 class RunTrigger(StrEnum):

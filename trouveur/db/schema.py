@@ -432,6 +432,27 @@ user_edition_item = sa.Table(
     ),
 )
 
+# One nightly recall check per reader: the jobs they saved or applied to that search could still
+# return, and at what rank it did. A needle with no rank was not found. The set itself is stored,
+# not just a count, because recall moves whenever the reader marks a job, and only the set shows it.
+recall_check = sa.Table(
+    "recall_check",
+    metadata,
+    sa.Column("id", sa.BigInteger, primary_key=True),
+    sa.Column("user_id", sa.BigInteger, nullable=False),
+    sa.Column("profile_version", sa.Integer, nullable=False),
+    sa.Column("checked_at", sa.DateTime(timezone=True), nullable=False,
+              server_default=sa.func.now()),
+)
+
+recall_needle = sa.Table(
+    "recall_needle",
+    metadata,
+    sa.Column("check_id", sa.BigInteger, primary_key=True),
+    sa.Column("job_id", sa.BigInteger, primary_key=True),
+    sa.Column("rank", sa.Integer),
+)
+
 # Cached by (content_hash, user, profile_version): a posting is scored once per profile, ever.
 llm_score_cache = sa.Table(
     "llm_score_cache",
@@ -463,25 +484,12 @@ user_query_expansion = sa.Table(
               server_default=sa.func.now()),
 )
 
-pipeline_schedule = sa.Table(
-    "pipeline_schedule",
-    metadata,
-    sa.Column("id", sa.SmallInteger, primary_key=True),
-    sa.Column("enabled", sa.Boolean, nullable=False, server_default="true"),
-    sa.Column("run_hour", sa.SmallInteger, nullable=False, server_default="7"),
-    sa.Column("run_minute", sa.SmallInteger, nullable=False, server_default="0"),
-    sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False,
-              server_default=sa.func.now()),
-)
-
 pipeline_run = sa.Table(
     "pipeline_run",
     metadata,
     sa.Column("id", sa.BigInteger, primary_key=True),
     sa.Column("trigger", run_trigger, nullable=False),
     sa.Column("status", run_status, nullable=False, server_default="queued"),
-    sa.Column("only_source", sa.Text),
-    sa.Column("backfill", sa.Boolean, nullable=False, server_default="false"),
     sa.Column("attempts", sa.SmallInteger, nullable=False, server_default="0"),
     sa.Column("queued_at", sa.DateTime(timezone=True), nullable=False,
               server_default=sa.func.now()),
@@ -499,4 +507,5 @@ pipeline_run = sa.Table(
     sa.Column("current_source", sa.Text),
     sa.Column("match_user_id", sa.BigInteger),
     sa.Column("stage", sa.Text),
+    sa.Column("stage_started", JSONB, nullable=False, server_default=sa.text("'{}'::jsonb")),
 )

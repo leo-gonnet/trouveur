@@ -6,7 +6,7 @@ directions that matter:
 
 - **Display.** A time rendered without conversion reads two hours early for anyone in Vienna,
   and nothing on the page says it is UTC.
-- **A day, and an hour, that a person chose.** `run_hour` is a wall-clock hour somebody typed,
+- **A day, and an hour, that a person chose.** `run_hour` is a wall-clock hour somebody chose,
   so it has to stay at that hour across a DST change instead of sliding by one. An edition's day
   is the day its reader would call it.
 

@@ -880,6 +880,8 @@ async def test_a_run_whose_sweep_answered_boards_records_its_report(
 
     assert finished.status == RunStatus.SUCCESS.value
     assert "greenhouse" in finished.report["sources"]
+    # Discovery is the run's last step, so its time is part of the run on Operations.
+    assert "discover" in finished.stage_started
 
 
 async def test_cancelling_while_preparing_stops_before_matching(

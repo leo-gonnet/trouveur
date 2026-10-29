@@ -110,6 +110,130 @@ async def lexical_candidates(
     return [row.job_id for row in rows]
 
 
+# The recall check's view of the two arms: the same pool and the same order as _DENSE_SQL and
+# _LEXICAL_SQL, with the value each sorts by kept, so a kept job outside tonight's window can be
+# placed where tonight's search would have put it. Change the order of either arm and change it
+# here too; an integration test compares the two.
+_DENSE_DISTANCES_SQL = f"""
+SELECT j.id AS job_id, e.embedding_768 <=> CAST(:vector AS halfvec) AS distance
+FROM job_embedding e
+JOIN job j ON j.id = e.job_id
+JOIN job_facet f ON f.job_id = j.id
+WHERE {_ELIGIBLE}
+  AND e.embedding_768 IS NOT NULL
+ORDER BY distance
+LIMIT :limit
+"""
+
+_DISTANCES_TO_SQL = """
+SELECT v.n, CAST(:vector AS halfvec) <=> CAST(v.vector AS halfvec) AS distance
+FROM unnest(CAST(:vectors AS text[])) WITH ORDINALITY AS v(vector, n)
+ORDER BY v.n
+"""
+
+_LEXICAL_RANKS_SQL = f"""
+SELECT j.id AS job_id,
+       ts_rank_cd(j.search_de, websearch_to_tsquery('german', :query)) AS rank,
+       j.posted_at
+FROM job j
+JOIN job_facet f ON f.job_id = j.id
+WHERE {_ELIGIBLE}
+  AND (
+      j.search_de @@ websearch_to_tsquery('german', :query)
+      OR j.search_fold LIKE '%' || lower(f_unaccent(:query)) || '%'
+  )
+ORDER BY rank DESC, j.posted_at DESC NULLS LAST
+LIMIT :limit
+"""
+
+# The same match and rank for given jobs, whatever their age or state.
+_LEXICAL_FOR_SQL = """
+SELECT j.id AS job_id,
+       (j.search_de @@ websearch_to_tsquery('german', :query)
+        OR j.search_fold LIKE '%' || lower(f_unaccent(:query)) || '%') AS matches,
+       ts_rank_cd(j.search_de, websearch_to_tsquery('german', :query)) AS rank,
+       j.posted_at
+FROM job j
+WHERE j.id = ANY(CAST(:job_ids AS bigint[]))
+"""
+
+# The location half of _ELIGIBLE alone: a kept job is judged by today's area, whatever its age.
+_IN_AREA_SQL = f"""
+SELECT j.id AS job_id
+FROM job j
+JOIN job_facet f ON f.job_id = j.id
+WHERE j.id = ANY(CAST(:job_ids AS bigint[]))
+  AND {location.SQL}
+  AND NOT {location.CLOSED_AT_ORIGIN}
+"""
+
+
+def _vector_text(vector: Sequence[float]) -> str:
+    return "[" + ",".join(f"{value:.6f}" for value in vector) + "]"
+
+
+async def dense_distances(
+    conn: AsyncConnection,
+    profile: Any,
+    vector: list[float],
+    limit: int,
+    fresh_since: datetime,
+    seen_since: datetime,
+) -> list[sa.Row]:
+    params = {
+        **_filter_params(profile, fresh_since, seen_since),
+        "vector": _vector_text(vector),
+        "limit": limit,
+    }
+    return list(await conn.execute(sa.text(_DENSE_DISTANCES_SQL), params))
+
+
+async def distances_to(
+    conn: AsyncConnection, vector: list[float], vectors: Sequence[Sequence[float]]
+) -> list[float]:
+    """The distance from `vector` to each of `vectors`, in order, computed as the arm does."""
+    if not vectors:
+        return []
+    rows = await conn.execute(
+        sa.text(_DISTANCES_TO_SQL),
+        {"vector": _vector_text(vector), "vectors": [_vector_text(v) for v in vectors]},
+    )
+    return [float(row.distance) for row in rows]
+
+
+async def lexical_ranks(
+    conn: AsyncConnection,
+    profile: Any,
+    query: str,
+    limit: int,
+    fresh_since: datetime,
+    seen_since: datetime,
+) -> list[sa.Row]:
+    params = {**_filter_params(profile, fresh_since, seen_since), "query": query, "limit": limit}
+    return list(await conn.execute(sa.text(_LEXICAL_RANKS_SQL), params))
+
+
+async def lexical_for(
+    conn: AsyncConnection, query: str, job_ids: Sequence[int]
+) -> list[sa.Row]:
+    if not job_ids:
+        return []
+    return list(
+        await conn.execute(
+            sa.text(_LEXICAL_FOR_SQL), {"query": query, "job_ids": list(job_ids)}
+        )
+    )
+
+
+async def in_area(conn: AsyncConnection, profile: Any, job_ids: Sequence[int]) -> set[int]:
+    if not job_ids:
+        return set()
+    rows = await conn.execute(
+        sa.text(_IN_AREA_SQL), {**location.params(profile), "job_ids": list(job_ids)}
+    )
+    return {row.job_id for row in rows}
+
+
 async def upsert_matches(conn: AsyncConnection, rows: Sequence[dict]) -> int:
     """Record what retrieval found, without disturbing what the user has since done about it.
 
