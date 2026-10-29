@@ -11,7 +11,7 @@
    (`.section + .grid`) or by giving a component a bottom margin — both leave the next block
    someone adds with no gap at all. A block meant to sit flush goes inside the one above it.
 
-   Components: .topbar .nav .menu .banner .page-head .section .section-head .grid .kpis .kpi table .pill
+   Components: .topbar .nav .menu .banner .page-head .subbar .flow .timeline .legend .linechart .section .section-head .grid .kpis .kpi table .pill
    .score button/.btn(.primary .danger .ghost) label/input .field .tags .switch
    .notice .empty .bar .toast
    .band .results .job .job-main .states .filed .editions .step .pager .searchbar .login .foot
@@ -59,6 +59,11 @@
   --good: #256c43;       --good-soft: #e4f1e8;
   --warn: #8a5308;       --warn-soft: #fbf0da;
   --bad: #a3271f;        --bad-soft: #fae6e4;
+
+  /* Chart series, used in this order and never for a status. Checked for colour-blind
+     separation as a set; two are under 3:1 on white, so a chart using them labels its marks. */
+  --series-1: #2a78d6; --series-2: #eb6834; --series-3: #1baf7a; --series-4: #eda100;
+  --series-5: #e87ba4;
 
   /* Diagram lanes only. These carry no meaning, so a status must never use them. */
   --tint-1: #e6eef8; --tint-2: #e3f1e8; --tint-3: #ece9f4;
@@ -169,7 +174,7 @@ main { flex: 1; width: 100%; max-width: var(--measure); margin: 0 auto; padding:
    work: htmx puts `htmx-request` on its target for the length of a request and takes it off
    again, which leaves `class=""` behind for ever, and an empty class attribute is still a class
    attribute. Marking the wrapper is also what keeps this off the swap targets INSIDE a card
-   (`/admin/status`, `/admin/runs`), where the card owns the spacing and this gap is far too big.
+   (`/admin/runs/live`), where the card owns the spacing and this gap is far too big.
    A container stacking page blocks that forgets `.stack` is caught by the test that reads the
    rendered pages, not by anybody noticing. */
 main > * + *,
@@ -181,6 +186,80 @@ main > * + *,
 .page-head { display: grid; gap: var(--space-2); justify-items: start;
              padding-bottom: var(--space-4); border-bottom: 1px solid var(--border); }
 .page-head .hint { max-width: 70ch; }
+/* The pages of one area, as a strip under the topbar: it replaces the page title, so the area's
+   name is its label and the current page is underlined the way .nav marks it. */
+.subbar { padding: 0 var(--space-6); background: var(--surface); border-bottom: 1px solid var(--border);
+          font-size: var(--fs-md); }
+.subbar .band { gap: var(--space-5); }
+.subbar .label { padding-right: var(--space-2); }
+.subbar a { display: flex; align-items: center; height: 42px; color: var(--fg-soft);
+            text-decoration: none; border-bottom: 2px solid transparent; white-space: nowrap; }
+.subbar a:hover { color: var(--fg); }
+.subbar a[aria-current="page"] { color: var(--primary); font-weight: 600; border-bottom-color: var(--primary); }
+/* A short chain of steps drawn as boxes and arrows. `.done` is finished, `.now` in progress,
+   `.bad` needs a look. */
+.flow { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2);
+        margin: 0; padding: 0; list-style: none; font-size: var(--fs-md); }
+.flow > li { display: flex; align-items: center; gap: var(--space-2); }
+.flow > li + li::before { content: "\2192"; color: var(--fg-muted); }
+.flow > li > span { padding: var(--space-1) var(--space-3); border: 1px solid var(--border);
+                    border-radius: var(--radius); background: var(--surface); color: var(--fg-soft); }
+.flow > .done > span { background: var(--good-soft); color: var(--good); border-color: transparent; }
+.flow > .now > span { background: var(--primary-soft); color: var(--primary); border-color: var(--primary);
+                      font-weight: 600; }
+.flow:not(:last-child) { margin-bottom: var(--space-4); }
+.flow > .bad > span { background: var(--bad-soft); color: var(--bad); border-color: transparent; }
+/* Bars on a shared time axis: a label, then the track. Segments are placed by inline left/width
+   percentages and coloured by `.s1`-`.s5`; `.s0` is a bar with no split. */
+.timeline { display: grid; gap: var(--space-2); font-size: var(--fs-md); }
+.timeline-row { display: grid; grid-template-columns: 5.5rem minmax(0, 1fr);
+                align-items: center; gap: var(--space-3); }
+.timeline-track { position: relative; height: 16px; }
+.timeline-track > span { position: absolute; top: 0; bottom: 0; min-width: 2px; cursor: default;
+                         border-right: 2px solid var(--surface); }
+.timeline-track > span:first-child { border-radius: var(--radius) 0 0 var(--radius); }
+.timeline-track > span:last-child { border-radius: 0 var(--radius) var(--radius) 0; border-right: 0; }
+.timeline-track > span:only-child { border-radius: var(--radius); }
+.timeline .s0, .legend .s0 { background: var(--border); }
+.timeline .s1, .legend .s1 { background: var(--series-1); }
+.timeline .s2, .legend .s2 { background: var(--series-2); }
+.timeline .s3, .legend .s3 { background: var(--series-3); }
+.timeline .s4, .legend .s4 { background: var(--series-4); }
+.timeline .s5, .legend .s5 { background: var(--series-5); }
+.timeline-axis { position: relative; height: 1.4em; font-size: var(--fs-sm); color: var(--fg-muted); }
+.timeline-axis > span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
+.timeline:not(:last-child) { margin-bottom: var(--space-5); }
+/* What a chart's colours stand for, always beside the chart: colour alone names nothing. */
+.legend { display: flex; flex-wrap: wrap; gap: var(--space-4); margin: 0; padding: 0; list-style: none;
+          font-size: var(--fs-md); color: var(--fg-soft); }
+.legend > li { display: flex; align-items: center; gap: var(--space-2); }
+.legend > li > i { width: 10px; height: 10px; border-radius: 2px; }
+.legend:not(:last-child) { margin-bottom: var(--space-3); }
+/* An inline SVG line chart (web/linechart.py). `.c0`-`.c2` are its series colours, shared with
+   `.legend`; `.miss` circles a night that needs a look. Text inside scales with the chart. */
+.linechart { display: block; width: 100%; height: auto; overflow: visible; }
+.linechart .gridline { stroke: var(--border); stroke-width: 1; }
+.linechart .tick { fill: var(--fg-muted); font-size: 11px; font-family: var(--font); }
+.linechart .line { fill: none; stroke-width: 2; stroke-linejoin: round; }
+.linechart .area { stroke: none; opacity: .18; }
+/* Not `.band`: that is the page column, and its `width: 100%` stretched every hover strip. */
+.linechart .night { fill: transparent; }
+.linechart .night:hover { fill: var(--fg); opacity: .05; }
+.linechart .range { stroke: none; opacity: .15; }
+.linechart .c0 { stroke: var(--fg-muted); fill: var(--fg-muted); }
+.linechart .c1 { stroke: var(--series-1); fill: var(--series-1); }
+.linechart .c2 { stroke: var(--series-2); fill: var(--series-2); }
+.linechart .line.c0, .linechart .line.c1, .linechart .line.c2 { fill: none; }
+.linechart .dot.miss { fill: var(--surface); stroke: var(--warn); stroke-width: 2.5; }
+.legend .c0 { background: var(--fg-muted); opacity: .5; }
+.legend .c1 { background: var(--series-1); }
+.legend .c2 { background: var(--series-2); }
+.legend .c2.soft { opacity: .3; }
+.legend .miss { background: var(--surface); border: 2px solid var(--warn); border-radius: 999px; }
+.chart-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); }
+.chart-head > strong { font-size: 20px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.chart-head > strong .hint { font-weight: 400; }
+.chart-head + .hint, .chart-head + .legend { margin: var(--space-2) 0 var(--space-3); }
 
 /* ---------- Sections ---------- */
 .section { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-5); }
@@ -221,7 +300,7 @@ th { text-align: left; font-weight: 600; color: var(--fg-muted); font-size: var(
 td { padding: var(--space-2) var(--space-3); border-top: 1px solid var(--border);
      font-variant-numeric: tabular-nums; vertical-align: top; }
 tr:first-child > td { border-top: 0; }
-td.num, th.num { text-align: right; }
+td.num, th.num { text-align: right; white-space: nowrap; }
 td[colspan].hint { padding-top: 0; border-top: 0; }
 table.compact td, table.compact th { padding: var(--space-1) var(--space-2); }
 
@@ -324,6 +403,8 @@ td form.inline button { padding: 0 var(--space-3); }
 .searchbar input[type=search], .searchbar input[type=url] { flex: 1 1 260px; }
 .searchbar select { width: auto; }
 .searchbar label { margin: 0; }
+.searchbar label:has(input[type=number]) { display: flex; align-items: center; gap: var(--space-2); }
+.searchbar input[type=number] { width: 5rem; }
 
 /* ---------- Architecture page ---------- */
 .doc { display: grid; gap: var(--space-5); }
@@ -367,9 +448,9 @@ td form.inline button { padding: 0 var(--space-3); }
 .bar { height: 6px; border-radius: var(--radius); background: var(--surface-2); overflow: hidden; }
 .bar > span { display: block; height: 100%; background: var(--primary); transition: width .4s ease; }
 .run-live { display: grid; gap: var(--space-3); }
+.run-live:not(:last-child) { margin-bottom: var(--space-5); }
 .run-line { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
 .run-line form { margin-left: auto; }
-.queues { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: var(--space-4) 0 var(--space-2); }
 
 /* ---------- Job results ---------- */
 /* A mail-style list: one row per posting, score on the left, actions on the right, hairlines
@@ -475,7 +556,8 @@ a.step:hover { background: var(--surface-2); border-color: var(--fg-muted); colo
   .job .filed { display: none; }
 }
 @media (max-width: 640px) {
-  .topbar, .banner, .foot { padding-left: var(--space-4); padding-right: var(--space-4); }
+  .topbar, .banner, .subbar, .foot { padding-left: var(--space-4); padding-right: var(--space-4); }
+  .subbar .band { overflow-x: auto; flex-wrap: nowrap; }
   .band { gap: var(--space-3); }
   .brand { padding: var(--space-2) 0; }
   /* Wraps rather than scrolling: `overflow-x: auto` painted a scrollbar across the navy bar. */

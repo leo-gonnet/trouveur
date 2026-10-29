@@ -47,8 +47,7 @@
       <a href="/settings" {% if active == 'settings' %}aria-current="page"{% endif %}>Settings</a>
       {% if request.state.is_admin %}
         <span class="label menu-group">Admin</span>
-        <a href="/admin" {% if active == 'admin' %}aria-current="page"{% endif %}>Operations</a>
-        <a href="/users" {% if active == 'users' %}aria-current="page"{% endif %}>Users</a>
+        <a href="/admin" {% if active in ('admin', 'users') %}aria-current="page"{% endif %}>Operations</a>
       {% endif %}
       <form method="post" action="/logout"><button type="submit" class="ghost">Log out</button></form>
     </div>
@@ -70,6 +69,7 @@
   Search and the free stages still work.</div></div>
 {% endif %}
 {% endif %}
+{% block subbar %}{% endblock %}
 <main>{% block content %}{% endblock %}</main>
 <footer class="foot">
  <div class="band">

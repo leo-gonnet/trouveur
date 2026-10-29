@@ -1,0 +1,48 @@
+{% import "_ops.html" as ops %}
+<section class="section">
+  <div class="section-head">
+    <h2>Each reader's area</h2>
+    <span class="hint">the places picked on a profile</span>
+  </div>
+  {% for row in coverage.blocked %}
+    <p class="notice warn">{{ row.source }} is blocked since
+      {{ row.since | localtime('%Y-%m-%d %H:%M') }}. Its numbers are old.</p>
+  {% endfor %}
+  {% if coverage.areas %}
+    {% for entry in coverage.areas %}
+      <div class="section-head">
+        <h2>{{ entry.area.label }}</h2>
+        <span class="hint">{{ entry.area.readers }}
+          reader{{ '' if entry.area.readers == 1 else 's' }}</span>
+      </div>
+      {% if entry.sources %}
+      <table>
+        <tr><th>Source</th><th class="num">Open</th>
+            <th class="num">Ready to recommend</th>
+            <th class="num">Only on this source</th>
+            <th class="num">From boards discovery found</th></tr>
+        {% for row in entry.sources %}
+        <tr>
+          <td>{{ row.source }}</td>
+          <td class="num">{{ ops.count(row.open_jobs) }}</td>
+          <td class="num">{{ ops.count(row.retrievable_jobs) }}</td>
+          <td class="num">{{ ops.count(row.only_source) }}</td>
+          <td class="num">{{ ops.count(row.discovered_jobs) }}</td>
+        </tr>
+        {% endfor %}
+        <tr>
+          <td>all sources</td>
+          <td class="num">{{ ops.count(entry.open_jobs) }}</td>
+          <td class="num">{{ ops.count(entry.retrievable_jobs) }}</td>
+          <td class="num">{{ ops.count(entry.only_source) }}</td>
+          <td class="num">{{ ops.count(entry.discovered_jobs) }}</td>
+        </tr>
+      </table>
+      {% else %}
+        <p class="notice bad">We hold nothing for this area, so this reader sees an empty page.</p>
+      {% endif %}
+    {% endfor %}
+  {% else %}
+    <p class="empty">No active reader has a profile yet.</p>
+  {% endif %}
+</section>

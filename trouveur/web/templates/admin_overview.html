@@ -1,0 +1,90 @@
+{% extends "admin_base.html" %}{% import "_ops.html" as ops %}
+{% block admin %}
+<div class="kpis">
+  {{ m.kpi(ops.count(overview.open_jobs), 'open postings') }}
+  {{ m.kpi(ops.count(overview.new_today), 'new in last 24 h') }}
+  {{ m.kpi(ops.count(overview.fresh_jobs), 'open, posted in last ' ~ horizon_days ~ ' days') }}
+  {# reltuples; NULL until ANALYZE has run. #}
+  {{ m.kpi('~' ~ ops.count(overview.total_estimate) if overview.total_estimate is not none
+           else '—', 'ever collected, estimate') }}
+</div>
+
+{% set failing = health | rejectattr('ok') | list + health | selectattr('ok') | selectattr('blocked') | list %}
+{% set never = sources | reject('in', health | map(attribute='source') | list) | list %}
+{% set stuck = queues | sum(attribute='stuck') %}
+{% set waiting = queues | sum(attribute='waiting') %}
+{% set oldest = queues | selectattr('oldest') | map(attribute='oldest') | list %}
+
+<section class="section">
+  <table>
+    <tr><th>Area</th><th>State</th><th>Why</th><th></th></tr>
+    <tr>
+      <td>Runs</td>
+      <td>
+        {%- if active_run %}{{ ops.run_status(active_run.status) }}
+        {%- elif last_run %}{{ ops.run_status(last_run.status) }}
+        {%- else %}<span class="pill">none</span>{% endif -%}
+      </td>
+      <td>
+        {%- if last_run %}Last daily run ended {{ last_run.finished_at | localtime('%a %d %b, %H:%M') }}: {{ ops.run_status(last_run.status) }}
+        {%- else %}No daily run has finished yet.{% endif -%}
+      </td>
+      <td><a href="/admin/runs">Runs</a></td>
+    </tr>
+    <tr>
+      <td>Sources</td>
+      <td>
+        {%- if failing %}<span class="pill bad">{{ failing | length }} failing</span>
+        {%- elif never %}<span class="pill warn">{{ never | length }} never fetched</span>
+        {%- else %}<span class="pill good">all fine</span>{% endif -%}
+      </td>
+      <td>
+        {%- if failing %}Failed or blocked last time: {{ failing | map(attribute='source') | join(', ') }}.
+        {%- elif never %}Never fetched: {{ never | join(', ') }}.
+        {%- else %}Every source worked last time.{% endif -%}
+      </td>
+      <td><a href="/admin/sources">Sources</a></td>
+    </tr>
+    <tr>
+      <td>Boards</td>
+      <td>
+        {%- if tenant_totals.failing %}<span class="pill warn">{{ ops.count(tenant_totals.failing) }} failing</span>
+        {%- else %}<span class="pill good">all fine</span>{% endif -%}
+      </td>
+      <td>{{ ops.count(tenant_totals.failing) }} company boards failed last time.
+        {{ ops.count(tenant_totals.sweeping) }} are on.</td>
+      <td><a href="/admin/sources">Sources</a></td>
+    </tr>
+    <tr>
+      <td>Queues</td>
+      <td>
+        {%- if stuck %}<span class="pill bad">{{ ops.count(stuck) }} stuck</span>
+        {%- elif waiting %}<span class="pill">{{ ops.count(waiting) }} waiting</span>
+        {%- else %}<span class="pill good">empty</span>{% endif -%}
+      </td>
+      <td>
+        {%- if waiting %}Waiting since {{ oldest | min | localtime('%a %d %b, %H:%M') }}:
+          {% for row in queues if row.waiting or row.working %}{{ ops.TERMS.get(row.kind, row.kind) }} {{ ops.count(row.waiting + row.working) }}{{ ' · ' if not loop.last }}{% endfor %}.
+        {%- else %}Nothing waiting.{% endif %}
+        {%- if stuck %} {{ ops.count(stuck) }} failed 5 times: <code>trouveur requeue</code> retries them.{% endif -%}
+      </td>
+      <td></td>
+    </tr>
+    {% if overview.vector_spaces > 1 %}
+    <tr>
+      <td>Vectors</td>
+      <td><span class="pill bad">mixed</span></td>
+      <td>{{ overview.vector_spaces }} vector versions. Search by meaning is wrong until the vector queue is empty.</td>
+      <td></td>
+    </tr>
+    {% endif %}
+  </table>
+</section>
+
+{% if timeline %}
+<section class="section">
+  <div class="section-head"><h2>Last nights</h2><a class="hint" href="/admin/runs">Runs</a></div>
+  {% include "_runs_chart.html" %}
+</section>
+{% endif %}
+{% endblock %}

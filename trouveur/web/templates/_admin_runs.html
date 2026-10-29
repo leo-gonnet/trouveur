@@ -1,21 +1,53 @@
+{% import "_ops.html" as ops %}{% import "_macros.html" as m %}
+{% set step_names = dict(ops.RUN_STEPS) %}
+<section class="section">
+  <div class="section-head">
+    <h2>Runs</h2>
+    <span class="hint">{% if run_daily %}every day at {{ run_time }}, {{ timezone }}{% else %}daily run is off{% endif %}</span>
+  </div>
+{% include "_admin_live.html" %}
+{% if timeline %}
+{% include "_runs_chart.html" %}
+{% else %}
+  <p class="empty">No daily run yet.</p>
+{% endif %}
+</section>
+
+<section class="section">
+<div class="section-head"><h2>Last {{ runs | length }} runs</h2></div>
 {% if runs %}
 <table>
-  <tr><th>Queued</th><th>Trigger</th><th>Status</th><th>Scope</th><th>Result</th></tr>
+  <tr><th>Started</th><th>Kind</th><th>State</th>
+      {% for key in steps %}<th class="num">{{ step_names[key] }}</th>{% endfor %}
+      <th>Result</th></tr>
   {% for run in runs %}
+  {% set took = step_seconds[run.id] %}
   <tr>
-    <td>{{ run.queued_at | localtime('%m-%d %H:%M') }}</td>
-    <td>{{ run.trigger }}</td>
+    <td>{{ (run.started_at or run.queued_at) | localtime('%a %d, %H:%M') }}</td>
+    <td>{% if run.match_user_id %}scoring only · user {{ run.match_user_id }}{% elif run.trigger == 'scheduled' %}daily{% else %}started by a person{% endif %}</td>
+    <td>{{ ops.run_status(run.status) }}</td>
+    {% for key in steps %}<td class="num">{{ ops.duration(took[key]) if key in took else '—' }}</td>{% endfor %}
+    {% set got = outcomes[run.id] %}
     <td>
-      <span class="pill {% if run.status == 'success' %}good{% elif run.status == 'failed' %}bad{% endif %}">
-        {{ run.status }}</span>
-    </td>
-    <td>{% if run.match_user_id %}match only · user {{ run.match_user_id }}{% else %}{{ run.only_source or 'all' }}{% if run.backfill %} · backfill{% endif %}{% endif %}</td>
-    <td class="hint">
-      {%- if run.error -%}{{ run.error[:160] }}
-      {%- elif run.report -%}{{ run.report.get('summary', '') }}
-      {%- else -%}—{%- endif -%}
+      {%- set postings = [] -%}
+      {%- if got.changed is not none %}{% set _ = postings.append(ops.count(got.changed) ~ ' new or changed') %}{% endif -%}
+      {%- if got.closed is not none %}{% set _ = postings.append(ops.count(got.closed) ~ ' closed') %}{% endif -%}
+      {%- set readers = [] -%}
+      {%- if got.scored is not none %}{% set _ = readers.append(ops.count(got.scored) ~ ' scored') %}{% endif -%}
+      {%- if got.recommended is not none %}{% set _ = readers.append(ops.count(got.recommended) ~ ' recommended') %}{% endif -%}
+      {%- if got.cost_usd is not none %}{% set _ = readers.append(m.money(got.cost_usd) | trim) %}{% endif -%}
+      {%- if got.emails is not none %}{% set _ = readers.append(got.emails ~ ' email' ~ ('' if got.emails == 1 else 's')) %}{% endif -%}
+      {%- if postings %}<span class="hint">Postings:</span> {{ postings | join(' · ') }}{% endif -%}
+      {%- if postings and readers %}<br>{% endif -%}
+      {%- if readers %}<span class="hint">Readers:</span> {{ readers | join(' · ') }}{% endif -%}
+      {%- if not postings and not readers %}—{% endif -%}
+      {%- if got.failed or got.blocked %}<br>{% endif -%}
+      {%- for name in got.failed %}<span class="pill bad">{{ name }} failed</span>{% endfor %}
+      {%- for name in got.blocked %} <span class="pill bad">{{ name }} blocked</span>{% endfor %}
+      {%- if run.error %}<br><span class="hint">{{ run.error[:160] }}</span>{% endif -%}
     </td>
   </tr>
   {% endfor %}
 </table>
 {% else %}<p class="empty">No runs yet.</p>{% endif %}
+</section>

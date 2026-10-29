@@ -1,0 +1,139 @@
+{% extends "admin_base.html" %}{% import "_ops.html" as ops %}
+{% block admin %}
+<section class="section">
+  <div class="section-head">
+    <h2>Compared with other sites</h2>
+    <span class="hint">last {{ recall_days }} days</span>
+  </div>
+  {% if coverage.recall %}
+  <table>
+    <tr><th>Site</th><th class="num">Jobs seen</th>
+        <th class="num">With company and place</th>
+        <th class="num">We had it (same company, title, town)</th></tr>
+    {% for row in coverage.recall %}
+    <tr>
+      <td>{{ row.origin }}</td>
+      <td class="num">{{ ops.count(row.seen) }}</td>
+      <td class="num">{{ ops.count(row.judged) }}</td>
+      <td class="num">{{ ops.count(row.held) }}{% if row.held_share is not none %}
+        ({{ '{:.0%}'.format(row.held_share) }}){% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% if coverage.misses %}
+  <div class="section-head">
+    <h2>Jobs we did not have</h2>
+    <span class="hint">companies we miss most come first</span>
+  </div>
+  <table>
+    <tr><th>Site</th><th>Company</th><th>Title</th><th>Place</th></tr>
+    {% for row in coverage.misses %}
+    <tr>
+      <td>{{ row.origin }}</td>
+      <td>{{ row.company }}{% if row.company_misses > 1 %} ({{ row.company_misses }}){% endif %}</td>
+      <td>{{ row.title }}</td>
+      <td>{{ row.location_text or '' }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+  {% elif linkedin_on %}
+    <p class="empty">No job seen on LinkedIn in the last {{ recall_days }} days yet.</p>
+  {% else %}
+    <p class="empty">Nothing to compare: the LinkedIn pass is off. Set <code>LINKEDIN_MAX_REQUESTS</code> to turn it on.</p>
+  {% endif %}
+</section>
+
+{# The one slow card: one filtered pass over the open corpus per area. It replaces itself once
+   counted, so it cannot hold the rest of the page back. #}
+<section class="section" hx-get="/admin/coverage/areas" hx-trigger="load" hx-swap="outerHTML">
+  <div class="section-head"><h2>Each reader's area</h2></div>
+  <p class="empty">Counting&hellip;</p>
+</section>
+
+{% if coverage.reports %}
+{% set said = coverage.reports %}
+<section class="section">
+  <div class="section-head">
+    <h2>Found elsewhere</h2>
+    <span class="hint">{{ ops.count(said.reports) }} link{{ '' if said.reports == 1
+      else 's' }} pasted by readers</span>
+  </div>
+  <table>
+    <tr><th>What we found</th><th class="num">Links</th></tr>
+    <tr><td>we had it and showed it</td>
+        <td class="num">{{ ops.count(said.recommended) }}</td></tr>
+    <tr><td>we had it and did not show it</td>
+        <td class="num">{{ ops.count(said.not_recommended) }}</td></tr>
+    <tr><td>we did not have it, on a board we fetch</td>
+        <td class="num">{{ ops.count(said.missing_job) }}</td></tr>
+    <tr><td>the board was new to us</td>
+        <td class="num">{{ ops.count(said.missing_board) }}</td></tr>
+    <tr><td>we cannot read links on that site</td>
+        <td class="num">{{ ops.count(said.unknown_platform) }}</td></tr>
+    {% if said.waiting %}
+      <tr><td>waiting</td><td class="num">{{ ops.count(said.waiting) }}</td></tr>
+    {% endif %}
+  </table>
+  {% if said.not_recommended %}
+    <p class="hint">Not shown because: {{ ops.count(said.by_location) }} outside the area,
+      {{ ops.count(said.by_retrieval) }} not found by search,
+      {{ ops.count(said.by_scoring) }} never scored.</p>
+  {% endif %}
+</section>
+{% endif %}
+
+{% if coverage.leads %}
+<section class="section">
+  <div class="section-head">
+    <h2>Discovery</h2>
+    <span class="hint">{{ ops.count(coverage.leads.leads) }} job links found ·
+      {{ ops.count(coverage.leads.resolved) }} on a board we can fetch</span>
+  </div>
+  {% if coverage.leads.unmined_jobs or coverage.leads.awaiting_resolve %}
+    <p class="notice">Still reading the archive: {{ ops.count(coverage.leads.unmined_jobs) }}
+      postings and {{ ops.count(coverage.leads.awaiting_resolve) }} links to go.</p>
+  {% endif %}
+  {% if coverage.leads.origins %}
+  <table>
+    <tr><th>Found by</th><th class="num">Job links</th><th class="num">New boards</th>
+        <th class="num">Tried</th>
+        <th class="num">Turned on</th></tr>
+    {% for row in coverage.leads.origins %}
+    <tr><td>{{ row.label }}</td><td class="num">{{ ops.count(row.leads) }}</td>
+        <td class="num">{{ ops.count(row.boards) }}</td>
+        <td class="num">{{ ops.count(row.tried) }}</td>
+        <td class="num">{{ ops.count(row.kept) }}</td></tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+  <div class="section-head">
+    <h2>Links we cannot read</h2>
+    <span class="hint">{{ ops.count(coverage.leads.unread) }} links on
+      {{ ops.count(coverage.leads.unread_host_count) }} sites</span>
+  </div>
+  {% if coverage.leads.hosts %}
+  <table>
+    <tr><th>Site</th><th class="num">Job links</th></tr>
+    {% for row in coverage.leads.hosts %}
+    <tr><td>{{ row.host }}</td><td class="num">{{ ops.count(row.leads) }}</td></tr>
+    {% endfor %}
+  </table>
+  <p class="hint">A site that comes back often needs a rule in <code>trouveur/discovery/resolve.py</code>.</p>
+  {% else %}
+    <p class="empty">Every link so far was readable.</p>
+  {% endif %}
+</section>
+{% endif %}
+
+<section class="section">
+  <div class="section-head"><h2>Open postings by country</h2></div>
+  {% if countries %}
+  <table>
+    {% for row in countries %}
+      <tr><td>{{ row.country }}</td><td class="num">{{ ops.count(row.jobs) }}</td></tr>
+    {% endfor %}
+  </table>
+  {% else %}<p class="empty">No facets read yet.</p>{% endif %}
+</section>
+{% endblock %}

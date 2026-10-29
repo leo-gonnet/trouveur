@@ -1,0 +1,110 @@
+{% extends "admin_base.html" %}
+{% set why = {'dismissed': 'dismissed by you', 'unmarked': 'unmarked by you'} %}
+{% set colour = {'good': 'c1', 'share': 'c1', 'dismissed': 'c2', 'kept': 'c0', 'found': 'c1'} %}
+
+{% macro pct(value) -%}{{ '—' if value is none else ((100 * value) | round | int) ~ '%' }}{%- endmacro %}
+
+{# `tips` is one hover line per night; `areas` names the series drawn as a filled area; `misses`
+   marks the nights to circle on the series named by `missed_on`. #}
+{% macro linechart(chart, tips, areas=(), misses=(), missed_on='', range_colour='c2') %}
+<svg class="linechart" viewBox="0 0 {{ chart.width }} {{ chart.height }}" role="img">
+  {% for label, y in chart.y_ticks %}
+    <line class="gridline" x1="{{ chart.left }}" x2="{{ chart.right }}" y1="{{ y }}" y2="{{ y }}"></line>
+    <text class="tick" x="{{ chart.left - 6 }}" y="{{ y + 4 }}" text-anchor="end">{{ label }}</text>
+  {% endfor %}
+  {% for label, x in chart.x_ticks %}
+    <text class="tick" x="{{ x }}" y="{{ chart.height - 6 }}" text-anchor="middle">{{ label }}</text>
+  {% endfor %}
+  {% for points in chart.ranges %}<polygon class="range {{ range_colour }}" points="{{ points }}"></polygon>{% endfor %}
+  {% for s in chart.series %}
+    {% if s.key in areas %}{% for points in s.areas %}<polygon class="area {{ colour[s.key] }}" points="{{ points }}"></polygon>{% endfor %}{% endif %}
+    {% for points in s.lines %}<polyline class="line {{ colour[s.key] }}" points="{{ points }}"></polyline>{% endfor %}
+    {% for point in s.points %}{% if point %}{% set missed = s.key == missed_on and loop.index0 in misses %}<circle class="dot {{ colour[s.key] }}{{ ' miss' if missed }}" cx="{{ point[0] }}" cy="{{ point[1] }}" r="{{ 4.5 if missed else 2.5 }}"></circle>{% endif %}{% endfor %}
+  {% endfor %}
+  {% for x, width, day in chart.bands %}
+    <rect class="night" x="{{ x }}" y="0" width="{{ width }}" height="{{ chart.bottom }}"><title>{{ tips[loop.index0] }}</title></rect>
+  {% endfor %}
+</svg>
+{% endmacro %}
+
+{% block admin %}
+<form class="searchbar" method="get" action="/admin/quality">
+  <select name="reader" onchange="this.form.submit()" aria-label="Reader">
+    <option value="all" {% if reader == 'all' %}selected{% endif %}>All readers</option>
+    {% for row in readers %}
+      <option value="{{ row.user.id }}" {% if reader == row.user.id | string %}selected{% endif %}>{{ row.user.display_name }}</option>
+    {% endfor %}
+  </select>
+  <label>Good from <input name="good" type="number" min="1" max="100" value="{{ good }}" onchange="this.form.submit()"></label>
+</form>
+
+{% if scores %}
+<section class="section">
+  {% set found, kept = found_week %}
+  <div class="chart-head">
+    <h2>Recall: does search still find the jobs you kept?</h2>
+    <strong>{{ found }} of {{ kept }} <span class="hint">last 7 nights</span></strong>
+  </div>
+  {% if recall | rejectattr('needles', 'none') | list %}
+    <ul class="legend">
+      <li><i class="c0"></i>kept jobs: every job you saved or applied to, whatever its age</li>
+      <li><i class="c1"></i>found by search</li>
+      <li><i class="miss"></i>a night with a miss</li>
+    </ul>
+    {% set tips = [] %}
+    {% set missed = [] %}
+    {% for night in recall %}
+      {% if night.needles and night.found < night.needles %}{% set _ = missed.append(loop.index0) %}{% endif %}
+      {% set reasons = [] %}{% for job, reason in night.removed %}{% set _ = reasons.append(why[reason]) %}{% endfor %}
+      {% set change = (' · +' ~ (night.added | length) ~ ' kept' if night.added else '') ~ (' · −' ~ (night.removed | length) ~ ' (' ~ (reasons | unique | join(', ')) ~ ')' if night.removed else '') %}
+      {% set _ = tips.append(night.day.strftime('%a %d %b') ~ (' · no check' if night.needles is none else ' · ' ~ night.found ~ ' of ' ~ night.needles ~ ' found' ~ change)) %}
+    {% endfor %}
+    {{ linechart(recall_chart, tips, areas=('kept',), misses=missed, missed_on='found') }}
+  {% else %}
+    <p class="empty">No check yet. The first one runs with the next daily run, right after scoring.</p>
+  {% endif %}
+</section>
+
+<section class="section">
+  <div class="chart-head">
+    <h2>Good jobs per night: is there anything worth reading?</h2>
+    <strong>{{ (good_chart.series[0].last | int) if good_chart.series[0].last is not none else '—' }} <span class="hint">last night</span></strong>
+  </div>
+  <p class="hint">Jobs scored {{ good }} or more.</p>
+  {% set tips = [] %}
+  {% for night in scores %}{% set _ = tips.append(night.day.strftime('%a %d %b') ~ (' · nothing scored' if night.scored is none else ' · ' ~ (night.good | int) ~ ' good of ' ~ (night.scored | int) ~ ' scored')) %}{% endfor %}
+  {{ linechart(good_chart, tips) }}
+</section>
+
+<section class="section">
+  <div class="chart-head">
+    <h2>Share good: does the score still sort?</h2>
+    <strong>{{ pct(share_chart.series[0].last) }} <span class="hint">last night</span></strong>
+  </div>
+  <p class="hint">Near 100% night after night means everything scores high, so the score no longer separates.</p>
+  {% set tips = [] %}
+  {% for night in scores %}{% set _ = tips.append(night.day.strftime('%a %d %b') ~ ' · ' ~ pct(night.share_good) ~ ' good') %}{% endfor %}
+  {{ linechart(share_chart, tips) }}
+</section>
+
+<section class="section">
+  {% set latest = (scores | rejectattr('dismissed_range', 'none') | list)[-1:] %}
+  <div class="chart-head">
+    <h2>Good, dismissed: do you agree with the score?</h2>
+    <strong>{{ pct(latest[0].dismissed_good) if latest else '—' }}{% if latest %} <span class="hint">likely {{ pct(latest[0].dismissed_range[0]) }}–{{ pct(latest[0].dismissed_range[1]) }} · last {{ agreement_nights }} nights</span>{% endif %}</strong>
+  </div>
+  <ul class="legend">
+    <li><i class="c2"></i>of the good jobs you acted on, the share you dismissed</li>
+    <li><i class="c2 soft"></i>where it really is, 9 times in 10: wide when few jobs were acted on</li>
+  </ul>
+  {% set tips = [] %}
+  {% for night in scores %}
+    {% set span = night.dismissed_range %}
+    {% set _ = tips.append(night.day.strftime('%a %d %b') ~ (' · no good job acted on' if span is none else ' · ' ~ night.good_dismissed ~ ' of ' ~ night.good_acted ~ ' dismissed · ' ~ pct(span[0]) ~ ' to ' ~ pct(span[1]))) %}
+  {% endfor %}
+  {{ linechart(dismissed_chart, tips) }}
+</section>
+{% else %}
+<p class="empty">Nothing scored and no recall check yet, for any reader.</p>
+{% endif %}
+{% endblock %}

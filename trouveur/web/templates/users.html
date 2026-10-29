@@ -1,13 +1,5 @@
-{% extends "base.html" %}{% import "_macros.html" as m %}{% block title %}Users · Trouveur{% endblock %}
-{% block content %}
-<div class="page-head">
-  <h1>Users</h1>
-  <p class="hint">
-    Accounts and the credit they score out of. Creating an account costs only the credit granted to
-    it; the crawl set stays a CLI decision, because enlarging that spends every user's politeness
-    budget.
-  </p>
-</div>
+{% extends "admin_base.html" %}{% import "_macros.html" as m %}
+{% block admin %}
 
 {% if error %}<p class="notice bad">{{ error }}</p>{% endif %}
 {% if deleted %}<p class="notice good">{{ deleted }} and everything they held is deleted.</p>{% endif %}

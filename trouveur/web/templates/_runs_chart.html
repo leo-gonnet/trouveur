@@ -1,0 +1,24 @@
+{% import "_ops.html" as ops %}
+{% set step_names = dict(ops.RUN_STEPS) %}
+{% set step_class = {'fetch': 's1', 'prepare': 's2', 'match': 's3', 'email': 's4', 'discover': 's5'} %}
+<ul class="legend">
+  {% for key in steps %}<li><i class="{{ step_class[key] }}"></i>{{ step_names[key] }}</li>{% endfor %}
+  {% if timeline.has_unsplit %}<li><i class="s0"></i>steps not recorded</li>{% endif %}
+</ul>
+<div class="timeline">
+  {% for bar in timeline.bars %}
+  <div class="timeline-row">
+    <span>{{ bar.day }}</span>
+    <div class="timeline-track">
+      {%- for seg in bar.segments %}
+      <span class="{{ step_class.get(seg.stage, 's0') }}" style="left: {{ seg.left }}%; width: {{ seg.width }}%"
+            title="{{ step_names.get(seg.stage, 'Steps not recorded') }} · {{ seg.start.strftime('%H:%M') }} → {{ 'now' if seg.running else seg.end.strftime('%H:%M') }} · {{ ops.duration(seg.seconds) }}"></span>
+      {%- endfor %}
+    </div>
+  </div>
+  {% endfor %}
+  <div class="timeline-row">
+    <span></span>
+    <div class="timeline-axis">{% for label, left in timeline.ticks %}<span style="left: {{ left }}%">{{ label }}</span>{% endfor %}</div>
+  </div>
+</div>
