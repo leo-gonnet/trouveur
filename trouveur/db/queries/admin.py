@@ -640,6 +640,16 @@ async def finish_run(
     )
 
 
+async def record_run_report(
+    conn: AsyncConnection, run_id: int, *, report: dict, error: str | None = None
+) -> None:
+    await conn.execute(
+        pipeline_run.update()
+        .where(pipeline_run.c.id == run_id)
+        .values(report=report, error=(error or "")[:4000] or None)
+    )
+
+
 async def recent_runs(conn: AsyncConnection, limit: int = 20) -> list[sa.Row]:
     return list(
         await conn.execute(

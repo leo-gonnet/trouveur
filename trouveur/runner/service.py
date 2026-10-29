@@ -264,6 +264,10 @@ async def _execute(settings: Settings, run) -> None:
         "boards_promoted": promoted,
         "digests_sent": notified,
     }
+    # Stored before discovery: a restart during the slow LinkedIn pass must not lose the report
+    # of a night that already delivered its emails.
+    async with connect() as conn:
+        await admin_q.record_run_report(conn, run.id, report=payload, error=error)
 
     # Last: these feed discovery, nothing tonight's edition reads. Inside the run, so their time
     # shows on Operations; their failures are caught, so they never change the verdict above.
