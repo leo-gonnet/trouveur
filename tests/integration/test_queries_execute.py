@@ -112,6 +112,7 @@ def _arguments(ctx: dict) -> dict[str, dict]:
         "admin.enqueue_run": {"trigger": RunTrigger.MANUAL},
         "admin.claim_next_run": {},
         "admin.finish_run": {"run_id": ctx["run_id"], "status": RunStatus.SUCCESS, "report": {}},
+        "admin.record_run_report": {"run_id": ctx["run_id"], "report": {}},
         "admin.request_cancel": {"run_id": ctx["run_id"]},
         "admin.cancel_requested": {"run_id": ctx["run_id"]},
         "admin.start_run_progress": {"run_id": ctx["run_id"], "sources_total": 3},
