@@ -81,6 +81,25 @@
   </table>
 </section>
 
+<section class="section">
+  {% set last = unknown_chart.series[0].last %}
+  <div class="chart-head">
+    <h2>Unknown location: postings every reader is shown</h2>
+    <strong>{{ ops.count(last) if last is not none else '—' }} <span class="hint">last run</span></strong>
+  </div>
+  <p class="hint">Open postings from the last {{ horizon_days }} days that name no place and are not remote. The location filter cannot rule them out, so they reach every reader, wherever they live.</p>
+  {% if last is not none %}
+    {% set tips = [] %}
+    {% for night in unknown %}
+      {% set top = [] %}{% for source, jobs in (night or {}) | dictsort(by='value', reverse=True) %}{% if loop.index <= 3 %}{% set _ = top.append(source ~ ' ' ~ ops.count(jobs)) %}{% endif %}{% endfor %}
+      {% set _ = tips.append(unknown_chart.bands[loop.index0][2].strftime('%a %d %b') ~ (' · not counted' if night is none else ' · ' ~ ops.count(night.values() | sum) ~ (' · ' ~ top | join(', ') if top else ''))) %}
+    {% endfor %}
+    {{ ops.linechart(unknown_chart, tips) }}
+  {% else %}
+    <p class="empty">Not counted yet. Each daily run counts them, from the next one on.</p>
+  {% endif %}
+</section>
+
 {% if timeline %}
 <section class="section">
   <div class="section-head"><h2>Last nights</h2><a class="hint" href="/admin/runs">Runs</a></div>

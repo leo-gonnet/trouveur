@@ -1,31 +1,7 @@
-{% extends "admin_base.html" %}
+{% extends "admin_base.html" %}{% import "_ops.html" as ops %}
 {% set why = {'dismissed': 'dismissed by you', 'unmarked': 'unmarked by you'} %}
-{% set colour = {'good': 'c1', 'share': 'c1', 'dismissed': 'c2', 'kept': 'c0', 'found': 'c1'} %}
 
 {% macro pct(value) -%}{{ '—' if value is none else ((100 * value) | round | int) ~ '%' }}{%- endmacro %}
-
-{# `tips` is one hover line per night; `areas` names the series drawn as a filled area; `misses`
-   marks the nights to circle on the series named by `missed_on`. #}
-{% macro linechart(chart, tips, areas=(), misses=(), missed_on='', range_colour='c2') %}
-<svg class="linechart" viewBox="0 0 {{ chart.width }} {{ chart.height }}" role="img">
-  {% for label, y in chart.y_ticks %}
-    <line class="gridline" x1="{{ chart.left }}" x2="{{ chart.right }}" y1="{{ y }}" y2="{{ y }}"></line>
-    <text class="tick" x="{{ chart.left - 6 }}" y="{{ y + 4 }}" text-anchor="end">{{ label }}</text>
-  {% endfor %}
-  {% for label, x in chart.x_ticks %}
-    <text class="tick" x="{{ x }}" y="{{ chart.height - 6 }}" text-anchor="middle">{{ label }}</text>
-  {% endfor %}
-  {% for points in chart.ranges %}<polygon class="range {{ range_colour }}" points="{{ points }}"></polygon>{% endfor %}
-  {% for s in chart.series %}
-    {% if s.key in areas %}{% for points in s.areas %}<polygon class="area {{ colour[s.key] }}" points="{{ points }}"></polygon>{% endfor %}{% endif %}
-    {% for points in s.lines %}<polyline class="line {{ colour[s.key] }}" points="{{ points }}"></polyline>{% endfor %}
-    {% for point in s.points %}{% if point %}{% set missed = s.key == missed_on and loop.index0 in misses %}<circle class="dot {{ colour[s.key] }}{{ ' miss' if missed }}" cx="{{ point[0] }}" cy="{{ point[1] }}" r="{{ 4.5 if missed else 2.5 }}"></circle>{% endif %}{% endfor %}
-  {% endfor %}
-  {% for x, width, day in chart.bands %}
-    <rect class="night" x="{{ x }}" y="0" width="{{ width }}" height="{{ chart.bottom }}"><title>{{ tips[loop.index0] }}</title></rect>
-  {% endfor %}
-</svg>
-{% endmacro %}
 
 {% block admin %}
 <form class="searchbar" method="get" action="/admin/quality">
@@ -59,7 +35,7 @@
       {% set change = (' · +' ~ (night.added | length) ~ ' kept' if night.added else '') ~ (' · −' ~ (night.removed | length) ~ ' (' ~ (reasons | unique | join(', ')) ~ ')' if night.removed else '') %}
       {% set _ = tips.append(night.day.strftime('%a %d %b') ~ (' · no check' if night.needles is none else ' · ' ~ night.found ~ ' of ' ~ night.needles ~ ' found' ~ change)) %}
     {% endfor %}
-    {{ linechart(recall_chart, tips, areas=('kept',), misses=missed, missed_on='found') }}
+    {{ ops.linechart(recall_chart, tips, areas=('kept',), misses=missed, missed_on='found') }}
   {% else %}
     <p class="empty">No check yet. The first one runs with the next daily run, right after scoring.</p>
   {% endif %}
@@ -73,7 +49,7 @@
   <p class="hint">Jobs scored {{ good }} or more.</p>
   {% set tips = [] %}
   {% for night in scores %}{% set _ = tips.append(night.day.strftime('%a %d %b') ~ (' · nothing scored' if night.scored is none else ' · ' ~ (night.good | int) ~ ' good of ' ~ (night.scored | int) ~ ' scored')) %}{% endfor %}
-  {{ linechart(good_chart, tips) }}
+  {{ ops.linechart(good_chart, tips) }}
 </section>
 
 <section class="section">
@@ -84,7 +60,7 @@
   <p class="hint">Near 100% night after night means everything scores high, so the score no longer separates.</p>
   {% set tips = [] %}
   {% for night in scores %}{% set _ = tips.append(night.day.strftime('%a %d %b') ~ ' · ' ~ pct(night.share_good) ~ ' good') %}{% endfor %}
-  {{ linechart(share_chart, tips) }}
+  {{ ops.linechart(share_chart, tips) }}
 </section>
 
 <section class="section">
@@ -102,7 +78,7 @@
     {% set span = night.dismissed_range %}
     {% set _ = tips.append(night.day.strftime('%a %d %b') ~ (' · no good job acted on' if span is none else ' · ' ~ night.good_dismissed ~ ' of ' ~ night.good_acted ~ ' dismissed · ' ~ pct(span[0]) ~ ' to ' ~ pct(span[1]))) %}
   {% endfor %}
-  {{ linechart(dismissed_chart, tips) }}
+  {{ ops.linechart(dismissed_chart, tips) }}
 </section>
 {% else %}
 <p class="empty">Nothing scored and no recall check yet, for any reader.</p>

@@ -10,6 +10,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from trouveur.db.queries import freshness, location
 from trouveur.db.schema import (
     job,
     pipeline_run,
@@ -552,6 +553,43 @@ async def system_overview(conn: AsyncConnection, fresh_since: datetime) -> sa.Ro
             {"fresh_since": fresh_since},
         )
     ).one()
+
+
+# Retrievable postings every reader is shown wherever they live, per source. A count, not a
+# share: a thousand of them crowd an edition whatever the corpus around them.
+_UNKNOWN_LOCATION = f"""
+SELECT j.source, count(*) AS jobs
+FROM job j
+JOIN job_facet f ON f.job_id = j.id
+WHERE j.closed_at IS NULL
+  AND f.derive_version > 0
+  AND {freshness.sql("j")}
+  AND NOT {location.CLOSED_AT_ORIGIN}
+  AND {location.UNKNOWN}
+GROUP BY j.source
+"""
+
+
+async def unknown_location(conn: AsyncConnection, fresh_since: datetime) -> dict[str, int]:
+    rows = await conn.execute(sa.text(_UNKNOWN_LOCATION), {"fresh_since": fresh_since})
+    return {row.source: row.jobs for row in rows}
+
+
+async def unknown_location_history(conn: AsyncConnection, since: datetime) -> list[sa.Row]:
+    """What each scheduled run counted, from the report it stored. Runs from before the count
+    was recorded have none, and are left out."""
+    counted = pipeline_run.c.report["unknown_location"]
+    return list(
+        await conn.execute(
+            sa.select(pipeline_run.c.finished_at, counted.label("unknown_location"))
+            .where(
+                pipeline_run.c.match_user_id.is_(None),
+                pipeline_run.c.finished_at >= since,
+                pipeline_run.c.report.has_key("unknown_location"),
+            )
+            .order_by(pipeline_run.c.finished_at)
+        )
+    )
 
 
 async def description_coverage(conn: AsyncConnection) -> int:

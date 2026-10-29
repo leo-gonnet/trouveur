@@ -29,6 +29,8 @@ def _admitted(facets: str) -> str:
     )"""
 
 
+_UNPLACED = "(cardinality(f.countries) = 0 AND cardinality(f.unplaced_countries) = 0)"
+
 _TWINS_NAMING_A_PLACE = """
     FROM job s
     JOIN job_facet sf ON sf.job_id = s.id
@@ -85,10 +87,19 @@ SQL = f"""
             OR CASE
                 WHEN j.location_text = '' AND EXISTS (SELECT 1 {_PLACED_TWINS})
                 THEN EXISTS (SELECT 1 {_PLACED_TWINS} AND {_admitted("sf")})
-                ELSE {_admitted("f")}
-                    OR (cardinality(f.countries) = 0 AND cardinality(f.unplaced_countries) = 0)
+                ELSE {_admitted("f")} OR {_UNPLACED}
             END
         )
+    )
+"""
+
+# What `SQL` passes for every reader whatever their area: no place of its own, and no placed twin
+# to be judged by. A remote one is left out, being shown only to readers who asked for anywhere.
+UNKNOWN = f"""
+    (
+        f.work_mode <> 'remote'
+        AND {_UNPLACED}
+        AND NOT (j.location_text = '' AND EXISTS (SELECT 1 {_PLACED_TWINS}))
     )
 """
 

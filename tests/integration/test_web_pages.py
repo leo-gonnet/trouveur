@@ -624,6 +624,26 @@ async def test_the_live_panel_renders_a_run_in_flight(admin):
     assert f"/admin/run/{run_id}/cancel" in body
 
 
+async def test_the_overview_charts_postings_of_unknown_location_per_night(admin):
+    from trouveur.db.queries import admin as admin_q
+    from trouveur.models import RunStatus, RunTrigger
+
+    async with connect() as conn:
+        await admin_q.enqueue_run(conn, trigger=RunTrigger.SCHEDULED)
+        claimed = await admin_q.claim_next_run(conn)
+        await admin_q.finish_run(
+            conn,
+            claimed.id,
+            status=RunStatus.SUCCESS,
+            report={"unknown_location": {"greenhouse": 1200, "arbeitnow": 34}},
+        )
+
+    body = (await admin.get("/admin")).text
+    assert '<svg class="linechart"' in body
+    assert "1,234" in body
+    assert "greenhouse 1,200, arbeitnow 34" in body
+
+
 async def test_a_source_still_fetching_keeps_its_last_verdict(admin):
     """A sweep has no `ok` until it ends, and the health table read that as "failed" for the
     whole length of the fetch, hiding the verdict of the one before."""

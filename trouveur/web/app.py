@@ -988,6 +988,7 @@ async def admin(request: Request):
     Built from the same queries as those pages, never a second count of the same thing. The
     coverage report is left out: it is the one slow query, and this page must always load.
     """
+    now = datetime.now(UTC)
     async with connect() as conn:
         health = await admin_q.source_health(conn)
         _, tenant_totals = await admin_q.tenants_needing_attention(conn, limit=0)
@@ -996,6 +997,13 @@ async def admin(request: Request):
             conn, freshness.fresh_since(get_settings().retrieval_horizon_days)
         )
         active = await admin_q.active_run(conn)
+        unknown_rows = await admin_q.unknown_location_history(
+            conn, now - timedelta(days=quality.DAYS + 1)
+        )
+    days = quality.days(now)
+    unknown = outcome.unknown_location_nights(unknown_rows, days)
+    totals = [sum(night.values()) if night is not None else None for night in unknown]
+    start = linechart.trim(days, totals)
     last_runs = await _last_runs()
     finished = [
         run for run in last_runs["runs"]
@@ -1015,6 +1023,13 @@ async def admin(request: Request):
             "queues": queues,
             "overview": overview,
             "horizon_days": get_settings().retrieval_horizon_days,
+            "unknown": unknown[start:],
+            "unknown_chart": linechart.build(
+                days[start:],
+                [("unknown", "unknown location", totals[start:])],
+                width=1200,
+                height=180,
+            ),
         },
     )
 

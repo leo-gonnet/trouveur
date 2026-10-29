@@ -66,3 +66,28 @@
 {% endmacro %}
 
 {% macro count(n) -%}{{ '{:,}'.format(n or 0) }}{%- endmacro %}
+
+{% set CHART_COLOUR = {'good': 'c1', 'share': 'c1', 'dismissed': 'c2', 'kept': 'c0', 'found': 'c1', 'unknown': 'c1'} %}
+
+{# `tips` is one hover line per night; `areas` names the series drawn as a filled area; `misses`
+   marks the nights to circle on the series named by `missed_on`. #}
+{% macro linechart(chart, tips, areas=(), misses=(), missed_on='', range_colour='c2') %}
+<svg class="linechart" viewBox="0 0 {{ chart.width }} {{ chart.height }}" role="img">
+  {% for label, y in chart.y_ticks %}
+    <line class="gridline" x1="{{ chart.left }}" x2="{{ chart.right }}" y1="{{ y }}" y2="{{ y }}"></line>
+    <text class="tick" x="{{ chart.left - 6 }}" y="{{ y + 4 }}" text-anchor="end">{{ label }}</text>
+  {% endfor %}
+  {% for label, x in chart.x_ticks %}
+    <text class="tick" x="{{ x }}" y="{{ chart.height - 6 }}" text-anchor="middle">{{ label }}</text>
+  {% endfor %}
+  {% for points in chart.ranges %}<polygon class="range {{ range_colour }}" points="{{ points }}"></polygon>{% endfor %}
+  {% for s in chart.series %}
+    {% if s.key in areas %}{% for points in s.areas %}<polygon class="area {{ CHART_COLOUR[s.key] }}" points="{{ points }}"></polygon>{% endfor %}{% endif %}
+    {% for points in s.lines %}<polyline class="line {{ CHART_COLOUR[s.key] }}" points="{{ points }}"></polyline>{% endfor %}
+    {% for point in s.points %}{% if point %}{% set missed = s.key == missed_on and loop.index0 in misses %}<circle class="dot {{ CHART_COLOUR[s.key] }}{{ ' miss' if missed }}" cx="{{ point[0] }}" cy="{{ point[1] }}" r="{{ 4.5 if missed else 2.5 }}"></circle>{% endif %}{% endfor %}
+  {% endfor %}
+  {% for x, width, day in chart.bands %}
+    <rect class="night" x="{{ x }}" y="0" width="{{ width }}" height="{{ chart.bottom }}"><title>{{ tips[loop.index0] }}</title></rect>
+  {% endfor %}
+</svg>
+{% endmacro %}

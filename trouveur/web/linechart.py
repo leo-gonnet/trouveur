@@ -140,7 +140,7 @@ def build(
         run.append((index, *span))
 
     def label(value: float) -> str:
-        return f"{round(100 * value)}%" if percent else f"{value:g}"
+        return f"{round(100 * value)}%" if percent else f"{value:,g}"
 
     every = max(1, round(count / 5))
     x_ticks = [

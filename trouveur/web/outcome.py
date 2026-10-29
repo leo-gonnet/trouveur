@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import date
 from decimal import Decimal
+
+from trouveur import clock
 
 
 @dataclass(frozen=True)
@@ -50,3 +53,9 @@ def _total(rows, key: str) -> int | None:
     if not any(key in row for row in values):
         return None
     return sum(int(row.get(key) or 0) for row in values)
+
+
+def unknown_location_nights(rows, days: list[date]) -> list[dict[str, int] | None]:
+    """Per night, the count of the night's last run, by source. None where no run counted."""
+    by_day = {clock.to_local(row.finished_at).date(): row.unknown_location for row in rows}
+    return [by_day.get(day) for day in days]
