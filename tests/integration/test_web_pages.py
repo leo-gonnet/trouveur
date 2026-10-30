@@ -624,7 +624,7 @@ async def test_the_live_panel_renders_a_run_in_flight(admin):
     assert f"/admin/run/{run_id}/cancel" in body
 
 
-async def test_the_overview_charts_postings_of_unknown_location_per_night(admin):
+async def test_coverage_charts_postings_of_unknown_location_per_night(admin):
     from trouveur.db.queries import admin as admin_q
     from trouveur.models import RunStatus, RunTrigger
 
@@ -638,10 +638,11 @@ async def test_the_overview_charts_postings_of_unknown_location_per_night(admin)
             report={"unknown_location": {"greenhouse": 1200, "arbeitnow": 34}},
         )
 
-    body = (await admin.get("/admin")).text
+    body = (await admin.get("/admin/coverage")).text
     assert '<svg class="linechart"' in body
     assert "1,234" in body
     assert "greenhouse 1,200, arbeitnow 34" in body
+    assert "1,234 postings of unknown location last run" in (await admin.get("/admin")).text
 
 
 async def test_a_source_still_fetching_keeps_its_last_verdict(admin):

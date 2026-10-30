@@ -108,6 +108,8 @@ def _arguments(ctx: dict) -> dict[str, dict]:
         "admin.open_job_count": {},
         "admin.system_overview": {"fresh_since": _cutoff()},
         "admin.tenants_needing_attention": {},
+        "admin.failing_boards_by_source": {},
+        "admin.sweep_history": {"since": _cutoff()},
         "admin.description_coverage": {},
         "admin.enqueue_run": {"trigger": RunTrigger.MANUAL},
         "admin.claim_next_run": {},

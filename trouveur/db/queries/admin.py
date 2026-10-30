@@ -205,6 +205,15 @@ async def list_tenants(
     return list(await conn.execute(stmt))
 
 
+# A dropped board is the one case that needs no decision: somebody already made it. Its failure
+# streak is frozen at whatever it was, so without this it would sit at the top of the list for ever.
+_NEEDS_DECISION = """
+    t.dropped_at IS NULL
+    AND coalesce(h.consecutive_failures, 0) > 0
+    AND (t.enabled OR t.origin = 'manual' OR t.decided_at IS NOT NULL)
+"""
+
+
 async def tenants_needing_attention(
     conn: AsyncConnection, *, limit: int = 50
 ) -> tuple[list[sa.Row], dict[str, int]]:
@@ -229,19 +238,14 @@ async def tenants_needing_attention(
     rows = list(
         await conn.execute(
             sa.text(
-                """
+                f"""
                 SELECT t.source, t.scope, t.enabled, t.origin::text AS origin, t.note,
                        h.last_ok_at, h.last_documents, h.last_error,
                        coalesce(h.consecutive_failures, 0) AS consecutive_failures
                 FROM source_tenant t
                 LEFT JOIN source_scope_health h
                        ON h.source = t.source AND h.scope = t.scope
-                -- A dropped board is the one case that needs no decision: somebody already made
-                -- it. Its failure streak is frozen at whatever it was, so without this it would
-                -- sit at the top of the list for ever.
-                WHERE t.dropped_at IS NULL
-                  AND coalesce(h.consecutive_failures, 0) > 0
-                  AND (t.enabled OR t.origin = 'manual' OR t.decided_at IS NOT NULL)
+                WHERE {_NEEDS_DECISION}
                 ORDER BY coalesce(h.consecutive_failures, 0) DESC, t.source, t.scope
                 LIMIT :limit
                 """
@@ -252,14 +256,10 @@ async def tenants_needing_attention(
     totals = (
         await conn.execute(
             sa.text(
-                """
+                f"""
                 SELECT count(*) AS tenants,
                        count(*) FILTER (WHERE t.enabled) AS sweeping,
-                       count(*) FILTER (
-                           WHERE t.dropped_at IS NULL
-                             AND coalesce(h.consecutive_failures, 0) > 0
-                             AND (t.enabled OR t.origin = 'manual'
-                                  OR t.decided_at IS NOT NULL)) AS failing,
+                       count(*) FILTER (WHERE {_NEEDS_DECISION}) AS failing,
                        count(*) FILTER (
                            WHERE t.enabled AND t.origin = 'discovered') AS auto_on,
                        count(*) FILTER (
@@ -282,6 +282,30 @@ async def tenants_needing_attention(
         "candidates": int(totals.candidates or 0),
         "dropped": int(totals.dropped or 0),
     }
+
+
+# Errors name their board, so the slug is blanked out of each before counting: otherwise a
+# hundred dead greenhouse boards are a hundred different errors.
+_FAILING_BY_SOURCE = f"""
+WITH failing AS (
+    SELECT t.source, replace(coalesce(h.last_error, ''), t.scope, '…') AS error, count(*) AS boards
+    FROM source_tenant t
+    LEFT JOIN source_scope_health h ON h.source = t.source AND h.scope = t.scope
+    WHERE {_NEEDS_DECISION}
+    GROUP BY 1, 2
+)
+SELECT source, sum(boards) AS boards,
+       (array_agg(error ORDER BY boards DESC, error))[1] AS top_error,
+       max(boards) AS top_error_boards
+FROM failing
+GROUP BY source
+ORDER BY boards DESC, source
+"""
+
+
+async def failing_boards_by_source(conn: AsyncConnection) -> list[sa.Row]:
+    """Per source, how many boards fail, and the error most of them share."""
+    return list(await conn.execute(sa.text(_FAILING_BY_SOURCE)))
 
 
 async def add_tenants(
@@ -464,6 +488,17 @@ async def recent_sweeps(conn: AsyncConnection, limit: int = 20) -> list[sa.Row]:
     return list(
         await conn.execute(
             source_sweep.select().order_by(source_sweep.c.started_at.desc()).limit(limit)
+        )
+    )
+
+
+async def sweep_history(conn: AsyncConnection, since: datetime) -> list[sa.Row]:
+    return list(
+        await conn.execute(
+            sa.select(source_sweep.c.source, source_sweep.c.started_at,
+                      source_sweep.c.documents_seen)
+            .where(source_sweep.c.finished_at.isnot(None), source_sweep.c.started_at >= since)
+            .order_by(source_sweep.c.started_at)
         )
     )
 

@@ -11,7 +11,7 @@
    (`.section + .grid`) or by giving a component a bottom margin — both leave the next block
    someone adds with no gap at all. A block meant to sit flush goes inside the one above it.
 
-   Components: .topbar .nav .menu .banner .page-head .subbar .flow .timeline .legend .linechart .section .section-head .grid .kpis .kpi table .pill
+   Components: .topbar .nav .menu .banner .page-head .subbar .flow .timeline .legend .linechart .spark .section .section-head .grid .kpis .kpi table .pill
    .score button/.btn(.primary .danger .ghost) label/input .field .tags .switch
    .notice .empty .bar .toast
    .band .results .job .job-main .states .filed .editions .step .pager .searchbar .login .foot
@@ -260,6 +260,11 @@ main > * + *,
 .chart-head > strong { font-size: 20px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .chart-head > strong .hint { font-weight: 400; }
 .chart-head + .hint, .chart-head + .legend { margin: var(--space-2) 0 var(--space-3); }
+/* A table-cell line chart with no axes (linechart.spark): its shape is the message, so it stays
+   muted beside the status pills. */
+.spark { display: block; width: 96px; height: 20px; overflow: visible; }
+.spark polyline { fill: none; stroke: var(--fg-muted); stroke-width: 1.5; stroke-linejoin: round; }
+.spark circle { fill: var(--fg-muted); }
 
 /* ---------- Sections ---------- */
 .section { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-5); }

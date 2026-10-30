@@ -265,9 +265,6 @@ async def _execute(settings: Settings, run) -> None:
         "boards_promoted": promoted,
         "digests_sent": notified,
     }
-    # Stored before discovery: a restart during the slow LinkedIn pass must not lose the report
-    # of a night that already delivered its emails.
-    # A diagnostic, never part of the verdict: a failed count costs one point on a chart.
     try:
         async with connect() as conn:
             payload["unknown_location"] = await admin_q.unknown_location(
@@ -275,6 +272,8 @@ async def _execute(settings: Settings, run) -> None:
             )
     except Exception:
         log.exception("counting postings of unknown location failed; the next run counts again")
+    # Stored before discovery: a restart during the slow LinkedIn pass must not lose the report
+    # of a night that already delivered its emails.
     async with connect() as conn:
         await admin_q.record_run_report(conn, run.id, report=payload, error=error)
 

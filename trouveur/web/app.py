@@ -997,13 +997,8 @@ async def admin(request: Request):
             conn, freshness.fresh_since(get_settings().retrieval_horizon_days)
         )
         active = await admin_q.active_run(conn)
-        unknown_rows = await admin_q.unknown_location_history(
-            conn, now - timedelta(days=quality.DAYS + 1)
-        )
-    days = quality.days(now)
-    unknown = outcome.unknown_location_nights(unknown_rows, days)
-    totals = [sum(night.values()) if night is not None else None for night in unknown]
-    start = linechart.trim(days, totals)
+        _, _, unknown_totals = await _unknown_location(conn, now)
+    unknown_usual, unknown_last = outcome.usual_and_last(unknown_totals)
     last_runs = await _last_runs()
     finished = [
         run for run in last_runs["runs"]
@@ -1023,15 +1018,23 @@ async def admin(request: Request):
             "queues": queues,
             "overview": overview,
             "horizon_days": get_settings().retrieval_horizon_days,
-            "unknown": unknown[start:],
-            "unknown_chart": linechart.build(
-                days[start:],
-                [("unknown", "unknown location", totals[start:])],
-                width=1200,
-                height=180,
-            ),
+            "unknown_usual": unknown_usual,
+            "unknown_last": unknown_last,
+            "unknown_jumped": unknown_usual is not None
+            and unknown_last > UNKNOWN_JUMP * unknown_usual,
         },
     )
+
+
+UNKNOWN_JUMP = 1.5
+
+
+async def _unknown_location(conn, now: datetime):
+    rows = await admin_q.unknown_location_history(conn, now - timedelta(days=quality.DAYS + 1))
+    days = quality.days(now)
+    nights = outcome.nightly(rows, days, lambda row: row.unknown_location)
+    totals = [sum(night.values()) if night is not None else None for night in nights]
+    return days, nights, totals
 
 
 @app.get("/admin/runs", response_class=HTMLResponse)
@@ -1041,21 +1044,41 @@ async def admin_runs(request: Request):
 
 @app.get("/admin/sources", response_class=HTMLResponse)
 async def admin_sources(request: Request):
+    now = datetime.now(UTC)
+    days = quality.days(now)
     async with connect() as conn:
         health = await admin_q.source_health(conn)
-        tenants, tenant_totals = await admin_q.tenants_needing_attention(conn)
+        sweeps = await admin_q.sweep_history(conn, now - timedelta(days=quality.DAYS + 1))
+        tenants, tenant_totals = await admin_q.tenants_needing_attention(
+            conn, limit=FAILING_BOARDS_SHOWN
+        )
+        failing_by_source = await admin_q.failing_boards_by_source(conn)
         crawl_set = await coverage.tenants(conn)
+    by_source: dict[str, list] = {}
+    for row in sweeps:
+        by_source.setdefault(row.source, []).append(row)
     return _admin_page(
         request,
         "sources",
         {
             "health": health,
+            "sparks": {
+                source: linechart.spark(
+                    outcome.nightly(rows, days, lambda row: row.documents_seen)
+                )
+                for source, rows in by_source.items()
+            },
+            "spark_nights": len(days),
+            "failing_by_source": failing_by_source,
             "tenants": tenants,
             "tenant_totals": tenant_totals,
             "crawl_set": crawl_set,
             "sources": sorted(NORMALIZERS),
         },
     )
+
+
+FAILING_BOARDS_SHOWN = 5
 
 
 @app.get("/admin/quality", response_class=HTMLResponse)
@@ -1146,6 +1169,7 @@ async def admin_quality(request: Request, reader: str = "all", good: int = quali
 async def admin_coverage(request: Request):
     async with connect() as conn:
         countries = await admin_q.facet_breakdown(conn)
+        days, unknown, totals = await _unknown_location(conn, datetime.now(UTC))
         recall, misses = await coverage.recall(conn)
         parts = {
             "recall": recall,
@@ -1153,6 +1177,7 @@ async def admin_coverage(request: Request):
             "reports": await coverage.reports(conn),
             "leads": await coverage.leads(conn),
         }
+    start = linechart.trim(days, totals)
     return _admin_page(
         request,
         "coverage",
@@ -1161,6 +1186,14 @@ async def admin_coverage(request: Request):
             "coverage": parts,
             "recall_days": coverage.RECALL_DAYS,
             "linkedin_on": get_settings().linkedin_max_requests > 0,
+            "horizon_days": get_settings().retrieval_horizon_days,
+            "unknown": unknown[start:],
+            "unknown_chart": linechart.build(
+                days[start:],
+                [("unknown", "unknown location", totals[start:])],
+                width=1200,
+                height=180,
+            ),
         },
     )
 

@@ -105,8 +105,9 @@ async def test_each_job_is_judged_at_first_sight_and_counted_in_the_report(
     assert [(row.origin, row.seen, row.judged, row.held) for row in recall] == [
         ("linkedin", 5, 3, 1)
     ]
-    assert sorted((row.company, row.title) for row in missed) == [
-        ("Beispiel Tech", "Werkstudent Logistik"), ("Ferne AG", "Prozessingenieur")
+    assert (missed.jobs, missed.companies) == (2, 2)
+    assert sorted((row.company, row.jobs, row.sample_title) for row in missed.top) == [
+        ("Beispiel Tech", 1, "Werkstudent Logistik"), ("Ferne AG", 1, "Prozessingenieur")
     ]
 
     assert await linkedin.run(settings) is None, "a second pass inside the day asks nothing"

@@ -184,15 +184,17 @@ async def recall(conn: AsyncConnection, origins: Sequence[str], days: int) -> li
     )
 
 
-# The jobs behind the misses, the companies we miss most first: where to look next.
+# The companies behind the misses, most missed first: the next board to add is a company's. The
+# totals ride on every row, counted before the LIMIT.
 _MISSES = """
-SELECT origin::text AS origin, company, title, location_text,
-       count(*) OVER (PARTITION BY origin, lower(company)) AS company_misses
+SELECT min(company) AS company, count(*) AS jobs, min(title) AS sample_title,
+       sum(count(*)) OVER () AS total_jobs, count(*) OVER () AS total_companies
 FROM discovery_lead
 WHERE origin::text = ANY(CAST(:origins AS text[]))
   AND held = false
   AND first_seen_at >= now() - make_interval(days => :days)
-ORDER BY company_misses DESC, lower(company), title
+GROUP BY lower(company)
+ORDER BY jobs DESC, lower(company)
 LIMIT :limit
 """
 

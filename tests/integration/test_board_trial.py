@@ -288,6 +288,29 @@ async def test_a_failing_candidate_does_not_crowd_the_boards_needing_attention(c
     assert totals["candidates"] == 1, "still counted, so the operator knows the pool is there"
 
 
+async def test_boards_failing_the_same_way_share_one_error_whatever_their_slug(clean_db):
+    from trouveur.sources.base import ScopeResult
+
+    async with connect() as conn:
+        await admin_q.add_tenants(conn, "greenhouse", ["eins", "zwei", "drei"], enabled=True)
+        await admin_q.record_scope_health(
+            conn,
+            "greenhouse",
+            [
+                ScopeResult(scope="eins", ok=False, documents=0,
+                            error="greenhouse board 'eins' does not exist (HTTP 404)."),
+                ScopeResult(scope="zwei", ok=False, documents=0,
+                            error="greenhouse board 'zwei' does not exist (HTTP 404)."),
+                ScopeResult(scope="drei", ok=False, documents=0, error="HTTP 500"),
+            ],
+        )
+        rows = await admin_q.failing_boards_by_source(conn)
+
+    assert [(row.source, row.boards, row.top_error, row.top_error_boards) for row in rows] == [
+        ("greenhouse", 3, "greenhouse board '…' does not exist (HTTP 404).", 2)
+    ]
+
+
 async def test_the_trial_queue_respects_its_cap_and_then_its_interval(clean_db):
     """The cap is the scan's whole protection: without it the pool is swept every night, and at
     the size discovery reaches that is hours. The interval is what stops a board being re-asked
