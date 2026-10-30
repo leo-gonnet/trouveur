@@ -27,7 +27,7 @@ from trouveur.models import LeadOrigin
 RECALL_DAYS = 7
 # The lead origins that judge whether we held what they saw.
 RECALL_ORIGINS = (LeadOrigin.LINKEDIN.value,)
-MISSES_SHOWN = 100
+MISSES_SHOWN = 10
 
 
 @dataclass(frozen=True)
@@ -214,15 +214,19 @@ class RecallCoverage:
 
 
 @dataclass(frozen=True)
-class MissedJob:
-    """A job an aggregator showed that we did not hold. Which companies keep appearing here is
-    where the next board or source is."""
+class MissedCompany:
+    """A company whose jobs an aggregator showed and we did not hold: where the next board is."""
 
-    origin: str
     company: str
-    title: str
-    location_text: str | None
-    company_misses: int
+    jobs: int
+    sample_title: str | None
+
+
+@dataclass(frozen=True)
+class Misses:
+    jobs: int
+    companies: int
+    top: list[MissedCompany]
 
 
 @dataclass(frozen=True)
@@ -247,7 +251,7 @@ class Report:
     blocked: list[BlockedSource] = field(default_factory=list)
     # Empty until an aggregator pass has seen a lead.
     recall: list[RecallCoverage] = field(default_factory=list)
-    misses: list[MissedJob] = field(default_factory=list)
+    misses: Misses | None = None
 
     def as_dict(self) -> dict:
         """The shape `trouveur coverage --json` prints. Plain types only, for an agent to read."""
@@ -282,7 +286,7 @@ class Report:
                 {**asdict(row), "held_share": row.held_share}
                 for row in self.recall
             ],
-            "misses": [asdict(row) for row in self.misses],
+            "misses": asdict(self.misses) if self.misses else None,
         }
 
 
@@ -367,8 +371,9 @@ async def blocked(conn: AsyncConnection) -> list[BlockedSource]:
     ]
 
 
-async def recall(conn: AsyncConnection) -> tuple[list[RecallCoverage], list[MissedJob]]:
-    """What the aggregators showed us this window, and the jobs among it we did not hold."""
+async def recall(conn: AsyncConnection) -> tuple[list[RecallCoverage], Misses | None]:
+    """What the aggregators showed us this window, and the companies whose jobs we did not hold."""
+    rows = await coverage_q.misses(conn, RECALL_ORIGINS, RECALL_DAYS, MISSES_SHOWN)
     return (
         [
             RecallCoverage(
@@ -380,16 +385,18 @@ async def recall(conn: AsyncConnection) -> tuple[list[RecallCoverage], list[Miss
             )
             for row in await coverage_q.recall(conn, RECALL_ORIGINS, RECALL_DAYS)
         ],
-        [
-            MissedJob(
-                origin=row.origin,
-                company=row.company,
-                title=row.title,
-                location_text=row.location_text,
-                company_misses=int(row.company_misses),
-            )
-            for row in await coverage_q.misses(conn, RECALL_ORIGINS, RECALL_DAYS, MISSES_SHOWN)
-        ],
+        Misses(
+            jobs=int(rows[0].total_jobs),
+            companies=int(rows[0].total_companies),
+            top=[
+                MissedCompany(
+                    company=row.company, jobs=int(row.jobs), sample_title=row.sample_title
+                )
+                for row in rows
+            ],
+        )
+        if rows
+        else None,
     )
 
 

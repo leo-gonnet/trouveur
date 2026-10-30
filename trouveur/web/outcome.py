@@ -3,7 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import date
 from decimal import Decimal
+from statistics import median
+
+from trouveur import clock
+
+USUAL_NIGHTS = 7
 
 
 @dataclass(frozen=True)
@@ -50,3 +56,19 @@ def _total(rows, key: str) -> int | None:
     if not any(key in row for row in values):
         return None
     return sum(int(row.get(key) or 0) for row in values)
+
+
+def nightly(rows, days: list[date], value) -> list:
+    """Per night, `value` of the night's last row, None where there is none. Rows come oldest
+    first, and a row belongs to the night it started, as on the runs chart."""
+    by_day = {clock.to_local(row.started_at).date(): value(row) for row in rows}
+    return [by_day.get(day) for day in days]
+
+
+def usual_and_last(totals: list[int | None]) -> tuple[int | None, int | None]:
+    """The median of the USUAL_NIGHTS counted nights before the last one, and the last one."""
+    counted = [total for total in totals if total is not None]
+    if not counted:
+        return None, None
+    before = counted[-USUAL_NIGHTS - 1 : -1]
+    return (int(median(before)) if before else None), counted[-1]

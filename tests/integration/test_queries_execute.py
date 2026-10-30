@@ -108,6 +108,8 @@ def _arguments(ctx: dict) -> dict[str, dict]:
         "admin.open_job_count": {},
         "admin.system_overview": {"fresh_since": _cutoff()},
         "admin.tenants_needing_attention": {},
+        "admin.failing_boards_by_source": {},
+        "admin.sweep_history": {"since": _cutoff()},
         "admin.description_coverage": {},
         "admin.enqueue_run": {"trigger": RunTrigger.MANUAL},
         "admin.claim_next_run": {},
@@ -128,6 +130,8 @@ def _arguments(ctx: dict) -> dict[str, dict]:
         "admin.fail_orphaned_runs": {},
         "admin.fail_orphaned_sweeps": {},
         "admin.facet_breakdown": {},
+        "admin.unknown_location": {"fresh_since": _cutoff()},
+        "admin.unknown_location_history": {"since": _cutoff()},
         "admin.queue_depth": {},
         # coverage -- the area carries the same four fields a profile does, so the location
         # filter reads it directly.

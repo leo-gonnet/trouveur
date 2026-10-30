@@ -10,6 +10,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from trouveur.db.queries import freshness, location
 from trouveur.db.schema import (
     job,
     pipeline_run,
@@ -204,6 +205,15 @@ async def list_tenants(
     return list(await conn.execute(stmt))
 
 
+# A dropped board is the one case that needs no decision: somebody already made it. Its failure
+# streak is frozen at whatever it was, so without this it would sit at the top of the list for ever.
+_NEEDS_DECISION = """
+    t.dropped_at IS NULL
+    AND coalesce(h.consecutive_failures, 0) > 0
+    AND (t.enabled OR t.origin = 'manual' OR t.decided_at IS NOT NULL)
+"""
+
+
 async def tenants_needing_attention(
     conn: AsyncConnection, *, limit: int = 50
 ) -> tuple[list[sa.Row], dict[str, int]]:
@@ -228,19 +238,14 @@ async def tenants_needing_attention(
     rows = list(
         await conn.execute(
             sa.text(
-                """
+                f"""
                 SELECT t.source, t.scope, t.enabled, t.origin::text AS origin, t.note,
                        h.last_ok_at, h.last_documents, h.last_error,
                        coalesce(h.consecutive_failures, 0) AS consecutive_failures
                 FROM source_tenant t
                 LEFT JOIN source_scope_health h
                        ON h.source = t.source AND h.scope = t.scope
-                -- A dropped board is the one case that needs no decision: somebody already made
-                -- it. Its failure streak is frozen at whatever it was, so without this it would
-                -- sit at the top of the list for ever.
-                WHERE t.dropped_at IS NULL
-                  AND coalesce(h.consecutive_failures, 0) > 0
-                  AND (t.enabled OR t.origin = 'manual' OR t.decided_at IS NOT NULL)
+                WHERE {_NEEDS_DECISION}
                 ORDER BY coalesce(h.consecutive_failures, 0) DESC, t.source, t.scope
                 LIMIT :limit
                 """
@@ -251,14 +256,10 @@ async def tenants_needing_attention(
     totals = (
         await conn.execute(
             sa.text(
-                """
+                f"""
                 SELECT count(*) AS tenants,
                        count(*) FILTER (WHERE t.enabled) AS sweeping,
-                       count(*) FILTER (
-                           WHERE t.dropped_at IS NULL
-                             AND coalesce(h.consecutive_failures, 0) > 0
-                             AND (t.enabled OR t.origin = 'manual'
-                                  OR t.decided_at IS NOT NULL)) AS failing,
+                       count(*) FILTER (WHERE {_NEEDS_DECISION}) AS failing,
                        count(*) FILTER (
                            WHERE t.enabled AND t.origin = 'discovered') AS auto_on,
                        count(*) FILTER (
@@ -281,6 +282,30 @@ async def tenants_needing_attention(
         "candidates": int(totals.candidates or 0),
         "dropped": int(totals.dropped or 0),
     }
+
+
+# Errors name their board, so the slug is blanked out of each before counting: otherwise a
+# hundred dead greenhouse boards are a hundred different errors.
+_FAILING_BY_SOURCE = f"""
+WITH failing AS (
+    SELECT t.source, replace(coalesce(h.last_error, ''), t.scope, '…') AS error, count(*) AS boards
+    FROM source_tenant t
+    LEFT JOIN source_scope_health h ON h.source = t.source AND h.scope = t.scope
+    WHERE {_NEEDS_DECISION}
+    GROUP BY 1, 2
+)
+SELECT source, sum(boards) AS boards,
+       (array_agg(error ORDER BY boards DESC, error))[1] AS top_error,
+       max(boards) AS top_error_boards
+FROM failing
+GROUP BY source
+ORDER BY boards DESC, source
+"""
+
+
+async def failing_boards_by_source(conn: AsyncConnection) -> list[sa.Row]:
+    """Per source, how many boards fail, and the error most of them share."""
+    return list(await conn.execute(sa.text(_FAILING_BY_SOURCE)))
 
 
 async def add_tenants(
@@ -467,6 +492,17 @@ async def recent_sweeps(conn: AsyncConnection, limit: int = 20) -> list[sa.Row]:
     )
 
 
+async def sweep_history(conn: AsyncConnection, since: datetime) -> list[sa.Row]:
+    return list(
+        await conn.execute(
+            sa.select(source_sweep.c.source, source_sweep.c.started_at,
+                      source_sweep.c.documents_seen)
+            .where(source_sweep.c.finished_at.isnot(None), source_sweep.c.started_at >= since)
+            .order_by(source_sweep.c.started_at)
+        )
+    )
+
+
 async def source_health(conn: AsyncConnection) -> list[sa.Row]:
     """Latest sweep per source, with completeness and partition overflow -- not just success. A
     sweep that reached only the first 10000 rows of a partition looks healthy by any count."""
@@ -552,6 +588,53 @@ async def system_overview(conn: AsyncConnection, fresh_since: datetime) -> sa.Ro
             {"fresh_since": fresh_since},
         )
     ).one()
+
+
+# Retrievable postings every reader is shown wherever they live, per source: those the filter
+# passes for a reader whose area admits nothing. A count, not a share: a thousand of them crowd
+# an edition whatever the corpus around them.
+_UNKNOWN_LOCATION = f"""
+SELECT j.source, count(*) AS jobs
+FROM job j
+JOIN job_facet f ON f.job_id = j.id
+WHERE j.closed_at IS NULL
+  AND f.derive_version > 0
+  AND {freshness.sql("j")}
+  AND NOT {location.CLOSED_AT_ORIGIN}
+  AND {location.SQL}
+GROUP BY j.source
+"""
+_ADMITS_NOTHING = {
+    "anywhere": False,
+    "countries": [],
+    "area_ids": [],
+    "area_countries": [],
+    "remote_anywhere": False,
+}
+
+
+async def unknown_location(conn: AsyncConnection, fresh_since: datetime) -> dict[str, int]:
+    rows = await conn.execute(
+        sa.text(_UNKNOWN_LOCATION), {"fresh_since": fresh_since, **_ADMITS_NOTHING}
+    )
+    return {row.source: row.jobs for row in rows}
+
+
+async def unknown_location_history(conn: AsyncConnection, since: datetime) -> list[sa.Row]:
+    """What each scheduled run counted, from the report it stored. Runs from before the count
+    was recorded have none, and are left out."""
+    counted = pipeline_run.c.report["unknown_location"]
+    return list(
+        await conn.execute(
+            sa.select(pipeline_run.c.started_at, counted.label("unknown_location"))
+            .where(
+                pipeline_run.c.match_user_id.is_(None),
+                pipeline_run.c.started_at >= since,
+                pipeline_run.c.report.has_key("unknown_location"),
+            )
+            .order_by(pipeline_run.c.started_at)
+        )
+    )
 
 
 async def description_coverage(conn: AsyncConnection) -> int:

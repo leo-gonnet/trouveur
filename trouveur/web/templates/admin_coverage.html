@@ -20,22 +20,25 @@
     </tr>
     {% endfor %}
   </table>
-  {% if coverage.misses %}
+  {% set missed = coverage.misses %}
+  {% if missed %}
   <div class="section-head">
     <h2>Jobs we did not have</h2>
-    <span class="hint">companies we miss most come first</span>
+    <span class="hint">{{ ops.count(missed.jobs) }} jobs missed, from {{ ops.count(missed.companies) }} compan{{ 'y' if missed.companies == 1 else 'ies' }}</span>
   </div>
   <table>
-    <tr><th>Site</th><th>Company</th><th>Title</th><th>Place</th></tr>
-    {% for row in coverage.misses %}
+    <tr><th>Company</th><th class="num">Jobs missed</th><th>For example</th></tr>
+    {% for row in missed.top %}
     <tr>
-      <td>{{ row.origin }}</td>
-      <td>{{ row.company }}{% if row.company_misses > 1 %} ({{ row.company_misses }}){% endif %}</td>
-      <td>{{ row.title }}</td>
-      <td>{{ row.location_text or '' }}</td>
+      <td>{{ row.company or 'no company named' }}</td>
+      <td class="num">{{ ops.count(row.jobs) }}</td>
+      <td>{{ row.sample_title or '' }}</td>
     </tr>
     {% endfor %}
   </table>
+  {% if missed.top | length < missed.companies %}
+    <p class="hint">The {{ missed.top | length }} companies we miss most are shown. Adding their board is the fix.</p>
+  {% endif %}
   {% endif %}
   {% elif linkedin_on %}
     <p class="empty">No job seen on LinkedIn in the last {{ recall_days }} days yet.</p>
@@ -125,6 +128,25 @@
   {% endif %}
 </section>
 {% endif %}
+
+<section class="section">
+  {% set last = unknown_chart.series[0].last %}
+  <div class="chart-head">
+    <h2>Unknown location: postings every reader is shown</h2>
+    <strong>{{ ops.count(last) if last is not none else '—' }} <span class="hint">last run</span></strong>
+  </div>
+  <p class="hint">Open postings from the last {{ horizon_days }} days that name no place we could resolve, and are not remote.</p>
+  {% if last is not none %}
+    {% set tips = [] %}
+    {% for night in unknown %}
+      {% set top = [] %}{% for source, jobs in (night or {}) | dictsort(by='value', reverse=True) %}{% if loop.index <= 3 %}{% set _ = top.append(source ~ ' ' ~ ops.count(jobs)) %}{% endif %}{% endfor %}
+      {% set _ = tips.append(unknown_chart.bands[loop.index0][2].strftime('%a %d %b') ~ (' · not counted' if night is none else ' · ' ~ ops.count(night.values() | sum) ~ (' · ' ~ top | join(', ') if top else ''))) %}
+    {% endfor %}
+    {{ ops.linechart(unknown_chart, tips) }}
+  {% else %}
+    <p class="empty">Not counted yet. Each daily run counts them, from the next one on.</p>
+  {% endif %}
+</section>
 
 <section class="section">
   <div class="section-head"><h2>Open postings by country</h2></div>

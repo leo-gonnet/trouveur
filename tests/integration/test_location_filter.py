@@ -12,6 +12,7 @@ import pytest
 
 from tests.integration.seed import seed_corpus, seed_user
 from trouveur.db.engine import connect
+from trouveur.db.queries import admin as admin_q
 from trouveur.db.queries import match as mq
 from trouveur.ingest import places
 
@@ -77,6 +78,29 @@ async def test_a_city_filter_keeps_what_its_location_cannot_rule_out(
     await seed_corpus(gh_board, aa_listing, aa_detail)
     _, profile = await seed_user(countries=[], city_ids=[VIENNA], radius_km=30)
     assert await _passes(profile, posting) is kept
+
+
+@pytest.mark.parametrize("posting", POSTINGS)
+async def test_operations_counts_as_unknown_exactly_what_reaches_a_reader_anywhere(
+    clean_db, gh_board, aa_listing, aa_detail, posting
+):
+    await seed_corpus(gh_board, aa_listing, aa_detail)
+    _, nowhere_near = await seed_user(countries=["NZ"], city_ids=[], remote_anywhere=False)
+    passes = await _passes(nowhere_near, posting)
+    async with connect() as conn:
+        counted = sum((await admin_q.unknown_location(conn, SINCE)).values())
+        total = (await conn.exec_driver_sql("SELECT count(*) FROM job")).scalar_one()
+    assert counted == (total if passes else 0)
+
+
+async def test_a_blank_copy_beside_a_placed_twin_is_not_unknown(
+    clean_db, gh_board, aa_listing, aa_detail
+):
+    await seed_corpus(gh_board, aa_listing, aa_detail)
+    _, vienna = await seed_user(countries=[], city_ids=[VIENNA], radius_km=30)
+    await _kept_beside_a_berlin_twin(vienna, "")
+    async with connect() as conn:
+        assert await admin_q.unknown_location(conn, SINCE) == {}
 
 
 async def test_countries_and_cities_add_up_rather_than_narrow(

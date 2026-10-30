@@ -5,7 +5,7 @@
   {% if health %}
   <table>
     <tr><th>Source</th><th>When</th><th>State</th><th>Got</th>
-        <th class="num">Postings read</th><th class="num">Parts read</th>
+        <th class="num">Postings read</th><th>Last {{ spark_nights }} nights</th><th class="num">Parts read</th>
         <th class="num">Parts too big</th></tr>
     {% for row in health %}
     <tr>
@@ -14,10 +14,11 @@
       <td>{{ ops.fetch_status(row) }}</td>
       <td>{{ ops.fetch_scope(row) }}</td>
       <td class="num">{{ ops.count(row.documents_seen) }}</td>
+      <td>{% set s = sparks.get(row.source) %}{% if s %}<svg class="spark" viewBox="0 0 96 20" role="img"><title>Postings read per night, highest {{ ops.count(s.top | int) }}</title>{% for points in s.lines %}<polyline points="{{ points }}"></polyline>{% endfor %}{% if s.last %}<circle cx="{{ s.last[0] }}" cy="{{ s.last[1] }}" r="2"></circle>{% endif %}</svg>{% endif %}</td>
       <td class="num">{{ row.partitions_done }}/{{ row.partitions_total }}</td>
       <td class="num">{% if row.partitions_overflowed %}<span class="pill bad">{{ row.partitions_overflowed }}</span>{% else %}0{% endif %}</td>
     </tr>
-    {% if row.error %}<tr><td colspan="7" class="hint">{{ row.error }}</td></tr>{% endif %}
+    {% if row.error %}<tr><td colspan="8" class="hint">{{ row.error }}</td></tr>{% endif %}
     {% endfor %}
   </table>
   <p class="hint">Full list: missing postings get closed. Parts too big: some postings were never read.</p>
@@ -34,6 +35,17 @@
     <span class="hint">{{ ops.count(tenant_totals.failing) }} failing</span>
   </div>
   {% if tenants %}
+  <table>
+    <tr><th>Source</th><th class="num">Boards failing</th><th>Most common error</th></tr>
+    {% for row in failing_by_source %}
+    <tr>
+      <td>{{ row.source }}</td>
+      <td class="num">{{ ops.count(row.boards) }}</td>
+      <td class="hint">{{ row.top_error or 'no error recorded' }}{% if row.top_error_boards < row.boards %} ({{ ops.count(row.top_error_boards) }} of them){% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  <div class="section-head"><h2>The worst {{ tenants | length }}</h2></div>
   <table>
     <tr><th>Source</th><th>Board</th><th>State</th>
         <th class="num">Postings</th><th>Last success</th>

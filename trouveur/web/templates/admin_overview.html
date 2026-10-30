@@ -70,6 +70,20 @@
       </td>
       <td></td>
     </tr>
+    <tr>
+      <td>Locations</td>
+      <td>
+        {%- if unknown_last is none %}<span class="pill">not counted</span>
+        {%- elif unknown_jumped %}<span class="pill warn">jumped</span>
+        {%- else %}<span class="pill good">steady</span>{% endif -%}
+      </td>
+      <td>
+        {%- if unknown_last is none %}No daily run has counted postings of unknown location yet.
+        {%- else %}{{ ops.count(unknown_last) }} postings of unknown location last run
+          {%- if unknown_usual is not none %}, usually {{ ops.count(unknown_usual) }}{% endif %}. Every reader sees them.{% endif -%}
+      </td>
+      <td><a href="/admin/coverage">Coverage</a></td>
+    </tr>
     {% if overview.vector_spaces > 1 %}
     <tr>
       <td>Vectors</td>

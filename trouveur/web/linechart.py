@@ -140,7 +140,7 @@ def build(
         run.append((index, *span))
 
     def label(value: float) -> str:
-        return f"{round(100 * value)}%" if percent else f"{value:g}"
+        return f"{round(100 * value)}%" if percent else f"{value:,g}"
 
     every = max(1, round(count / 5))
     x_ticks = [
@@ -167,4 +167,43 @@ def build(
         bands=[
             (round(LEFT + band * index, 1), round(band, 1), day) for index, day in enumerate(days)
         ],
+    )
+
+
+SPARK_WIDTH = 96
+SPARK_HEIGHT = 20
+SPARK_PAD = 2
+
+
+@dataclass(frozen=True)
+class Spark:
+    lines: list[str]
+    last: tuple[float, float] | None
+    top: float
+
+
+def spark(values: list[float | None]) -> Spark:
+    """A table-cell line with no axes, from zero to the highest night."""
+    count = len(values)
+    top = max((v for v in values if v is not None), default=0) or 1
+    plot_w = SPARK_WIDTH - 2 * SPARK_PAD
+    plot_h = SPARK_HEIGHT - 2 * SPARK_PAD
+
+    def point(index: int, value: float) -> tuple[float, float]:
+        x = SPARK_PAD + (plot_w * index / (count - 1) if count > 1 else plot_w / 2)
+        return round(x, 1), round(SPARK_PAD + plot_h * (1 - value / top), 1)
+
+    runs: list[list[tuple[float, float]]] = [[]]
+    for index, value in enumerate(values):
+        if value is None:
+            runs.append([])
+        else:
+            runs[-1].append(point(index, value))
+    last = next(
+        (point(i, v) for i, v in reversed(list(enumerate(values))) if v is not None), None
+    )
+    return Spark(
+        lines=[" ".join(f"{x},{y}" for x, y in run) for run in runs if len(run) > 1],
+        last=last,
+        top=top,
     )

@@ -16,6 +16,7 @@ from trouveur import clock, versions
 from trouveur.config import Settings, get_settings
 from trouveur.db.engine import connect
 from trouveur.db.queries import admin as admin_q
+from trouveur.db.queries import freshness
 from trouveur.discovery import freehire, linkedin, reports, trial
 from trouveur.discovery import work as discovery
 from trouveur.ingest import pipeline as ingest
@@ -264,6 +265,13 @@ async def _execute(settings: Settings, run) -> None:
         "boards_promoted": promoted,
         "digests_sent": notified,
     }
+    try:
+        async with connect() as conn:
+            payload["unknown_location"] = await admin_q.unknown_location(
+                conn, freshness.fresh_since(settings.retrieval_horizon_days)
+            )
+    except Exception:
+        log.exception("counting postings of unknown location failed; the next run counts again")
     # Stored before discovery: a restart during the slow LinkedIn pass must not lose the report
     # of a night that already delivered its emails.
     async with connect() as conn:
