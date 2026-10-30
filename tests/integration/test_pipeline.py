@@ -912,7 +912,10 @@ async def test_a_run_whose_sweep_answered_boards_records_its_report(
     monkeypatch.setattr(service.ingest, "run", board_sweep)
     monkeypatch.setattr(service, "prepare_arrivals", nothing_to_prepare)
     monkeypatch.setattr(service.freehire, "run", no_discovery)
-    monkeypatch.setattr(service.linkedin, "run", no_discovery)
+    async def nothing_seen():
+        return []
+
+    monkeypatch.setattr(service.linkedin, "record_seen", nothing_seen)
     async with connect() as conn:
         await admin_q.enqueue_run(conn, trigger=RunTrigger.SCHEDULED)
         run = await admin_q.claim_next_run(conn)

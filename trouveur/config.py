@@ -88,8 +88,8 @@ class Settings(BaseSettings):
     # do not control: the pass stops here, or at the first block.
     freehire_max_requests: int = 500
 
-    # Requests per daily LinkedIn pass, searches and job pages together. Zero switches it off,
-    # and that is the default: its limits are unprobed, and a block costs the source for days.
+    # Requests per day to LinkedIn, shared between the readers' visits. Zero switches it off, and
+    # that is the default: a block costs the source for days.
     linkedin_max_requests: int = 0
 
     # How old a posting may be and still be recommended. Measured discovery lag is under 1.3 days
