@@ -675,3 +675,38 @@ def test_smartrecruiters_hybrid_posting_is_not_on_site():
     assert hint({"remote": False, "hybrid": True}) is None
     assert hint({"remote": False, "hybrid": False}) is False
     assert hint({"remote": True}) is True
+
+
+# --------------------------------------------------------------------------- recruitee
+
+
+def test_recruitee_body_without_offers_is_a_failed_board_not_an_empty_one():
+    """Read as an empty board, it would close every posting the board holds."""
+    from trouveur.sources.recruitee import RecruiteeSource
+
+    client = StubClient({"https://acme.recruitee.com/api/offers/": (200, {"error": "?"})})
+    outcome, seen = asyncio.run(collect(RecruiteeSource(boards=["acme"]), client))
+
+    assert seen == []
+    assert outcome.errors
+    assert outcome.closable_scopes == []
+
+
+def test_recruitee_hybrid_posting_is_not_on_site():
+    from trouveur.sources.recruitee import normalize
+
+    job = normalize(
+        {"id": 1, "title": "T", "hybrid": True, "on_site": True}, external_id="acme:1"
+    )
+    assert job is not None
+    assert job.remote_hint is None
+
+
+def test_recruitee_dates_with_a_utc_suffix_are_read():
+    from trouveur.sources.recruitee import normalize
+
+    job = normalize(
+        {"id": 1, "title": "T", "published_at": "2026-10-26 19:43:14 UTC"}, external_id="a:1"
+    )
+    assert job is not None
+    assert job.posted_at == datetime(2026, 10, 26, 19, 43, 14, tzinfo=UTC)
