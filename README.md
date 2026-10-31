@@ -129,3 +129,6 @@ need a commercial license.
 The city list in `trouveur/ingest/data/places.tsv.gz` is derived from
 [GeoNames](https://www.geonames.org), licensed under
 [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+
+The region names in `trouveur/sources/eures/nuts.tsv` are the EURES portal's labels for the
+[NUTS classification](https://ec.europa.eu/eurostat/web/nuts) of Eurostat.

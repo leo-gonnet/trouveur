@@ -160,6 +160,9 @@ PORTED: tuple[tuple[str, str | None, str | None], ...] = (
     ('https://acme.teamtailor.com/jobs/8610208-data-engineer', 'teamtailor', 'acme'),
     ('https://app.teamtailor.com/companies', None, None),
     ('https://www.karriere.at/jobs/10035051', 'karriere', None),
+    ('https://europa.eu/eures/portal/jv-se/jv-details/ODE2MTU0MiA5?lang=en', 'eures', None),
+    # EURES is one section of europa.eu; the rest of the host is no job platform.
+    ('https://europa.eu/youreurope/citizens/work/', None, None),
 )
 
 

@@ -1,0 +1,30 @@
+{
+  "listing": {
+    "id": "QkVJU1BJRUwtMDAwMSA0Mg==",
+    "title": "Mechatroniker (m/w/d)",
+    "description": "&nbsp;&nbsp;Wir suchen Verstärkung für die Wartung unserer Anlagen.<br><ul><li>SPS-Programmierung</li><li>Schichtbetrieb</li></ul>",
+    "creationDate": 1792656726000,
+    "lastModificationDate": 1792926624000,
+    "numberOfPosts": 2,
+    "locationMap": {
+      "DE": ["DE212", "DE300"]
+    },
+    "euresFlag": true,
+    "jobCategoriesCodes": [
+      "http://data.europa.eu/esco/occupation/00000000-0000-0000-0000-000000000000"
+    ],
+    "positionScheduleCodes": ["fulltime"],
+    "positionOfferingCode": "directhire",
+    "employer": {
+      "name": "Beispiel Anlagenbau GmbH",
+      "legalID": null,
+      "website": null,
+      "sectorCodes": [],
+      "description": null
+    },
+    "availableLanguages": ["de"],
+    "score": null,
+    "translationType": "FIRST_LANGUAGE"
+  },
+  "external_id": "QkVJU1BJRUwtMDAwMSA0Mg=="
+}

@@ -1,0 +1,64 @@
+{
+  "facets": {
+    "cities": [
+      "München",
+      "Berlin"
+    ],
+    "countries": [
+      "DE"
+    ],
+    "employment_type": "unknown",
+    "is_agency": null,
+    "language": "de",
+    "place_ids": [
+      2867714,
+      2950159
+    ],
+    "regions": [
+      "Berlin"
+    ],
+    "salary_annualised": false,
+    "salary_max_eur_year": null,
+    "salary_min_eur_year": null,
+    "seniority": "unknown",
+    "skills": [
+      "sps"
+    ],
+    "unplaced_countries": [],
+    "work_mode": "unknown"
+  },
+  "job": {
+    "agency_hint": null,
+    "closes_at": null,
+    "company": "Beispiel Anlagenbau GmbH",
+    "department_hint": null,
+    "description": "Wir suchen Verstärkung für die Wartung unserer Anlagen. SPS-Programmierung Schichtbetrieb",
+    "employment_type_hint": "directhire fulltime",
+    "external_id": "QkVJU1BJRUwtMDAwMSA0Mg==",
+    "language_hint": "de",
+    "locations": [
+      {
+        "city": null,
+        "country": "Germany",
+        "country_hint": null,
+        "raw": "München, Kreisfreie Stadt, Germany",
+        "region": "München, Kreisfreie Stadt"
+      },
+      {
+        "city": null,
+        "country": "Germany",
+        "country_hint": null,
+        "raw": "Berlin, Germany",
+        "region": "Berlin"
+      }
+    ],
+    "posted_at": "2026-10-22T08:12:06Z",
+    "remote_hint": null,
+    "salary": null,
+    "source": "eures",
+    "title": "Mechatroniker (m/w/d)",
+    "updated_at": "2026-10-25T11:10:24Z",
+    "url": "https://europa.eu/eures/portal/jv-se/jv-details/QkVJU1BJRUwtMDAwMSA0Mg==?lang=en"
+  },
+  "normalize_version": 1
+}

@@ -68,6 +68,9 @@ class Rule:
     # Where the board sits when the path holds only machinery: Greenhouse's embed script names it
     # in `?for=`, and that script is how most company careers pages mention their board at all.
     param: str | None = None
+    # The first path segment the platform lives under, on a host it shares with others: EURES is
+    # one section of europa.eu, and the rest of that host is no job platform at all.
+    under: str | None = None
 
 
 # An ATS's own API host, where the board sits right after a fixed prefix. These are not links a
@@ -124,6 +127,7 @@ RULES: tuple[Rule, ...] = (
     Rule(("himalayas.app",), "himalayas", Mode.WHOLE_SITE),
     Rule(("jobicy.com",), "jobicy", Mode.WHOLE_SITE),
     Rule(("karriere.at",), "karriere", Mode.WHOLE_SITE),
+    Rule(("europa.eu",), "eures", Mode.WHOLE_SITE, under="eures"),
 )
 
 # Leftmost DNS labels a multi-tenant platform uses for its own product hosts rather than for a
@@ -237,11 +241,12 @@ def _rule_board(host: str, parts) -> tuple[str, str] | None:
     if matched is None:
         return None
     rule, apex = matched
+    segments = [segment for segment in parts.path.split("/") if segment]
+    if rule.under and (not segments or segments[0] != rule.under):
+        return None
     if rule.mode is Mode.WHOLE_SITE:
         # Nothing is read out of the URL at all; `_for_source` drops the empty scope.
         return rule.source, ""
-
-    segments = [segment for segment in parts.path.split("/") if segment]
 
     if rule.mode is Mode.SUBDOMAIN:
         if _is_platform_host(host):
