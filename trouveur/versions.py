@@ -22,7 +22,7 @@ QUERY_EXPANSION_VERSION = 3
 # The URL rules that turn a link into a board. Bumping re-resolves every lead we already hold,
 # which is how an adapter for a new platform picks up the boards we have already seen without a
 # single new request.
-RESOLVE_VERSION = 2
+RESOLVE_VERSION = 3
 
 # Which links we pull out of a posting we already hold. Separate from RESOLVE_VERSION because the
 # two change for different reasons -- a wider extractor has to re-read the archive, a new URL rule

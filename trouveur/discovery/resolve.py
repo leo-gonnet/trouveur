@@ -16,13 +16,13 @@ Two rules shape everything here:
   crawl rejects. Which is why every scope goes through `registry.clean_scope` -- the source's own
   grammar -- rather than being trusted as extracted.
 
-**There is one rule per source we sweep, and no others** -- the sources that sweep a whole
-platform included, and those resolve to the platform with no board. freehire's table covers about
-ninety more platforms (SmartRecruiters, Teamtailor, Recruitee, BambooHR, Softgarden, UKG, ADP,
-iCIMS and so on), several with an extraction mode of their own; port the one you need when the
-adapter for it is written, and not before. A rule for a platform we cannot sweep buys nothing:
-the link is counted by host either way, every lead keeps its raw URL, and bumping RESOLVE_VERSION
-the day the rule lands re-reads all of them with no new request to anybody.
+**There is one rule per source we sweep, and no others** -- the sources that sweep a whole platform
+included, and those resolve to the platform with no board. freehire's table covers about ninety
+more platforms (Teamtailor, Recruitee, BambooHR, Softgarden, UKG, ADP, iCIMS and so on), several
+with an extraction mode of their own; port the one you need when the adapter for it is written, and
+not before. A rule for a platform we cannot sweep buys nothing: the link is counted by host either
+way, every lead keeps its raw URL, and bumping RESOLVE_VERSION the day the rule lands re-reads all
+of them with no new request to anybody.
 """
 
 from __future__ import annotations
@@ -81,6 +81,7 @@ API_RULES: tuple[tuple[str, str, str], ...] = (
     ("api.ashbyhq.com", "ashby", "posting-api/job-board"),
     ("boards-api.greenhouse.io", "greenhouse", "v1/boards"),
     ("api.lever.co", "lever", "v0/postings"),
+    ("api.smartrecruiters.com", "smartrecruiters", "v1/companies"),
 )
 
 # Hosts under a supported platform's domain that serve the platform's own infrastructure, so no
@@ -106,6 +107,11 @@ RULES: tuple[Rule, ...] = (
     Rule(("breezy.hr",), "breezy", Mode.SUBDOMAIN),
     Rule(("jobs.personio.com", "jobs.personio.de"), "personio", Mode.SUBDOMAIN),
     Rule(("myworkdayjobs.com",), "workday", Mode.HOST_PATH),
+    # A one-click application names the company after two words of the platform's own.
+    Rule(
+        ("jobs.smartrecruiters.com", "careers.smartrecruiters.com"), "smartrecruiters", Mode.PATH,
+        reserved=("oneclick-ui", "company"),
+    ),
     # The rest sweep one global corpus, so their links name a platform and never a board. They
     # are listed for two reasons: counted as an unread host they would read as a platform to go
     # and build an adapter for, and a reader reporting a job on one of them has to be told we

@@ -194,7 +194,7 @@ async def test_a_platform_no_rule_reads_is_an_unknown_platform(seeded):
     """Still worth filing: the lead keeps the raw URL, so the day a rule for that platform lands
     a RESOLVE_VERSION bump reads every one of these without asking anybody for anything."""
     row = await _answer(
-        seeded["user_id"], "https://jobs.smartrecruiters.com/AcmeGmbH/744000139104759"
+        seeded["user_id"], "https://jobs.jobvite.com/acmegmbh/job/oAbC1234"
     )
     assert row.outcome == ReportOutcome.UNKNOWN_PLATFORM
     assert (row.source, row.scope, row.job_id) == (None, None, None)
@@ -204,7 +204,7 @@ async def test_a_platform_no_rule_reads_is_an_unknown_platform(seeded):
                 sa.select(discovery_lead).where(discovery_lead.c.origin == "user_report")
             )
         ).one()
-    assert lead.host == "jobs.smartrecruiters.com", "the host is the case for writing a rule"
+    assert lead.host == "jobs.jobvite.com", "the host is the case for writing a rule"
 
 
 async def test_an_answer_is_never_rewritten(seeded):
@@ -256,7 +256,7 @@ async def test_the_coverage_report_counts_what_readers_were_told(seeded):
     from trouveur.coverage import report
 
     await _answer(seeded["user_id"], await _url_of(seeded["job_id"]))
-    await _file(seeded["user_id"], "https://jobs.smartrecruiters.com/AcmeGmbH/1")
+    await _file(seeded["user_id"], "https://jobs.jobvite.com/acmegmbh/job/oAbC0001")
     async with connect() as conn:
         card = await report(conn, horizon_days=36500)
     assert card.reports is not None, "a section that stays None is a section nobody reads"
