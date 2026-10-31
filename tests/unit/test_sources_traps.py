@@ -119,7 +119,7 @@ def test_personio_repeated_xml_elements_decode_to_a_list():
     """One office and several offices must decode to the same shape, or one of them is misread."""
     from xml.etree import ElementTree
 
-    from trouveur.sources.personio.client import element_to_dict
+    from trouveur.sources.parse import element_to_dict
 
     node = ElementTree.fromstring(
         "<position><id>1</id><jobDescriptions>"

@@ -1,10 +1,12 @@
-"""Pure decoding shared by normalisers. Nothing here interprets; that is ingest/derive.py."""
+"""Pure decoding shared by adapters. Nothing here interprets; that is ingest/derive.py."""
 
 from __future__ import annotations
 
 import html as html_module
 from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from typing import Any
+from xml.etree import ElementTree
 
 from selectolax.parser import HTMLParser
 
@@ -52,3 +54,35 @@ def html_to_text(content: Any, *, unescape: bool = False) -> str | None:
     if unescape:
         markup = html_module.unescape(markup)
     return collapse_whitespace(HTMLParser(markup).text(separator=" "))
+
+
+def rfc822_datetime(value: Any) -> datetime | None:
+    """An RSS `pubDate` such as 'Fri, 23 Oct 2026 16:22:01 +0200', normalised to UTC."""
+    if not value or not isinstance(value, str):
+        return None
+    try:
+        parsed = parsedate_to_datetime(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed.astimezone(UTC) if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+
+def element_to_dict(node: ElementTree.Element) -> Any:
+    """One XML element as JSON-compatible data. Repeated sibling tags become a list, so a board
+    with one section and a board with several decode to the same shape. A namespace is dropped
+    from the tag: Teamtailor puts its locations under one, and the archive keeps the bare name."""
+    children = list(node)
+    if not children:
+        return (node.text or "").strip()
+
+    record: dict[str, Any] = {}
+    for child in children:
+        tag = child.tag.rsplit("}", 1)[-1]
+        value = element_to_dict(child)
+        if tag in record:
+            existing = record[tag]
+            record[tag] = existing if isinstance(existing, list) else [existing]
+            record[tag].append(value)
+        else:
+            record[tag] = value
+    return record
