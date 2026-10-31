@@ -42,6 +42,14 @@ _LONGEST_NAME = 4
 # A word inside text we could not parse is evidence of a town only if it names a city this big
 # somewhere: "From", "Market", "Store" and "Fully" are all towns too.
 _PROMINENT = 100_000
+_ISO2_COUNTRIES = frozenset(vocab.ISO3_COUNTRIES.values())
+# A US state's code that is also a region elsewhere whose small towns the list does not hold:
+# Western Australia, Tamil Nadu, Goa, and Brazil's Pará, Maranhão, Alagoas, Mato Grosso (do Sul)
+# and Santa Catarina.
+_STATE_CODE_REGIONS = {
+    "WA": "AU", "TN": "IN", "GA": "IN",
+    "PA": "BR", "MA": "BR", "AL": "BR", "MT": "BR", "MS": "BR", "SC": "BR",
+}
 
 version = DERIVE_VERSION
 
@@ -132,12 +140,16 @@ def _countries_in(title: str) -> list[str]:
     """Countries a title spells out in full. Codes are left out: "US" and "IT" are teams."""
     words = [match.group() for match in _WORD.finditer(title)]
     found: list[str] = []
-    for start in range(len(words)):
+    start = 0
+    while start < len(words):
         for size in range(min(_LONGEST_NAME, len(words) - start), 0, -1):
             key = fold(" ".join(words[start : start + size]))
             if len(key) > 3 and key in vocab.COUNTRIES:
                 found.append(vocab.COUNTRIES[key])
                 break
+        else:
+            size = 1
+        start += size
     return _unique(found)
 
 
@@ -211,6 +223,10 @@ def _place(location: Location) -> tuple[list[str], str | None, list[Place], list
         # several namesakes the town is.
         return [], city, [], [], remote
     stated, found, possible = _mentioned(location.raw)
+    beside = _beside_a_state(location.raw)
+    # A town found in a country the state allows is better evidence: "Seattle Area, WA".
+    if beside and not any(place.country in beside for place in found):
+        return (beside if len(beside) == 1 else []), city, [], beside, remote
     return stated + [p.country for p in found], city, found, possible, remote
 
 
@@ -336,6 +352,9 @@ def _parse_free_text(raw: str) -> tuple[str | None, str | None, bool]:
     The country is NOT always last -- Workday writes 'AT, Vienna' -- so it is looked for wherever
     it sits, from the end, which keeps 'Georgia, US' resolving to US.
     """
+    # ISO names put a comma inside one country: "Virgin Islands, British".
+    if whole := vocab.COUNTRIES.get(fold(raw.strip())):
+        return whole, None, False
     parts = _parts(raw)
     if not parts:
         return None, None, False
@@ -361,6 +380,21 @@ def _parse_free_text(raw: str) -> tuple[str | None, str | None, bool]:
         if country is None and named and places.exists(named[0], "US"):
             country = "US"
     return country, (_city(named[0]) if named else None), remote
+
+
+def _beside_a_state(raw: str) -> list[str]:
+    """Every country a town we do not know, beside a US state, could be in.
+
+    The list holds no US town under 15,000 people, so "Keyser, WV" is in the US and "Buford, GA"
+    in the US or Gabon. A town known elsewhere is not one of these: "Assago, MI" is near Milan.
+    """
+    named = [part for part in _parts(raw) if fold(part) not in vocab.REMOTE_TERMS]
+    states = [part for part in named[1:] if fold(part) in vocab.US_STATES]
+    if not states or places.known(named[0]) or fold(named[0]) in vocab.REGION_COUNTRIES:
+        return []
+    codes = [state.upper() for state in states if len(state) == 2]
+    also = [code for code in codes if code in _ISO2_COUNTRIES]
+    return _unique(["US", *also, *(_STATE_CODE_REGIONS.get(code) for code in codes)])
 
 
 def _lists_countries(named: list[str]) -> bool:
