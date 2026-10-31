@@ -23,6 +23,7 @@ from trouveur.sources import (
     recruitee,
     rippling,
     smartrecruiters,
+    teamtailor,
     workable,
     workday,
 )
@@ -134,6 +135,12 @@ SOURCES: dict[str, SourceSpec] = {
         normalize=recruitee.normalize,
         normalize_version=recruitee.version,
         build=lambda scopes: recruitee.RecruiteeSource(boards=scopes),
+        tenant_scoped=True,
+    ),
+    teamtailor.SOURCE: SourceSpec(
+        normalize=teamtailor.normalize,
+        normalize_version=teamtailor.version,
+        build=lambda scopes: teamtailor.TeamtailorSource(boards=scopes),
         tenant_scoped=True,
     ),
 }
