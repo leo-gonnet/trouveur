@@ -364,7 +364,9 @@ async def _execute_match_only(settings: Settings, run) -> None:
         await admin_q.finish_run(conn, run.id, status=status, report=payload, error=error)
 
 
-async def _tick(settings: Settings) -> None:
+async def _tick(settings: Settings) -> bool:
+    """Whether the tick found queue work, so the loop sleeps only once the queues are idle.
+    Discovery is left out for the reason `prepare_arrivals` gives."""
     async with connect() as conn:
         await admin_q.fail_orphaned_runs(conn)
         await admin_q.fail_orphaned_sweeps(conn)
@@ -378,7 +380,7 @@ async def _tick(settings: Settings) -> None:
     async with connect() as conn:
         run = await admin_q.claim_next_run(conn)
     if run is None:
-        return
+        return any(drained[kind.value] for kind in WorkKind)
 
     log.info("starting run %s (trigger=%s)", run.id, run.trigger)
     try:
@@ -392,6 +394,7 @@ async def _tick(settings: Settings) -> None:
                 status=RunStatus.FAILED,
                 error=f"{type(exc).__name__}: {exc}",
             )
+    return True
 
 
 async def refill_below_current() -> dict[str, int]:
@@ -430,10 +433,12 @@ async def main() -> None:
                 refilled = True
             except Exception:  # noqa: BLE001 - retried next tick; the queues must still drain
                 log.exception("startup refill failed; retrying next tick")
+        busy = False
         try:
-            await _tick(settings)
+            busy = await _tick(settings)
         except Exception:  # noqa: BLE001 - the loop must survive anything a tick can raise
             log.exception("runner tick failed; continuing")
-        await asyncio.sleep(TICK_SECONDS)
+        if not busy:
+            await asyncio.sleep(TICK_SECONDS)
 
 
