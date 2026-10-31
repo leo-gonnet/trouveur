@@ -143,7 +143,12 @@ async def test_a_town_that_could_be_several_places_reaches_a_reader_in_any_of_th
 
 
 async def _kept_beside_a_berlin_twin(
-    profile, copy_says: str, *, twin_open: bool = True, copy_hinted: tuple[str, ...] = ()
+    profile,
+    copy_says: str,
+    *,
+    twin_open: bool = True,
+    copy_hinted: tuple[str, ...] = (),
+    copy_employer: str | None = None,
 ) -> int:
     """A copy with no location facets and its twin in Berlin, both open and in one group."""
     async with connect() as conn:
@@ -162,6 +167,10 @@ async def _kept_beside_a_berlin_twin(
         await conn.exec_driver_sql(
             "UPDATE job SET location_text = $1 WHERE id = $2", (copy_says, copy)
         )
+        if copy_employer:
+            await conn.exec_driver_sql(
+                "UPDATE job SET company = $1 WHERE id = $2", (copy_employer, copy)
+            )
         await conn.exec_driver_sql(
             "UPDATE job_facet SET countries = $1, place_ids = $2, unplaced_countries = $3, "
             "work_mode = 'onsite' WHERE job_id = $4",
@@ -191,11 +200,16 @@ async def test_a_copy_that_names_its_own_town_is_never_judged_by_a_twin(
     clean_db, gh_board, aa_listing, aa_detail
 ):
     """The same role in Sobernheim and in Coburg is two places. A town we cannot resolve is
-    still the posting's own, and the reader who lives there must keep it."""
+    still the posting's own, and the reader who lives there must keep it. The copy's employer is
+    one never placed anywhere, so only the twin could have ruled it out."""
     await seed_corpus(gh_board, aa_listing, aa_detail)
     _, vienna = await seed_user(countries=[], city_ids=[VIENNA], radius_km=30)
-    assert await _kept_beside_a_berlin_twin(vienna, "Sobernheim") == 1
-    assert await _kept_beside_a_berlin_twin(vienna, "", twin_open=False) == 1
+    unknown = "Nowhere Else GmbH"
+    assert await _kept_beside_a_berlin_twin(vienna, "Sobernheim", copy_employer=unknown) == 1
+    assert (
+        await _kept_beside_a_berlin_twin(vienna, "", twin_open=False, copy_employer=unknown)
+        == 1
+    )
 
 
 async def test_a_twin_outranks_the_country_a_copy_was_only_hinted_at(
@@ -251,3 +265,50 @@ async def test_a_reader_who_declined_fully_remote_roles_sees_none_whatever_count
     assert await _passes(accepted, "fully remote, open in Austria")
     assert not await _passes(everywhere, "fully remote, open in Austria")
     assert await _passes(declined, "Mödling, near Vienna")
+
+
+async def _kept_beside_a_sibling(profile, unplaced: list[str], sibling: tuple | None) -> bool:
+    """A posting naming no readable place, and a closed posting of the same employer."""
+    async with connect() as conn:
+        rows = await conn.exec_driver_sql("SELECT id FROM job ORDER BY id LIMIT 2")
+        posting, other = [row[0] for row in rows.all()]
+        await conn.exec_driver_sql(
+            "UPDATE job SET posted_at = now(), first_seen_at = now(), closed_at = now(), "
+            "dedup_group = NULL, company = 'Acme', location_text = 'Somewhere'"
+        )
+        await conn.exec_driver_sql("UPDATE job SET closed_at = NULL WHERE id = $1", (posting,))
+        await conn.exec_driver_sql(
+            "UPDATE job_facet SET countries = '{}', place_ids = '{}', unplaced_countries = $1, "
+            "work_mode = 'onsite'",
+            (unplaced,),
+        )
+        if sibling:
+            countries, place_ids = sibling
+            await conn.exec_driver_sql(
+                "UPDATE job_facet SET countries = $1, place_ids = $2 WHERE job_id = $3",
+                (countries, place_ids, other),
+            )
+        return await mq.count_pending_rerank(conn, profile, SINCE) == 1
+
+
+@pytest.mark.parametrize("unplaced", [[], ["CH", "AT", "DE"]])
+async def test_an_unplaced_posting_is_judged_by_where_its_employer_posts(
+    clean_db, gh_board, aa_listing, aa_detail, unplaced
+):
+    """Most unplaced postings a reader saw came from employers that had never posted in their
+    country. One that has, or one never placed anywhere, still passes."""
+    await seed_corpus(gh_board, aa_listing, aa_detail)
+    _, vienna = await seed_user(countries=[], city_ids=[VIENNA], radius_km=30)
+    assert not await _kept_beside_a_sibling(vienna, unplaced, (["DE"], [BERLIN]))
+    assert await _kept_beside_a_sibling(vienna, unplaced, (["AT"], [GRAZ]))
+    assert await _kept_beside_a_sibling(vienna, unplaced, None)
+
+
+async def test_a_country_the_posting_names_needs_no_employer(
+    clean_db, gh_board, aa_listing, aa_detail
+):
+    await seed_corpus(gh_board, aa_listing, aa_detail)
+    _, vienna = await seed_user(countries=[], city_ids=[VIENNA], radius_km=30)
+    async with connect() as conn:
+        await conn.exec_driver_sql("UPDATE job SET company = 'Acme'")
+    assert await _passes(vienna, "Austria, town unknown")

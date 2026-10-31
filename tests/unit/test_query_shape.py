@@ -239,7 +239,7 @@ def test_a_circle_across_a_border_admits_both_countries_postings_with_no_town():
 
     basel = places.resolve("Basel", "CH").id
     params = location_params(UserProfile(user_id=1, countries=[], city_ids=[basel]))
-    assert {"CH", "DE", "FR"} <= set(params["area_countries"])
+    assert {"CH", "DE", "FR"} <= set(params["reach"])
     assert places.resolve("Lörrach", "DE").id in params["area_ids"]
 
 

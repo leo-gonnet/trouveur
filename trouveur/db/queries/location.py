@@ -16,14 +16,57 @@ def _remote_allowed(facets: str) -> str:
     return f"(CAST(:remote_anywhere AS boolean) OR {facets}.work_mode <> 'remote')"
 
 
-def _admitted(facets: str) -> str:
+def employer(jobs: str) -> str:
+    return f"COALESCE(NULLIF(lower({jobs}.company), ''), {jobs}.source || ':' || {jobs}.scope)"
+
+
+# An unplaced posting is not a coin toss: in a worldwide corpus, a posting with no readable place
+# is almost never in the reader's town. Most such postings one reader saw came from employers
+# that had never posted anything in the reader's country. An employer is evidence of where its
+# postings are -- the same evidence a dedup twin is, at the scale of the whole employer -- and an
+# employer we never placed anywhere says nothing, so its postings still pass.
+def _employer_may_be_here(jobs: str) -> str:
+    # The employers present here are one set per query, hashed once: correlated, the same check
+    # walked every posting of a 60k-posting tenant once for each of its unplaced postings.
+    return f"""(
+        {employer(jobs)} IN (
+            SELECT {employer("e")}
+            FROM job e
+            JOIN job_facet ef ON ef.job_id = e.id
+            WHERE ef.countries && CAST(:reach AS text[])
+        )
+        OR NOT EXISTS (
+            SELECT 1
+            FROM job e
+            JOIN job_facet ef ON ef.job_id = e.id
+            WHERE {employer("e")} = {employer(jobs)}
+              AND cardinality(ef.countries) > 0
+        )
+    )"""
+
+
+def _admitted(facets: str, jobs: str) -> str:
+    # A country both stated and unplaced is a country the posting names: "Austria" with a town we
+    # could not resolve. One only unplaced is a country it might be in: one of five "Baden"s.
+    # The overlaps first: they are cheap, and the unnest would otherwise run for every posting.
+    stated_here = f"""(
+        {facets}.unplaced_countries && CAST(:reach AS text[])
+        AND {facets}.countries && CAST(:reach AS text[])
+        AND EXISTS (
+            SELECT 1 FROM unnest({facets}.unplaced_countries) u
+            WHERE u = ANY({facets}.countries) AND u = ANY(CAST(:reach AS text[]))
+        )
+    )"""
     return f"""(
         {_remote_allowed(facets)}
         AND (
             {facets}.countries && CAST(:countries AS text[])
-            OR {facets}.unplaced_countries && CAST(:countries AS text[])
             OR {facets}.place_ids && CAST(:area_ids AS integer[])
-            OR {facets}.unplaced_countries && CAST(:area_countries AS text[])
+            OR {stated_here}
+            OR (
+                {facets}.unplaced_countries && CAST(:reach AS text[])
+                AND {_employer_may_be_here(jobs)}
+            )
             OR (CAST(:remote_anywhere AS boolean) AND {facets}.work_mode = 'remote')
         )
     )"""
@@ -84,9 +127,13 @@ SQL = f"""
             CAST(:anywhere AS boolean)
             OR CASE
                 WHEN j.location_text = '' AND EXISTS (SELECT 1 {_PLACED_TWINS})
-                THEN EXISTS (SELECT 1 {_PLACED_TWINS} AND {_admitted("sf")})
-                ELSE {_admitted("f")}
-                    OR (cardinality(f.countries) = 0 AND cardinality(f.unplaced_countries) = 0)
+                THEN EXISTS (SELECT 1 {_PLACED_TWINS} AND {_admitted("sf", "s")})
+                ELSE {_admitted("f", "j")}
+                    OR (
+                        cardinality(f.countries) = 0
+                        AND cardinality(f.unplaced_countries) = 0
+                        AND {_employer_may_be_here("j")}
+                    )
             END
         )
     )
@@ -104,6 +151,6 @@ def params(area: Any) -> dict[str, Any]:
         "anywhere": not countries and not city_ids,
         "countries": countries,
         "area_ids": area_ids,
-        "area_countries": area_countries,
+        "reach": sorted(set(countries) | set(area_countries)),
         "remote_anywhere": bool(area.remote_anywhere),
     }
