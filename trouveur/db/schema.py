@@ -241,6 +241,50 @@ discovery_lead = sa.Table(
     sa.Column("held_job_id", sa.BigInteger),
 )
 
+# One reader's guest browser on LinkedIn, overwritten after every visit. The cookies are LinkedIn's
+# identifiers for that browser: never logged, never exported.
+linkedin_visitor = sa.Table(
+    "linkedin_visitor",
+    metadata,
+    sa.Column("user_id", sa.BigInteger, primary_key=True),
+    sa.Column("cookies", JSONB, nullable=False, server_default=sa.text("'[]'::jsonb")),
+    sa.Column("jar_expires_at", sa.DateTime(timezone=True), nullable=False),
+    sa.Column("next_visit_at", sa.DateTime(timezone=True), nullable=False),
+    sa.Column("next_search", sa.Integer, nullable=False, server_default="0"),
+    sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False,
+              server_default=sa.func.now()),
+)
+
+# Every request a visit sent, so a block can be read against rate, depth and jar. Pruned by age.
+linkedin_request = sa.Table(
+    "linkedin_request",
+    metadata,
+    sa.Column("id", sa.BigInteger, primary_key=True),
+    sa.Column("sweep_id", sa.BigInteger, nullable=False),
+    sa.Column("user_id", sa.BigInteger, nullable=False),
+    sa.Column("sent_at", sa.DateTime(timezone=True), nullable=False),
+    sa.Column("kind", sa.Text, nullable=False),
+    sa.Column("status", sa.Integer),
+    sa.Column("elapsed_ms", sa.Integer, nullable=False),
+    sa.Column("cards", sa.Integer, nullable=False, server_default="0"),
+    sa.Column("retry_after", sa.Text),
+    sa.Column("set_cookies", ARRAY(sa.Text), nullable=False, server_default="{}"),
+    sa.Column("error", sa.Text),
+)
+
+# Cards a visit saw, held back until the nightly sweep has run, so a job is judged against the
+# corpus that had its chance to collect it.
+linkedin_seen = sa.Table(
+    "linkedin_seen",
+    metadata,
+    sa.Column("linkedin_id", sa.Text, primary_key=True),
+    sa.Column("company", sa.Text),
+    sa.Column("title", sa.Text),
+    sa.Column("location_text", sa.Text),
+    sa.Column("seen_at", sa.DateTime(timezone=True), nullable=False,
+              server_default=sa.func.now()),
+)
+
 
 # One reader's "I found this job somewhere else", and the answer the runner worked out for it.
 #

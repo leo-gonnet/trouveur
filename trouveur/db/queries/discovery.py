@@ -13,13 +13,20 @@ from __future__ import annotations
 
 import json
 from collections.abc import Sequence
+from datetime import UTC, datetime, timedelta
 
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from trouveur.db.queries import location
-from trouveur.db.schema import discovery_lead, job
+from trouveur.db.schema import (
+    discovery_lead,
+    job,
+    linkedin_request,
+    linkedin_seen,
+    linkedin_visitor,
+)
 
 # One posting with everything a lead needs, its raw payloads included.
 #
@@ -394,3 +401,87 @@ async def held_jobs(
     ]
     result = await conn.execute(sa.text(_HELD), {"wanted": json.dumps(rows)})
     return {row.key: row.id for row in result}
+
+
+async def linkedin_visitors(conn: AsyncConnection) -> dict[int, sa.Row]:
+    rows = await conn.execute(sa.select(linkedin_visitor))
+    return {row.user_id: row for row in rows}
+
+
+async def save_linkedin_visitor(
+    conn: AsyncConnection,
+    *,
+    user_id: int,
+    cookies: list[dict],
+    jar_expires_at: datetime,
+    next_visit_at: datetime,
+    next_search: int,
+) -> None:
+    values = {
+        "cookies": cookies, "jar_expires_at": jar_expires_at, "next_visit_at": next_visit_at,
+        "next_search": next_search, "updated_at": sa.func.now(),
+    }
+    await conn.execute(
+        pg_insert(linkedin_visitor)
+        .values(user_id=user_id, **values)
+        .on_conflict_do_update(index_elements=[linkedin_visitor.c.user_id], set_=values)
+    )
+
+
+async def record_linkedin_requests(
+    conn: AsyncConnection, rows: Sequence[dict], *, keep_days: int
+) -> None:
+    """Add a visit's requests and drop those older than `keep_days`, so the log stays a few
+    thousand rows whatever the budget."""
+    if rows:
+        await conn.execute(linkedin_request.insert(), list(rows))
+    await conn.execute(
+        linkedin_request.delete().where(
+            linkedin_request.c.sent_at < datetime.now(UTC) - timedelta(days=keep_days)
+        )
+    )
+
+
+async def linkedin_requests_since(conn: AsyncConnection, since: datetime) -> dict[int, int]:
+    """user_id -> requests sent since `since`."""
+    rows = await conn.execute(
+        sa.select(linkedin_request.c.user_id, sa.func.count().label("sent"))
+        .where(linkedin_request.c.sent_at >= since)
+        .group_by(linkedin_request.c.user_id)
+    )
+    return {row.user_id: row.sent for row in rows}
+
+
+async def linkedin_last_request_at(conn: AsyncConnection) -> datetime | None:
+    return await conn.scalar(sa.select(sa.func.max(linkedin_request.c.sent_at)))
+
+
+async def linkedin_requests_per_visit(conn: AsyncConnection, since: datetime) -> float | None:
+    row = (
+        await conn.execute(
+            sa.select(
+                sa.func.count().label("sent"),
+                sa.func.count(sa.distinct(linkedin_request.c.sweep_id)).label("visits"),
+            ).where(linkedin_request.c.sent_at >= since)
+        )
+    ).one()
+    return row.sent / row.visits if row.visits else None
+
+
+async def add_linkedin_seen(conn: AsyncConnection, rows: Sequence[dict]) -> None:
+    """The first sighting stays: a job seen twice before the night is one job to judge."""
+    if rows:
+        await conn.execute(
+            pg_insert(linkedin_seen).values(list(rows)).on_conflict_do_nothing()
+        )
+
+
+async def linkedin_seen_cards(conn: AsyncConnection) -> list[sa.Row]:
+    return list(await conn.execute(sa.select(linkedin_seen).order_by(linkedin_seen.c.seen_at)))
+
+
+async def forget_linkedin_seen(conn: AsyncConnection, linkedin_ids: Sequence[str]) -> None:
+    if linkedin_ids:
+        await conn.execute(
+            linkedin_seen.delete().where(linkedin_seen.c.linkedin_id.in_(list(linkedin_ids)))
+        )

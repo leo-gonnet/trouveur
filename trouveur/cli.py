@@ -424,24 +424,26 @@ def discover_freehire(max_requests: int | None) -> None:
 
 
 @discover.command("linkedin")
-@click.option("--max-requests", type=int, default=None, help="Overrides the configured cap.")
+@click.option("--max-requests", type=int, default=None, help="Overrides the configured budget.")
 def discover_linkedin(max_requests: int | None) -> None:
-    """Search LinkedIn's logged-out job search with the readers' queries. Live site.
+    """One reader's visit to LinkedIn's logged-out job search, now. Live site.
 
-    The runner does this daily on its own once `linkedin_max_requests` is set; this runs it now.
+    The runner spreads visits over the day on its own once `linkedin_max_requests` is set; this
+    makes the next one now, within the day's budget, and the nightly run judges what it saw.
     """
     from trouveur.discovery import linkedin
 
     settings = get_settings()
     if max_requests is not None:
         settings = settings.model_copy(update={"linkedin_max_requests": max_requests})
-    found = asyncio.run(linkedin.run(settings, force=True))
+    found = asyncio.run(linkedin.visit_due(settings, force=True))
     if found is None:
-        raise SystemExit("switched off: set linkedin_max_requests or pass --max-requests")
-    held = sum(bool(lead.held) for lead in found.leads)
+        raise SystemExit(
+            "no visit: switched off, paused after a block, out of today's budget, or a visit "
+            "ran less than a few minutes ago"
+        )
     click.echo(
-        f"{found.requests} request(s), {found.cards:,} card(s) read, "
-        f"{len(found.leads):,} new lead(s), {held:,} already held"
+        f"{found.requests} request(s), {len(found.cards):,} card(s) seen, judged tonight"
     )
     if found.blocked or found.error:
         raise SystemExit(f"stopped early: {found.blocked or found.error}")

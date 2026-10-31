@@ -32,6 +32,7 @@ from trouveur.work import WorkKind, refill_all, release_stale, waiting_since
 log = logging.getLogger(__name__)
 
 TICK_SECONDS = 20
+LINKEDIN_CHECK_SECONDS = 60
 _DETAIL_PER_TICK = 40
 # How long a scheduled run waits for its own sweep to be prepared before matching anyway. Workday
 # alone is a detail fetch per posting at one a second, so a busy night is about an hour of it.
@@ -286,9 +287,9 @@ async def _execute(settings: Settings, run) -> None:
         log.exception("the freehire pass failed; the next scheduled run retries it")
     # After the sweep, so a job counts as held only if tonight's corpus already had it.
     try:
-        await linkedin.run(settings)
+        await linkedin.record_seen()
     except Exception:
-        log.exception("the LinkedIn pass failed; the next scheduled run retries it")
+        log.exception("judging the LinkedIn cards failed; the next scheduled run retries it")
 
     async with connect() as conn:
         await admin_q.finish_run(conn, run.id, status=status, report=payload, error=error)
@@ -400,9 +401,22 @@ async def refill_below_current() -> dict[str, int]:
     return queued
 
 
+async def visit_linkedin(settings: Settings) -> None:
+    """LinkedIn's visits, beside the ticks rather than in them: they are spread over the day,
+    and a nightly run that holds the tick for hours must not hold them too."""
+    while True:
+        try:
+            await linkedin.visit_due(settings)
+        except Exception:  # noqa: BLE001 - the loop must survive anything a visit can raise
+            log.exception("LinkedIn visit failed; continuing")
+        await asyncio.sleep(LINKEDIN_CHECK_SECONDS)
+
+
 async def main() -> None:
     settings = get_settings()
     log.info("runner started; tick=%ss", TICK_SECONDS)
+    # Held for the process's life: the loop keeps only a weak reference to a task.
+    _visits = asyncio.create_task(visit_linkedin(settings))
     refilled = False
     while True:
         if not refilled:

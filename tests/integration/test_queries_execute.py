@@ -172,6 +172,32 @@ def _arguments(ctx: dict) -> dict[str, dict]:
         },
         "reports.for_user": {"user_id": user_id, "chunk": 10},
         "discovery.totals": {"resolve_version": 1, "mine_version": 1},
+        "discovery.linkedin_visitors": {},
+        "discovery.save_linkedin_visitor": {
+            "user_id": user_id,
+            "cookies": [{"name": "bcookie", "value": "probe", "domain": ".linkedin.com",
+                         "path": "/", "secure": True, "expires": None}],
+            "jar_expires_at": datetime.now(UTC) + timedelta(days=7),
+            "next_visit_at": datetime.now(UTC),
+            "next_search": 0,
+        },
+        "discovery.record_linkedin_requests": {
+            "rows": [{
+                "sweep_id": 1, "user_id": user_id, "sent_at": datetime.now(UTC),
+                "kind": "search", "status": 200, "elapsed_ms": 120, "cards": 25,
+                "retry_after": None, "set_cookies": ["lidc"], "error": None,
+            }],
+            "keep_days": 30,
+        },
+        "discovery.linkedin_requests_since": {"since": _cutoff()},
+        "discovery.linkedin_last_request_at": {},
+        "discovery.linkedin_requests_per_visit": {"since": _cutoff()},
+        "discovery.add_linkedin_seen": {
+            "rows": [{"linkedin_id": "1", "company": "Nahe", "title": "Prozessingenieur",
+                      "location_text": "Wien"}],
+        },
+        "discovery.linkedin_seen_cards": {},
+        "discovery.forget_linkedin_seen": {"linkedin_ids": ["1"]},
         # ingest
         "ingest.archive_documents": {"documents": [document]},
         "ingest.latest_documents": {

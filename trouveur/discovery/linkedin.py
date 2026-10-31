@@ -1,15 +1,22 @@
-"""LinkedIn's logged-out job search as the measure of how much of it we already hold. Daily at
-most, search pages only, and off until an operator gives it a request budget
-(`linkedin_max_requests`).
+"""LinkedIn's logged-out job search as the measure of how much of it we already hold. Off until an
+operator gives it a daily request budget (`linkedin_max_requests`).
 
-NOT PROBED from our server. The facts below come from JobSpy (speedyapply/JobSpy,
-`jobspy/linkedin`, MIT, October 2026); probe by hand from the server before setting a budget, and
-correct this docstring with the date:
-- `seeMoreJobPostings/search` answers an HTML fragment of up to 10 job cards per `start`.
-  `f_TPR=r86400` is "posted in the past 24 hours", `distance` is in miles, and `location` is text.
-- Past the last result it answers `END_PAGE`, not an empty body.
+The budget is spent as visits spread over the day, each made by one reader's own guest browser: a
+search page, a page or two more, sometimes a second query, then minutes to hours of nothing. The
+cards a visit saw are judged after the nightly sweep, against a corpus that had its chance at them.
+
+From JobSpy (speedyapply/JobSpy, `jobspy/linkedin`, MIT) and Scrapfly's scraper, October 2026;
+correct with the date when probed from our server:
+- `/jobs/search` is the page a visitor loads: its first cards, and their total in
+  `.results-context-header__job-count`. `seeMoreJobPostings/search` is the request that page sends
+  for more, an HTML fragment of cards from `start`.
+- Past the last result the fragment is `END_PAGE`, not an empty body.
+- `f_TPR=r86400` is "posted in the past 24 hours", `distance` is in miles, and `location` is text.
 - LinkedIn answers HTTP 999 to a client it takes for a bot, and sends a logged-out client it
   wants to stop to `/authwall`.
+
+Measured from our server on 2026-10-29: one request every 6 s, from httpx with our own
+User-Agent, drew a 429 on the 32nd.
 
 No job pages: since July 2026 they no longer show a logged-out visitor the apply link, and they
 are what LinkedIn throttles first. No login and no account, ever.
@@ -17,14 +24,23 @@ are what LinkedIn throttles first. No login and no account, ever.
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import math
+import random
 import re
+import time
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from http.cookiejar import Cookie
+from urllib.parse import urlencode
 
+from curl_cffi.requests import AsyncSession
+from curl_cffi.requests.errors import RequestsError
 from selectolax.parser import HTMLParser
 
-from trouveur import versions
+from trouveur import clock, versions
 from trouveur.config import Settings, get_settings
 from trouveur.db.engine import connect
 from trouveur.db.queries import discovery as discovery_q
@@ -34,23 +50,44 @@ from trouveur.db.queries import users as users_q
 from trouveur.discovery.work import record_leads
 from trouveur.ingest import places
 from trouveur.ingest.derive import derive
+from trouveur.ingest.pipeline import SLOW_DAYS, pause_after, slowdown
 from trouveur.match import expand
 from trouveur.match.pipeline import profile_from_row
 from trouveur.models import COUNTRY_NAMES, CanonicalJob, Lead, LeadOrigin, Location, UserProfile
 from trouveur.sources.errors import FetchError, SourceBlocked
-from trouveur.sources.http import PoliteClient
 
 log = logging.getLogger(__name__)
 
 SOURCE = "linkedin"
-SEARCH = "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search"
+LANDING = "https://www.linkedin.com/jobs"
+SEARCH_PAGE = "https://www.linkedin.com/jobs/search"
+MORE = "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search"
 END_PAGE = "<!DOCTYPE html>\n\n<!---->"
-PAGE = 10
-PAGES_PER_SEARCH = 3
-# Slower than JobSpy's average on purpose, and one attempt per request: retrying a 429 is how a
-# slowdown becomes a block.
-DELAY_SECONDS = 6.0
-EVERY = timedelta(hours=20)
+# curl_cffi rather than PoliteClient: httpx's TLS and HTTP/2 handshake give it away whatever
+# User-Agent it sends. Pinned, so a jar keeps one browser for its whole life.
+IMPERSONATE = "chrome150"
+# Local wall-clock hours. The window runs past midnight: some people do search at one in the
+# morning, and nobody at five.
+WINDOW_OPENS = 7
+WINDOW_CLOSES = 2
+# The day's budget is aimed at this share of the window, so a day whose visits come out shorter
+# than expected spends the rest in the hours after rather than in a rush before it closes.
+SPEND_WITHIN = 0.8
+# Between two visits of anyone: one IP, so two readers at the same minute is one fast client.
+MIN_GAP = timedelta(minutes=4)
+# A visit due longer ago than this was missed (runner down, a pause after a block) and is moved,
+# never made up: several overdue visits in a row are a burst.
+MISSED = timedelta(minutes=30)
+READ_MEDIAN_SECONDS = 8.0
+READ_SPREAD = 0.6
+READ_BOUNDS = (5.0, 25.0)
+PAGES = (1, 2, 3)
+PAGE_WEIGHTS = (45, 35, 20)
+SECOND_QUERY = 0.4
+# A returning guest is normal; a whole year on one browser id is not.
+JAR_DAYS = (5.0, 9.0)
+PER_VISIT_GUESS = 2.0
+KEEP_REQUESTS_DAYS = 30
 # A query longer than this is a sentence from the profile, which LinkedIn ANDs into nothing.
 MAX_QUERY_CHARS = 60
 MAX_QUERIES = 6
@@ -65,8 +102,21 @@ MAX_COUNTRIES = 2
 _CARDS = ".base-search-card, [data-entity-urn^='urn:li:jobPosting:']"
 _JOB_ID = re.compile(r"/jobs/view/(?:[^/?#]*-)?(\d+)")
 _WALLS = ("/authwall", "/login", "/checkpoint", "/uas/")
-# What freehire and JobSpy both send; httpx's default `Accept: */*` is not what a page load asks.
-_HEADERS = {"Accept": "text/html", "Accept-Language": "en-US,en;q=0.9"}
+_LANGUAGE = "en-US,en;q=0.9"
+_NAVIGATE = {"Accept-Language": _LANGUAGE, "Sec-Fetch-Site": "same-origin"}
+# What the search page's own script sends for more cards. None removes a header the impersonated
+# browser adds to a page load and never to a script's request.
+_SCRIPT = {
+    "Accept": "*/*",
+    "Accept-Language": _LANGUAGE,
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "same-origin",
+    "Sec-Fetch-User": None,
+    "Upgrade-Insecure-Requests": None,
+}
+
+_rng = random.Random()
 
 
 @dataclass(frozen=True)
@@ -85,18 +135,138 @@ class Card:
 
 
 @dataclass
-class Harvest:
-    requests: int = 0
+class Sent:
+    """One request, as `linkedin_request` keeps it. No cookie value, ever."""
+
+    sent_at: datetime
+    kind: str
+    status: int | None
+    elapsed_ms: int
+    cards: int = 0
+    retry_after: str | None = None
+    set_cookies: list[str] = field(default_factory=list)
+    error: str | None = None
+
+
+@dataclass
+class Visit:
     searches_planned: int = 0
     searches_done: int = 0
-    cards: int = 0
-    leads: list[Lead] = field(default_factory=list)
+    cards: dict[str, Card] = field(default_factory=dict)
+    sent: list[Sent] = field(default_factory=list)
     blocked: str | None = None
     error: str | None = None
+
+    @property
+    def requests(self) -> int:
+        return len(self.sent)
+
+
+@dataclass(frozen=True)
+class Answer:
+    status: int
+    location: str
+    text: str
+    retry_after: str | None
+    set_cookies: list[str]
+
+
+class Browser:
+    """One reader's guest browser: Chrome's handshake and headers, and that reader's cookie jar.
+    Redirects are not followed, so a wall is seen rather than fetched."""
+
+    def __init__(self, cookies: list[dict]) -> None:
+        self._session = AsyncSession(impersonate=IMPERSONATE, timeout=30)
+        for saved in cookies:
+            # Through the jar itself: `Cookies.set` drops the expiry, so a cookie LinkedIn meant
+            # to lapse would outlive it in every jar we reload.
+            cookie = Cookie(
+                0, saved["name"], saved["value"], None, False, saved["domain"], True,
+                saved["domain"].startswith("."), saved["path"], True, saved.get("secure", True),
+                saved["expires"], saved["expires"] is None, None, None, {},
+            )
+            if not cookie.is_expired():
+                self._session.cookies.jar.set_cookie(cookie)
+
+    async def __aenter__(self) -> Browser:
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        await self._session.close()
+
+    async def get(
+        self, url: str, *, params: dict, headers: Mapping[str, str | None]
+    ) -> Answer:
+        try:
+            response = await self._session.get(
+                url, params=params, headers=dict(headers), allow_redirects=False
+            )
+        except RequestsError as exc:
+            raise FetchError(f"LinkedIn could not be reached at {url}: {exc}") from exc
+        return Answer(
+            status=response.status_code,
+            location=response.headers.get("location") or "",
+            text=response.text,
+            retry_after=response.headers.get("retry-after"),
+            set_cookies=sorted(response.cookies.keys()),
+        )
+
+    def cookies(self) -> list[dict]:
+        return [
+            {"name": c.name, "value": c.value, "domain": c.domain, "path": c.path,
+             "secure": c.secure, "expires": c.expires}
+            for c in self._session.cookies.jar
+            if not c.is_expired()
+        ]
 
 
 def miles(radius_km: int) -> int:
     return max(5, min(100, round(radius_km / 1.609)))
+
+
+def window(now: datetime) -> tuple[datetime, datetime]:
+    """The visiting window `now` falls in, else the next one, as UTC instants.
+
+    On the local wall clock, like the nightly slot, so seven in the morning stays seven when the
+    clocks change.
+    """
+    local = clock.to_local(now)
+    opens = local.replace(hour=WINDOW_OPENS, minute=0, second=0, microsecond=0)
+    if local.hour < WINDOW_CLOSES:
+        opens -= timedelta(days=1)
+    closes = (opens + timedelta(days=1)).replace(hour=WINDOW_CLOSES)
+    return opens.astimezone(UTC), closes.astimezone(UTC)
+
+
+def next_visit(
+    now: datetime, *, share: int, used: int, per_visit: float, rng: random.Random
+) -> datetime:
+    """When a reader visits next: a random gap sized so the visits left in their share of the
+    budget fit in what is left of the window, or a random start in the next one once spent."""
+    opens, closes = window(now)
+    if used >= share:
+        opens, closes = window(closes)
+        used = 0
+    begin = max(now, opens)
+    aim = opens + (closes - opens) * SPEND_WITHIN
+    visits = max((share - used) / per_visit, 1.0)
+    if begin < aim:
+        gap = timedelta(seconds=rng.expovariate((visits + 1) / (aim - begin).total_seconds()))
+        return min(begin + max(gap, MIN_GAP), aim + (closes - aim) / 2)
+    # Past the aim, what is left must still fit before the window closes.
+    room = (closes - begin) / (visits + 1)
+    gap = timedelta(seconds=rng.expovariate(1 / room.total_seconds()))
+    return begin + min(max(gap, MIN_GAP), room)
+
+
+def read_seconds(rng: random.Random) -> float:
+    """Time on a page before the next: mostly short, sometimes long."""
+    low, high = READ_BOUNDS
+    return min(max(rng.lognormvariate(math.log(READ_MEDIAN_SECONDS), READ_SPREAD), low), high)
+
+
+def jar_life(rng: random.Random) -> timedelta:
+    return timedelta(days=rng.uniform(*JAR_DAYS))
 
 
 def searches_for(profile: UserProfile, queries: list[str]) -> list[Search]:
@@ -155,17 +325,115 @@ def parse_cards(html: str) -> list[Card]:
     return list(cards.values())
 
 
-async def _page(client: PoliteClient, url: str, params: dict) -> str:
-    """One page's HTML. Raises SourceBlocked at the first refusal."""
-    response = await client.get(url, params=params, headers=_HEADERS)
-    final = str(response.url)
-    if response.status_code in {403, 429, 999} or any(wall in final for wall in _WALLS):
-        raise SourceBlocked(
-            f"LinkedIn refused {url} with HTTP {response.status_code} (landed on {final})."
+def parse_search_page(html: str) -> tuple[list[Card], int | None]:
+    """The search page's cards and the total it names. None when it names none we can read, or
+    only a lower bound ("1,000+").
+
+    No card and no count of zero is an error, never "no results": a block or a markup change
+    would otherwise read as an empty market.
+    """
+    tree = HTMLParser(html)
+    node = tree.css_first(".results-context-header__job-count")
+    text = node.text(strip=True) if node is not None else ""
+    digits = re.sub(r"\D", "", text)
+    total = int(digits) if digits and "+" not in text else None
+    cards = {card.job_id: card for card in map(_card, tree.css(_CARDS)) if card}
+    if not cards and total != 0:
+        raise FetchError("LinkedIn's search page held no job card we can read, and no zero count.")
+    return list(cards.values()), total
+
+
+async def _fetch(
+    browser: Browser, found: Visit, kind: str, url: str, params: dict,
+    headers: Mapping[str, str | None],
+) -> tuple[str, Sent]:
+    """One request, logged whatever it answered. Raises SourceBlocked at the first refusal."""
+    sent_at, started = datetime.now(UTC), time.monotonic()
+    try:
+        answer = await browser.get(url, params=params, headers=headers)
+    except FetchError as exc:
+        found.sent.append(
+            Sent(sent_at, kind, None, round((time.monotonic() - started) * 1000), error=str(exc))
         )
-    if response.status_code != 200:
-        raise FetchError(f"LinkedIn answered {url} with HTTP {response.status_code}.")
-    return response.text
+        raise
+    sent = Sent(
+        sent_at, kind, answer.status, round((time.monotonic() - started) * 1000),
+        retry_after=answer.retry_after, set_cookies=answer.set_cookies,
+    )
+    found.sent.append(sent)
+    if answer.status in {403, 429, 999} or any(wall in answer.location for wall in _WALLS):
+        sent.error = f"refused with HTTP {answer.status}"
+        raise SourceBlocked(
+            f"LinkedIn refused {url} with HTTP {answer.status}"
+            + (f", sending us to {answer.location}." if answer.location else ".")
+        )
+    if answer.status != 200:
+        sent.error = f"HTTP {answer.status}"
+        raise FetchError(
+            f"LinkedIn answered {url} with HTTP {answer.status}"
+            + (f", redirecting to {answer.location}." if answer.location else ".")
+        )
+    return answer.text, sent
+
+
+async def _browse(
+    browser: Browser, found: Visit, search: Search, *, referer: str, pages: int,
+    allowance: int, rng: random.Random,
+) -> str:
+    """One search as a person makes it: the page, then more cards while they scroll. Returns the
+    page's address, which is the referer of whatever comes next."""
+    params = {"keywords": search.keywords, "location": search.location, "f_TPR": "r86400"}
+    if search.distance_miles:
+        params["distance"] = search.distance_miles
+    page = {**params, "position": 1, "pageNum": 0}
+    text, sent = await _fetch(
+        browser, found, "search", SEARCH_PAGE, page, {**_NAVIGATE, "Referer": referer}
+    )
+    cards, total = parse_search_page(text)
+    address = f"{SEARCH_PAGE}?{urlencode(page)}"
+    seen = sent.cards = len(cards)
+    found.cards.update((card.job_id, card) for card in cards)
+    for _ in range(pages - 1):
+        if not cards or (total is not None and seen >= total) or found.requests >= allowance:
+            break
+        await asyncio.sleep(read_seconds(rng))
+        text, sent = await _fetch(
+            browser, found, "more", MORE, {**params, "start": seen},
+            {**_SCRIPT, "Referer": address},
+        )
+        cards = parse_cards(text)
+        sent.cards = len(cards)
+        seen += len(cards)
+        found.cards.update((card.job_id, card) for card in cards)
+    return address
+
+
+async def visit(
+    browser: Browser, searches: list[Search], *, first: int, allowance: int, rng: random.Random
+) -> Visit:
+    """One visit: the reader's next search, and sometimes the one after it. Stops at the
+    allowance or the first refusal, keeping what it found."""
+    count = 2 if len(searches) > 1 and rng.random() < SECOND_QUERY else 1
+    found = Visit(searches_planned=count)
+    referer = LANDING
+    try:
+        for offset in range(count):
+            if found.requests >= allowance:
+                break
+            if offset:
+                await asyncio.sleep(read_seconds(rng))
+            referer = await _browse(
+                browser, found, searches[(first + offset) % len(searches)], referer=referer,
+                pages=rng.choices(PAGES, PAGE_WEIGHTS)[0], allowance=allowance, rng=rng,
+            )
+            found.searches_done += 1
+    except SourceBlocked as exc:
+        found.blocked = str(exc)
+        log.warning("LinkedIn blocked us, stopping: %s", exc)
+    except FetchError as exc:
+        found.error = str(exc)
+        log.warning("LinkedIn visit stopped: %s", exc)
+    return found
 
 
 def lead_for(card: Card) -> Lead:
@@ -177,58 +445,6 @@ def lead_for(card: Card) -> Lead:
         location_text=card.location,
         payload={"linkedin_id": card.job_id},
     )
-
-
-async def harvest(
-    client: PoliteClient,
-    searches: list[Search],
-    *,
-    max_requests: int,
-    known: set[str],
-) -> Harvest:
-    """Every search's pages, one lead per job not seen before. Stops at the cap or the first
-    block, keeping what it found."""
-    found = Harvest(searches_planned=len(searches))
-    new: dict[str, Card] = {}
-
-    async def page_through(search: Search) -> bool:
-        """Every page of one search. False when the budget stopped it."""
-        start = 0
-        for _ in range(PAGES_PER_SEARCH):
-            if found.requests >= max_requests:
-                return False
-            params = {"keywords": search.keywords, "location": search.location,
-                      "f_TPR": "r86400", "start": start}
-            if search.distance_miles:
-                params["distance"] = search.distance_miles
-            found.requests += 1
-            cards = parse_cards(await _page(client, SEARCH, params))
-            found.cards += len(cards)
-            for card in cards:
-                if card.job_id not in known:
-                    new.setdefault(card.job_id, card)
-            if len(cards) < PAGE:
-                break
-            start += len(cards)
-        return True
-
-    try:
-        for search in searches:
-            if not await page_through(search):
-                break
-            found.searches_done += 1
-    except SourceBlocked as exc:
-        found.blocked = str(exc)
-        log.warning("LinkedIn blocked us, stopping: %s", exc)
-    except FetchError as exc:
-        found.error = str(exc)
-        log.warning("LinkedIn pass stopped: %s", exc)
-    # Every search answering "nothing" is what a quiet block looks like; a day with no number
-    # must not pass for a day with nothing to count.
-    if found.searches_done and not found.cards and not (found.blocked or found.error):
-        found.error = "LinkedIn returned no job card for any search."
-    found.leads = [lead_for(card) for card in new.values()]
-    return found
 
 
 def where(lead: Lead) -> tuple[list[int], list[str]] | None:
@@ -270,12 +486,12 @@ async def judge(conn, leads: list[Lead]) -> list[Lead]:
     ]
 
 
-async def reader_searches(conn) -> list[Search]:
-    """Every active reader's searches: their cached expanded queries, else the deterministic ones.
+async def reader_searches(conn) -> dict[int, list[Search]]:
+    """Each active reader's searches: their cached expanded queries, else the deterministic ones.
 
     Never an LLM call: an expansion is paid for by the match, and this only reuses it.
     """
-    planned: dict[Search, None] = {}
+    planned: dict[int, list[Search]] = {}
     for user in await users_q.list_users(conn):
         row = await users_q.get_profile(conn, user.id) if user.is_active else None
         if row is None:
@@ -285,39 +501,116 @@ async def reader_searches(conn) -> list[Search]:
             conn, user.id, profile.version, versions.QUERY_EXPANSION_VERSION
         )
         queries = cached.queries if cached else expand.deterministic_queries(profile)
-        for search in searches_for(profile, queries):
-            planned.setdefault(search, None)
-    return list(planned)
+        if searches := searches_for(profile, queries):
+            planned[user.id] = searches
+    return planned
 
 
-async def run(settings: Settings | None = None, *, force: bool = False) -> Harvest | None:
-    """One pass, when a day has gone by since the last one. None when not due or switched off."""
+async def visit_due(
+    settings: Settings | None = None,
+    *,
+    force: bool = False,
+    browser: Callable[[list[dict]], Browser] = Browser,
+) -> Visit | None:
+    """The visit of the reader due first, if any is. None when switched off, paused after a
+    block, out of budget, or when nobody is due.
+
+    The day's budget is shared evenly between readers, and divided by the slowdown a recent block
+    earned, as a sweep's pace is. `force` skips the visit clock and the window, never the budget,
+    the pause or the gap between visits.
+    """
     settings = settings or get_settings()
     if settings.linkedin_max_requests <= 0:
         return None
     now = datetime.now(UTC)
     async with connect() as conn:
-        last = await ingest_q.last_sweep_started(conn, SOURCE)
-        if not force and last is not None and now - last < EVERY:
+        history = (await ingest_q.block_history(conn, days=SLOW_DAYS)).get(SOURCE)
+        if history and history.streak and now < history.last_blocked_at + pause_after(
+            history.streak
+        ):
             return None
+        budget = settings.linkedin_max_requests // slowdown(history.recent if history else 0)
         searches = await reader_searches(conn)
-        known = await discovery_q.payload_values(conn, origin=SOURCE, key="linkedin_id")
+        share = budget // len(searches) if searches else 0
+        if share <= 0:
+            return None
+        opens, closes = window(now)
+        used = await discovery_q.linkedin_requests_since(conn, opens)
+        last = await discovery_q.linkedin_last_request_at(conn)
+        per_visit = await discovery_q.linkedin_requests_per_visit(
+            conn, now - timedelta(days=SLOW_DAYS)
+        ) or PER_VISIT_GUESS
+        visitors = await discovery_q.linkedin_visitors(conn)
+        for user_id in searches:
+            row = visitors.get(user_id)
+            # A new reader gets a clock rather than a visit, and so does one who missed theirs.
+            if row is None or now - row.next_visit_at > MISSED:
+                await discovery_q.save_linkedin_visitor(
+                    conn,
+                    user_id=user_id,
+                    cookies=row.cookies if row else [],
+                    jar_expires_at=row.jar_expires_at if row else now + jar_life(_rng),
+                    next_visit_at=next_visit(
+                        now, share=share, used=used.get(user_id, 0), per_visit=per_visit,
+                        rng=_rng,
+                    ),
+                    next_search=row.next_search if row else 0,
+                )
+        visitors = await discovery_q.linkedin_visitors(conn)
+        due = sorted(
+            (
+                row for user_id, row in visitors.items()
+                if user_id in searches and used.get(user_id, 0) < share
+                and (force or (opens <= now and row.next_visit_at <= now))
+            ),
+            key=lambda row: row.next_visit_at,
+        )
+        if (
+            not due
+            or sum(used.values()) >= budget
+            or (last is not None and now - last < MIN_GAP)
+        ):
+            return None
+        reader = due[0]
         sweep_id, _ = await ingest_q.start_sweep(conn, SOURCE)
 
-    found = Harvest()
-    if searches:
-        async with PoliteClient() as client:
-            found = await harvest(
-                client.paced(DELAY_SECONDS, attempts=1),
-                searches,
-                max_requests=settings.linkedin_max_requests,
-                known=known,
-            )
-    async with connect() as conn:
-        found.leads = await judge(conn, found.leads)
-    written = await record_leads(found.leads)
+    spent = used.get(reader.user_id, 0)
+    fresh = reader.jar_expires_at <= now
+    async with browser([] if fresh else list(reader.cookies)) as guest:
+        found = await visit(
+            guest, searches[reader.user_id], first=reader.next_search,
+            allowance=min(share - spent, budget - sum(used.values())), rng=_rng,
+        )
+        jar = guest.cookies()
+    done = datetime.now(UTC)
 
     async with connect() as conn:
+        await discovery_q.record_linkedin_requests(
+            conn,
+            [
+                {"sweep_id": sweep_id, "user_id": reader.user_id, **vars(sent)}
+                for sent in found.sent
+            ],
+            keep_days=KEEP_REQUESTS_DAYS,
+        )
+        await discovery_q.add_linkedin_seen(
+            conn,
+            [
+                {"linkedin_id": card.job_id, "company": card.company, "title": card.title,
+                 "location_text": card.location}
+                for card in found.cards.values()
+            ],
+        )
+        await discovery_q.save_linkedin_visitor(
+            conn,
+            user_id=reader.user_id,
+            cookies=jar,
+            jar_expires_at=done + jar_life(_rng) if fresh else reader.jar_expires_at,
+            next_visit_at=next_visit(
+                done, share=share, used=spent + found.requests, per_visit=per_visit, rng=_rng
+            ),
+            next_search=reader.next_search + found.searches_done,
+        )
         await ingest_q.finish_sweep(
             conn,
             sweep_id,
@@ -326,14 +619,38 @@ async def run(settings: Settings | None = None, *, force: bool = False) -> Harve
             partitions_total=found.searches_planned,
             partitions_done=found.searches_done,
             partitions_overflowed=0,
-            documents_seen=found.cards,
+            documents_seen=len(found.cards),
             jobs_upserted=0,
             jobs_closed=0,
             error=found.blocked or found.error,
             blocked=found.blocked is not None,
         )
     log.info(
-        "linkedin: %d request(s), %d card(s), %d new lead(s), %d already held",
-        found.requests, found.cards, written, sum(bool(lead.held) for lead in found.leads),
+        "linkedin: reader %d visited, %d request(s), %d card(s)",
+        reader.user_id, found.requests, len(found.cards),
     )
     return found
+
+
+async def record_seen() -> list[Lead]:
+    """Judge and record what the visits saw, once the nightly sweep has run. Free: no request."""
+    async with connect() as conn:
+        rows = await discovery_q.linkedin_seen_cards(conn)
+        known = await discovery_q.payload_values(conn, origin=SOURCE, key="linkedin_id")
+        leads = await judge(
+            conn,
+            [
+                lead_for(Card(row.linkedin_id, row.title, row.company, row.location_text))
+                for row in rows
+                if row.linkedin_id not in known
+            ],
+        )
+    written = await record_leads(leads)
+    # After the write: a crash before it leaves the cards to judge tomorrow, never lost.
+    async with connect() as conn:
+        await discovery_q.forget_linkedin_seen(conn, [row.linkedin_id for row in rows])
+    log.info(
+        "linkedin: %d card(s) seen, %d new lead(s), %d already held",
+        len(rows), written, sum(bool(lead.held) for lead in leads),
+    )
+    return leads
