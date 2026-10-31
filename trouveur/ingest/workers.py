@@ -29,7 +29,13 @@ from trouveur.models import (
     dedup_key,
 )
 from trouveur.sources.base import GLOBAL_SCOPE
-from trouveur.sources.errors import SOURCE_BURST, SOURCE_PAUSE, SourceBlocked, SourceError
+from trouveur.sources.errors import (
+    SOURCE_BURST,
+    SOURCE_PAUSE,
+    FetchError,
+    SourceBlocked,
+    SourceError,
+)
 from trouveur.sources.http import PoliteClient
 from trouveur.sources.registry import SOURCES
 from trouveur.work import (
@@ -223,15 +229,22 @@ async def drain_detail(
                     row.source, f"{row.source} paused for {SOURCE_PAUSE}: blocked. {exc}"
                 )
                 return exc
-            except SourceError as exc:
+            except Exception as exc:  # noqa: BLE001 - one posting's surprise must not void the batch
+                failure = exc
+                if not isinstance(exc, SourceError):
+                    log.exception("detail fetch for %s raised unexpectedly", row.external_id)
+                    failure = FetchError(
+                        f"The detail fetch for {row.external_id} raised "
+                        f"{type(exc).__name__}: {exc}."
+                    )
                 failed_in_a_row[row.source] = failed_in_a_row.get(row.source, 0) + 1
                 if failed_in_a_row[row.source] >= SOURCE_BURST:
                     stopped.setdefault(
                         row.source,
                         f"{row.source} paused for {SOURCE_PAUSE} after {SOURCE_BURST} detail "
-                        f"failures in a row; the last was: {exc}",
+                        f"failures in a row; the last was: {failure}",
                     )
-                return exc
+                return failure
             failed_in_a_row[row.source] = 0
             return document
 
