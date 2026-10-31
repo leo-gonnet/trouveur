@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from itertools import zip_longest
 
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -22,6 +23,7 @@ from trouveur.ingest.persist import persist
 from trouveur.models import (
     CanonicalJob,
     Location,
+    RawDocument,
     SalaryPeriod,
     SalaryQuote,
     dedup_key,
@@ -29,11 +31,25 @@ from trouveur.models import (
 from trouveur.sources.base import GLOBAL_SCOPE
 from trouveur.sources.errors import SOURCE_BURST, SOURCE_PAUSE, SourceBlocked, SourceError
 from trouveur.sources.http import PoliteClient
-from trouveur.work import WorkKind, claim, complete, fail, pause_source
+from trouveur.sources.registry import SOURCES
+from trouveur.work import (
+    WorkKind,
+    claim,
+    claim_across_boards,
+    complete,
+    fail,
+    pause_source,
+)
 
 log = logging.getLogger(__name__)
 
 WORKER = "runner"
+
+# At most this many from one board per batch, so a batch spans many boards; and this many
+# requests in flight across all of them.
+_DETAIL_PER_BOARD = 20
+_DETAIL_AT_ONCE = 32
+_SKIPPED = object()
 
 
 
@@ -172,64 +188,105 @@ async def drain_detail(
 
     Small batches drained continuously rather than a burst inside the sweep: one polite request
     per second absorbs ~36k Arbeitsagentur postings across a day but would add ten hours to it.
+
+    Fetched concurrently, a few per board at a time: the per-provider clock in `PoliteClient`
+    still spaces each provider's requests, and only a provider budgeted per company (Workday)
+    gets faster. A failure charges the posting an attempt only when it was actually asked.
     """
-    items = await claim(conn, WorkKind.DETAIL, limit, WORKER)
+    items = await claim_across_boards(conn, WorkKind.DETAIL, limit, _DETAIL_PER_BOARD, WORKER)
     if not items:
         return 0
     targets = await jobs_q.detail_targets(conn, [item.job_id for item in items])
     by_job = {item.job_id: item.id for item in items}
 
+    gate = asyncio.Semaphore(_DETAIL_AT_ONCE)
+    # Why each source stopped, decided while fetching so a failing source stops being asked;
+    # requests already in flight when it stops still land.
+    stopped: dict[str, str] = {}
+    failed_in_a_row: dict[str, int] = {}
+
+    async def fetch(row: sa.Row) -> object:
+        async with gate:
+            if row.source in stopped:
+                return _SKIPPED
+            try:
+                document = await sources[row.source].fetch_detail(
+                    _paced(client, row.source), row.external_id
+                )
+            except SourceBlocked as exc:
+                stopped.setdefault(
+                    row.source, f"{row.source} paused for {SOURCE_PAUSE}: blocked. {exc}"
+                )
+                return exc
+            except SourceError as exc:
+                failed_in_a_row[row.source] = failed_in_a_row.get(row.source, 0) + 1
+                if failed_in_a_row[row.source] >= SOURCE_BURST:
+                    stopped.setdefault(
+                        row.source,
+                        f"{row.source} paused for {SOURCE_PAUSE} after {SOURCE_BURST} detail "
+                        f"failures in a row; the last was: {exc}",
+                    )
+                return exc
+            failed_in_a_row[row.source] = 0
+            return document
+
+    # One board after another, so the slots are not all held by one board waiting out its
+    # own provider's interval.
+    known = _round_robin([row for row in targets if row.source in sources])
+    outcomes = dict(
+        zip(
+            (row.id for row in known),
+            await asyncio.gather(*(fetch(row) for row in known)),
+            strict=True,
+        )
+    )
+
+    documents: list[RawDocument] = []
     fetched: dict[str, list[str]] = {}
     done: list[int] = []
     retired: list[int] = []
-    failed_in_a_row: dict[str, int] = {}
-    paused: set[str] = set()
     for row in targets:
-        if row.source in paused:
-            continue
-        source = sources.get(row.source)
-        if source is None:
+        if row.id not in outcomes:
             await fail(conn, [by_job[row.id]], f"no source registered for {row.source!r}")
             continue
-        try:
-            document = await source.fetch_detail(client, row.external_id)
-        except SourceBlocked as exc:
-            paused.add(row.source)
-            reason = f"{row.source} paused for {SOURCE_PAUSE}: blocked. {exc}"
-            held = await pause_source(
-                conn, WorkKind.DETAIL, row.source, SOURCE_PAUSE, reason, list(by_job.values())
-            )
-            log.warning("%s (%d item(s) held back)", reason, held)
+        outcome = outcomes[row.id]
+        if outcome is _SKIPPED or isinstance(outcome, SourceBlocked):
             continue
-        except SourceError as exc:
-            await fail(conn, [by_job[row.id]], str(exc))
-            failed_in_a_row[row.source] = failed_in_a_row.get(row.source, 0) + 1
-            if failed_in_a_row[row.source] >= SOURCE_BURST:
-                paused.add(row.source)
-                reason = (
-                    f"{row.source} paused for {SOURCE_PAUSE} after {SOURCE_BURST} detail "
-                    f"failures in a row; the last was: {exc}"
-                )
-                held = await pause_source(
-                    conn, WorkKind.DETAIL, row.source, SOURCE_PAUSE, reason, list(by_job.values())
-                )
-                log.warning("%s (%d item(s) held back)", reason, held)
+        if isinstance(outcome, SourceError):
+            await fail(conn, [by_job[row.id]], str(outcome))
             continue
-        failed_in_a_row[row.source] = 0
-        if document is None:
+        if outcome is None:
             # A 404 is the posting telling us it is gone -- evidence, not the age heuristic.
             retired.append(row.id)
             done.append(by_job[row.id])
             continue
-        await ingest_q.archive_documents(conn, [document])
+        documents.append(outcome)
         fetched.setdefault(row.source, []).append(row.external_id)
         done.append(by_job[row.id])
+    for source_name, reason in stopped.items():
+        held = await pause_source(
+            conn, WorkKind.DETAIL, source_name, SOURCE_PAUSE, reason, list(by_job.values())
+        )
+        log.warning("%s (%d item(s) held back)", reason, held)
 
+    await ingest_q.archive_documents(conn, documents)
     for source_name, external_ids in fetched.items():
         await persist(conn, source_name, external_ids, requires_detail=True)
     if retired:
         await ingest_q.close_retired(conn, retired)
     await complete(conn, done)
     return len(done)
+
+
+def _round_robin(rows: list[sa.Row]) -> list[sa.Row]:
+    boards: dict[tuple[str, str | None], list[sa.Row]] = {}
+    for row in rows:
+        boards.setdefault((row.source, row.scope), []).append(row)
+    return [row for turn in zip_longest(*boards.values()) for row in turn if row is not None]
+
+
+def _paced(client: PoliteClient, source: str) -> PoliteClient:
+    interval = SOURCES[source].min_interval if source in SOURCES else None
+    return client if interval is None else client.paced(interval)
 
 

@@ -128,7 +128,9 @@ async def detail_targets(conn: AsyncConnection, job_ids: Sequence[int]) -> list[
         return []
     return list(
         await conn.execute(
-            sa.select(job.c.id, job.c.source, job.c.external_id).where(job.c.id.in_(list(job_ids)))
+            sa.select(job.c.id, job.c.source, job.c.scope, job.c.external_id).where(
+                job.c.id.in_(list(job_ids))
+            )
         )
     )
 

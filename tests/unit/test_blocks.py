@@ -11,7 +11,7 @@ from trouveur.sources.arbeitsagentur.client import ArbeitsagenturSource
 from trouveur.sources.board import sweep_boards
 from trouveur.sources.errors import SOURCE_BURST, FetchError, SourceBlocked
 from trouveur.sources.feed import require_list
-from trouveur.sources.workday.client import WorkdaySource
+from trouveur.sources.workday.client import BOARDS_AT_ONCE, WorkdaySource
 
 _CLOUDFLARE_WALL = (
     "<!DOCTYPE html><html><head><title>Just a moment...</title></head>"
@@ -153,10 +153,12 @@ async def test_a_block_stops_a_workday_sweep_instead_of_failing_each_board():
         asked.append(request.url.host)
         return httpx.Response(429)
 
-    boards = ["eins:wd3:Karriere", "zwei:wd3:Karriere"]
+    boards = [f"board{n}:wd3:Karriere" for n in range(BOARDS_AT_ONCE * 2)]
     with pytest.raises(SourceBlocked):
         await WorkdaySource(boards=boards).sweep(_client(handler), _nowhere)
-    assert set(asked) == {"eins.wd3.myworkdayjobs.com"}, "the boards after the block are not asked"
+    # Boards walk in parallel, so those already walking when the block lands were asked.
+    assert len(set(asked)) <= BOARDS_AT_ONCE, "the boards after the block are not asked"
+    assert f"board{BOARDS_AT_ONCE}.wd3.myworkdayjobs.com" not in asked
 
 
 def test_each_block_in_a_row_waits_longer_and_sweeps_slower():

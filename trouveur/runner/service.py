@@ -33,7 +33,7 @@ log = logging.getLogger(__name__)
 
 TICK_SECONDS = 20
 LINKEDIN_CHECK_SECONDS = 60
-_DETAIL_PER_TICK = 40
+_DETAIL_PER_TICK = 400
 # How long a scheduled run waits for its own sweep to be prepared before matching anyway. Workday
 # alone is a detail fetch per posting at one a second, so a busy night is about an hour of it.
 MATCH_WAIT_LIMIT = timedelta(hours=2)

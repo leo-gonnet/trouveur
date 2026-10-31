@@ -88,6 +88,51 @@ async def claim(
     return list(await conn.execute(stmt))
 
 
+async def claim_across_boards(
+    conn: AsyncConnection, kind: WorkKind, limit: int, per_board: int, worker: str
+) -> list[sa.Row]:
+    """`claim`, taking at most `per_board` items from any one board. A board's postings are
+    queued together, so in id order a batch is one company's backlog -- and the budget of a
+    provider that limits each company separately would be spent on one company at a time."""
+    ranked = (
+        sa.select(
+            work_item.c.id,
+            sa.func.row_number()
+            .over(
+                partition_by=(job.c.source, job.c.scope),
+                order_by=(work_item.c.not_before, work_item.c.id),
+            )
+            .label("rank"),
+        )
+        .select_from(work_item.join(job, job.c.id == work_item.c.job_id))
+        .where(
+            work_item.c.kind == kind.value,
+            work_item.c.claimed_at.is_(None),
+            work_item.c.not_before <= sa.func.now(),
+        )
+        .subquery()
+    )
+    picked = (
+        sa.select(ranked.c.id)
+        .where(ranked.c.rank <= per_board)
+        .order_by(ranked.c.rank, ranked.c.id)
+        .limit(limit)
+    )
+    ready = (
+        sa.select(work_item.c.id)
+        .where(work_item.c.id.in_(picked))
+        .with_for_update(skip_locked=True)
+        .scalar_subquery()
+    )
+    stmt = (
+        work_item.update()
+        .where(work_item.c.id.in_(ready))
+        .values(claimed_at=sa.func.now(), claimed_by=worker)
+        .returning(work_item.c.id, work_item.c.job_id, work_item.c.target_version)
+    )
+    return list(await conn.execute(stmt))
+
+
 async def complete(conn: AsyncConnection, item_ids: list[int]) -> None:
     if not item_ids:
         return
