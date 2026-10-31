@@ -6,6 +6,7 @@ same function that ran on today's postings, so there is no separate migration sc
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 import sqlalchemy as sa
@@ -63,11 +64,18 @@ def _to_canonical(row: sa.Row) -> CanonicalJob:
     )
 
 
-async def drain_derive(conn: AsyncConnection, limit: int = 500) -> int:
+async def drain_derive(conn: AsyncConnection, limit: int = 2000) -> int:
     items = await claim(conn, WorkKind.DERIVE, limit, WORKER)
     if not items:
         return 0
     rows = await jobs_q.load_for_derive(conn, [item.job_id for item in items])
+    facet_rows = await asyncio.to_thread(_facet_rows, rows)
+    await jobs_q.write_facets(conn, facet_rows)
+    await complete(conn, [item.id for item in items])
+    return len(facet_rows)
+
+
+def _facet_rows(rows: list[sa.Row]) -> list[dict]:
     facet_rows = []
     for row in rows:
         facets = derive(_to_canonical(row))
@@ -92,9 +100,7 @@ async def drain_derive(conn: AsyncConnection, limit: int = 500) -> int:
                 "derived_at": sa.func.now(),
             }
         )
-    await jobs_q.write_facets(conn, facet_rows)
-    await complete(conn, [item.id for item in items])
-    return len(facet_rows)
+    return facet_rows
 
 
 async def drain_embed(conn: AsyncConnection, limit: int = 256) -> int:
