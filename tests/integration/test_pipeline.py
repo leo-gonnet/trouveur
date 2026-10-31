@@ -808,6 +808,70 @@ async def test_the_nightly_match_waits_for_what_the_sweep_brought_in(
         assert await waiting_since(conn, datetime.now(UTC) - timedelta(hours=25)) == 0
 
 
+async def test_the_nightly_match_reaches_back_to_the_last_match_not_a_fixed_day(
+    clean_db, monkeypatch
+):
+    """A night whose sweep ran 43 minutes longer than the one before matched 25h43m after it, and
+    the fixed 25-hour window skipped everything that became ready in between: 4,073 postings on
+    2026-10-31. A failed run and a match-only run did not score the sweep, so neither counts."""
+    from trouveur.config import get_settings
+    from trouveur.db.engine import connect
+    from trouveur.db.queries import admin as admin_q
+    from trouveur.ingest.pipeline import IngestReport
+    from trouveur.models import RunStatus, RunTrigger
+    from trouveur.runner import service
+
+    user_id, _ = await seed_user()
+    async with connect() as conn:
+        for hours_ago, status, match_user_id in (
+            (30, RunStatus.SUCCESS, None),
+            (2, RunStatus.FAILED, None),
+            (1, RunStatus.SUCCESS, user_id),
+        ):
+            run_id = await admin_q.enqueue_run(
+                conn, trigger=RunTrigger.SCHEDULED, match_user_id=match_user_id
+            )
+            await admin_q.finish_run(conn, run_id, status=status, report={})
+            await conn.exec_driver_sql(
+                "UPDATE pipeline_run SET started_at = now() - make_interval(hours => $1), "
+                "stage_started = jsonb_build_object('match', now() - make_interval(hours => $1)) "
+                "WHERE id = $2",
+                (hours_ago, run_id),
+            )
+
+    async def no_sweep(**kwargs):
+        return IngestReport()
+
+    async def nothing_to_prepare(_settings, **_kwargs):
+        return 0
+
+    windows = []
+
+    async def record_window(_settings, *, seen_since=None):
+        windows.append(seen_since)
+        return []
+
+    async def no_discovery(_settings):
+        return None
+
+    async def nothing_seen():
+        return []
+
+    monkeypatch.setattr(service.ingest, "run", no_sweep)
+    monkeypatch.setattr(service, "prepare_arrivals", nothing_to_prepare)
+    monkeypatch.setattr(service.matching, "run_all", record_window)
+    monkeypatch.setattr(service.freehire, "run", no_discovery)
+    monkeypatch.setattr(service.linkedin, "record_seen", nothing_seen)
+
+    async with connect() as conn:
+        await admin_q.enqueue_run(conn, trigger=RunTrigger.SCHEDULED)
+        run = await admin_q.claim_next_run(conn)
+    await service._execute(get_settings(), run)
+
+    (since,) = windows
+    assert abs(since - (datetime.now(UTC) - timedelta(hours=30))) < timedelta(minutes=1)
+
+
 async def test_a_profile_with_nothing_to_search_for_is_skipped_not_failed(
     clean_db, gh_board, aa_listing, aa_detail, monkeypatch
 ):

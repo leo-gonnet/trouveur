@@ -110,7 +110,9 @@ def profile_from_row(row) -> UserProfile:
     )
 
 
-async def run_all(settings: Settings | None = None) -> list[MatchReport]:
+async def run_all(
+    settings: Settings | None = None, *, seen_since: datetime | None = None
+) -> list[MatchReport]:
     settings = settings or get_settings()
     async with connect() as conn:
         users = await users_q.list_users(conn)
@@ -120,7 +122,7 @@ async def run_all(settings: Settings | None = None) -> list[MatchReport]:
         if not user.is_active:
             continue
         try:
-            reports.append(await run_for_user(user.id, settings))
+            reports.append(await run_for_user(user.id, settings, seen_since=seen_since))
         except Exception as exc:  # noqa: BLE001 - one user's failure is not the run's
             log.warning("matching failed for user %s: %s", user.id, exc, exc_info=True)
             reports.append(MatchReport(user_id=user.id, errors=[str(exc)]))
@@ -128,7 +130,11 @@ async def run_all(settings: Settings | None = None) -> list[MatchReport]:
 
 
 async def run_for_user(
-    user_id: int, settings: Settings | None = None, *, whole_horizon: bool = False
+    user_id: int,
+    settings: Settings | None = None,
+    *,
+    whole_horizon: bool = False,
+    seen_since: datetime | None = None,
 ) -> MatchReport:
     """One user's run.
 
@@ -160,11 +166,10 @@ async def run_for_user(
 
     # One pair of cutoffs for the whole run, so the two arms cannot disagree about either.
     fresh_since = freshness.fresh_since(settings.retrieval_horizon_days)
-    seen_since = (
-        fresh_since
-        if whole_horizon
-        else datetime.now(UTC) - timedelta(hours=retrieve.NEW_ARRIVALS_HOURS)
-    )
+    if whole_horizon:
+        seen_since = fresh_since
+    elif seen_since is None:
+        seen_since = datetime.now(UTC) - timedelta(hours=retrieve.NEW_ARRIVALS_HOURS)
     async with connect() as conn:
         retrieved = await _retrieve(
             conn, profile, queries, report, adverts,

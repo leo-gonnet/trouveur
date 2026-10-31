@@ -28,9 +28,10 @@ PER_QUERY_DEPTH = 200
 # postings, not by this number.
 FUSED_LIMIT = 2000
 
-# How far back a run held after a sweep looks: what became ready since the last run, and nothing
-# else. Twenty-five rather than twenty-four so a run starting a few minutes late cannot drop a
-# sliver of the day -- the hour of overlap is free, because anything already scored is skipped.
+# How far back a run held after a sweep looks when no earlier run has matched; otherwise it looks
+# back to that run's match (`admin.last_match_started`). Twenty-five rather than twenty-four so a
+# run starting a few minutes late cannot drop a sliver of the day -- the hour of overlap is free,
+# because anything already scored is skipped.
 #
 # One chance, not seven: a wider window lets a quiet week promote postings beaten by two thousand
 # others for six days running.

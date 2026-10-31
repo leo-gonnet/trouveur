@@ -241,7 +241,12 @@ async def _execute(settings: Settings, run) -> None:
         promoted = await trial.judge()
     except Exception:
         log.exception("the board trial failed; matching continues and the next run re-judges")
-    matches = await matching.run_all(settings)
+    async with connect() as conn:
+        last_match = await admin_q.last_match_started(conn)
+    # From the last match, not a fixed span back: a run whose sweep took longer than the one
+    # before it left a gap that no window ever covered (4,073 postings on 2026-10-31).
+    since = last_match or datetime.now(UTC) - timedelta(hours=retrieve.NEW_ARRIVALS_HOURS)
+    matches = await matching.run_all(settings, seen_since=since)
     # After matching, so it reads tonight's corpus and tonight's saved jobs. Free, and never part
     # of the verdict: a failed check costs one point on a chart, not anybody's edition.
     try:
