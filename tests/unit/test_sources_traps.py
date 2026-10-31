@@ -692,6 +692,16 @@ def test_recruitee_body_without_offers_is_a_failed_board_not_an_empty_one():
     assert outcome.closable_scopes == []
 
 
+def test_recruitee_hybrid_posting_is_not_on_site():
+    from trouveur.sources.recruitee import normalize
+
+    job = normalize(
+        {"id": 1, "title": "T", "hybrid": True, "on_site": True}, external_id="acme:1"
+    )
+    assert job is not None
+    assert job.remote_hint is None
+
+
 def test_recruitee_dates_with_a_utc_suffix_are_read():
     from trouveur.sources.recruitee import normalize
 

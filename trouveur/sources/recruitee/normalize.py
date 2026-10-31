@@ -88,6 +88,7 @@ def _locations(listing: dict) -> list[Location]:
 def _remote(listing: dict) -> bool | None:
     if listing.get("remote") is True:
         return True
+    # Before `on_site`: a hybrid posting may carry `on_site: true` too.
     if listing.get("hybrid") is True:
         return None
     if listing.get("on_site") is True:
