@@ -80,7 +80,12 @@ def _to_canonical(row: sa.Row) -> CanonicalJob:
     )
 
 
-async def drain_derive(conn: AsyncConnection, limit: int = 2000) -> int:
+# write_facets binds 16 parameters a row, and asyncpg refuses a statement over 32,767: at 2,000
+# rows one more facet column would have broken every batch.
+_DERIVE_PER_BATCH = 1000
+
+
+async def drain_derive(conn: AsyncConnection, limit: int = _DERIVE_PER_BATCH) -> int:
     items = await claim(conn, WorkKind.DERIVE, limit, WORKER)
     if not items:
         return 0
