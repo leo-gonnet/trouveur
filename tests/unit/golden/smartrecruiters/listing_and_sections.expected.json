@@ -36,7 +36,7 @@
     "locations": [
       {
         "city": "Lyon",
-        "country": null,
+        "country": "fr",
         "country_hint": null,
         "raw": "Lyon, ARA, France",
         "region": "ARA"

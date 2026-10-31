@@ -70,13 +70,11 @@ def _description(job_ad: Any) -> str | None:
 def _locations(location: dict) -> list[Location]:
     city = collapse_whitespace(location.get("city"))
     region = collapse_whitespace(location.get("region"))
-    # `country` is an ISO code ("fr"), which derivation reads for a handful of countries only:
-    # stated, it leaves a Lyon posting with no country and its town unplaced. `fullLocation`
-    # ends in the English name, which derivation does read from the raw text.
+    country = collapse_whitespace(location.get("country"))
     raw = collapse_whitespace(location.get("fullLocation")) or ", ".join(
-        part for part in (city, region, collapse_whitespace(location.get("country"))) if part
+        part for part in (city, region, country) if part
     )
-    return [Location(raw=raw, city=city, region=region)] if raw else []
+    return [Location(raw=raw, city=city, region=region, country=country)] if raw else []
 
 
 def _remote(location: dict) -> bool | None:
