@@ -154,6 +154,9 @@ PORTED: tuple[tuple[str, str | None, str | None], ...] = (
         'acmecorp',
     ),
     ('https://www.smartrecruiters.com/', None, None),
+    ('https://acme.recruitee.com/o/data-engineer', 'recruitee', 'acme'),
+    ('https://app.recruitee.com/#/settings', None, None),
+    ('https://gateway.recruitee.com/session', None, None),
 )
 
 

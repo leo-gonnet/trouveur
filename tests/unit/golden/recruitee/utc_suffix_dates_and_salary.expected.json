@@ -1,0 +1,58 @@
+{
+  "facets": {
+    "cities": [
+      "Hamburg"
+    ],
+    "countries": [
+      "DE"
+    ],
+    "employment_type": "unknown",
+    "is_agency": null,
+    "language": null,
+    "place_ids": [
+      2911298
+    ],
+    "regions": [
+      "Hamburg"
+    ],
+    "salary_annualised": true,
+    "salary_max_eur_year": "62400",
+    "salary_min_eur_year": "48000",
+    "seniority": "unknown",
+    "skills": [],
+    "unplaced_countries": [],
+    "work_mode": "onsite"
+  },
+  "job": {
+    "agency_hint": null,
+    "closes_at": null,
+    "company": "Acme",
+    "department_hint": "Design",
+    "description": "Shape our mobile app.\n\nFigma",
+    "employment_type_hint": "fulltime_permanent",
+    "external_id": "acme:2790001",
+    "language_hint": null,
+    "locations": [
+      {
+        "city": "Hamburg",
+        "country": "Germany",
+        "country_hint": null,
+        "raw": "Hamburg, Hamburg, Germany",
+        "region": "Hamburg"
+      }
+    ],
+    "posted_at": "2026-10-26T19:43:14Z",
+    "remote_hint": false,
+    "salary": {
+      "amount_max": "5200",
+      "amount_min": "4000",
+      "currency": "EUR",
+      "period": "MONTH"
+    },
+    "source": "recruitee",
+    "title": "Product Designer",
+    "updated_at": "2026-10-26T19:43:14Z",
+    "url": "https://acme.recruitee.com/o/product-designer"
+  },
+  "normalize_version": 1
+}

@@ -18,11 +18,11 @@ Two rules shape everything here:
 
 **There is one rule per source we sweep, and no others** -- the sources that sweep a whole platform
 included, and those resolve to the platform with no board. freehire's table covers about ninety
-more platforms (Teamtailor, Recruitee, BambooHR, Softgarden, UKG, ADP, iCIMS and so on), several
-with an extraction mode of their own; port the one you need when the adapter for it is written, and
-not before. A rule for a platform we cannot sweep buys nothing: the link is counted by host either
-way, every lead keeps its raw URL, and bumping RESOLVE_VERSION the day the rule lands re-reads all
-of them with no new request to anybody.
+more platforms (Teamtailor, BambooHR, Softgarden, UKG, ADP, iCIMS and so on), several with an
+extraction mode of their own; port the one you need when the adapter for it is written, and not
+before. A rule for a platform we cannot sweep buys nothing: the link is counted by host either way,
+every lead keeps its raw URL, and bumping RESOLVE_VERSION the day the rule lands re-reads all of
+them with no new request to anybody.
 """
 
 from __future__ import annotations
@@ -112,6 +112,7 @@ RULES: tuple[Rule, ...] = (
         ("jobs.smartrecruiters.com", "careers.smartrecruiters.com"), "smartrecruiters", Mode.PATH,
         reserved=("oneclick-ui", "company"),
     ),
+    Rule(("recruitee.com",), "recruitee", Mode.SUBDOMAIN),
     # The rest sweep one global corpus, so their links name a platform and never a board. They
     # are listed for two reasons: counted as an unread host they would read as a platform to go
     # and build an adapter for, and a reader reporting a job on one of them has to be told we
@@ -127,7 +128,7 @@ RULES: tuple[Rule, ...] = (
 # tenant. In subdomain mode the label IS the board, so without this the platform's own app --
 # which every tenant's career site links to -- reads as a company called "app".
 _PLATFORM_LABELS = frozenset(
-    {"app", "dashboard", "admin", "api", "support", "help", "blog", "docs"}
+    {"app", "dashboard", "admin", "api", "support", "help", "blog", "docs", "gateway"}
 )
 
 # An xx-XX language-COUNTRY locale, the optional leading segment Rippling's public site and
