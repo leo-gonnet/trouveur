@@ -372,6 +372,20 @@ def test_workday_page_that_is_not_json_fails_its_board_not_the_source():
     assert outcome.errors and "broken:wd5:Careers" in outcome.errors[0]
 
 
+def test_workday_challenge_page_served_as_200_is_a_block_not_a_parse_error():
+    """`PoliteClient` recognises a challenge only on a refusal status; read as a page that is not
+    JSON, a 200 one would fail the board and let the walk go on asking."""
+    from trouveur.sources.workday import WorkdaySource
+
+    url = "https://acme.wd5.myworkdayjobs.com/wday/cxs/acme/Careers/jobs"
+    client = StubClient({url: (200, "<html><title>Just a moment...</title></html>")})
+    outcome, seen = asyncio.run(collect(WorkdaySource(boards=["acme:wd5:Careers"]), client))
+
+    assert seen == []
+    assert [result.blocked for result in outcome.scope_results] == [True]
+    assert outcome.closable_scopes == []
+
+
 def test_workday_detail_403_s22_is_a_withdrawn_posting_and_any_other_403_is_not():
     """Workday answers a posting taken down after the listing with 403 S22, not 404, so it was
     retried five times and parked, open for ever. Some tenants also answer a burst with a 403,

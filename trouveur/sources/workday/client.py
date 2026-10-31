@@ -21,8 +21,8 @@ import httpx
 from trouveur.models import DocumentKind, RawDocument
 from trouveur.sources.base import DocumentSink, ScopeResult, SweepOutcome
 from trouveur.sources.board import BATCH, scoped_id
-from trouveur.sources.errors import FetchError, SourceBlocked
-from trouveur.sources.http import PoliteClient
+from trouveur.sources.errors import SOURCE_BURST, FetchError, SourceBlocked
+from trouveur.sources.http import PoliteClient, is_challenge
 from trouveur.sources.scopes import split_workday_scope
 
 log = logging.getLogger(__name__)
@@ -61,18 +61,25 @@ class WorkdaySource:
     ) -> SweepOutcome:
         outcome = SweepOutcome(partitions_total=len(self.boards), expected=0)
         gate = asyncio.Semaphore(BOARDS_AT_ONCE)
-        blocked = asyncio.Event()
+        blocked: list[str] = []
 
         async def sweep_one(scope: str) -> None:
             async with gate:
-                if blocked.is_set():
+                if len(blocked) >= SOURCE_BURST:
                     return
                 try:
                     seen, overflowed = await self._sweep_board(client, sink, scope)
-                # A FetchError too: caught below, a block would never stop the source.
-                except SourceBlocked:
-                    blocked.set()
-                    raise
+                # Before FetchError, which it is. Workday limits each company on its own, so one
+                # company refusing stops that company; several mean Workday refuses us.
+                except SourceBlocked as exc:
+                    blocked.append(scope)
+                    outcome.errors.append(f"scope={scope}: {exc}")
+                    outcome.scope_results.append(
+                        ScopeResult(scope=scope, ok=False, error=str(exc), blocked=True)
+                    )
+                    if len(blocked) >= SOURCE_BURST:
+                        raise
+                    return
                 except FetchError as exc:
                     outcome.errors.append(f"scope={scope}: {exc}")
                     outcome.scope_results.append(
@@ -94,8 +101,7 @@ class WorkdaySource:
                 for scope in self.boards:
                     group.create_task(sweep_one(scope))
         except ExceptionGroup as failed:
-            # The group has already cancelled the boards still walking, so a block stops the
-            # source as it did when boards were walked one at a time.
+            # The group has already cancelled the boards still walking.
             raise failed.exceptions[0] from None
         return outcome
 
@@ -267,7 +273,10 @@ class WorkdaySource:
 
 def _json(response: httpx.Response, what: str) -> Any:
     """A 200 whose body is not JSON came back mid-sweep on 2026-10-23 and 2026-10-31, at 1 req/s,
-    and its ValueError ended the whole source: 173 boards, none closable. It fails one board."""
+    and its ValueError ended the whole source: 173 boards, none closable. It fails one board,
+    unless it is a bot challenge, which `PoliteClient` only recognises on a refusal status."""
+    if is_challenge(response):
+        raise SourceBlocked(f"{what} answered HTTP 200 with a bot challenge page.")
     try:
         return response.json()
     except ValueError as exc:
