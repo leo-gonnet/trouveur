@@ -611,3 +611,67 @@ def test_an_empty_disabled_setting_disables_nothing():
     from trouveur.sources.registry import build_sources
 
     assert build_sources(tenants={}, disabled="".split(","))
+
+
+# --------------------------------------------------------------------------- smartrecruiters
+
+_SR_URL = "https://api.smartrecruiters.com/v1/companies/acme/postings"
+
+
+def test_smartrecruiters_walk_ends_on_a_short_page_not_on_its_moving_total():
+    """`totalFound` moved from 1,149 to 1,151 inside one walk, so the short page is the end."""
+    from trouveur.sources.smartrecruiters import SmartRecruitersSource
+
+    def respond(params, _body):
+        offset = params["offset"]
+        rows = [{"id": str(n)} for n in range(offset, offset + (100 if offset == 0 else 3))]
+        return 200, {"totalFound": 50 if offset == 0 else 999, "content": rows}
+
+    client = StubClient({_SR_URL: respond})
+    outcome, seen = asyncio.run(
+        collect(SmartRecruitersSource(boards=["acme"]), client)
+    )
+
+    assert [params["offset"] for _m, _u, params, _b in client.requested] == [0, 100]
+    assert all(params["limit"] == 100 for _m, _u, params, _b in client.requested)
+    assert len(seen) == 103
+    assert outcome.closable_scopes == ["acme"]
+
+
+def test_smartrecruiters_board_whose_offset_does_not_advance_is_not_closable():
+    from trouveur.sources.smartrecruiters import SmartRecruitersSource
+
+    full = {"totalFound": 1000, "content": [{"id": str(n)} for n in range(100)]}
+    client = StubClient({_SR_URL: (200, full)})
+    outcome, seen = asyncio.run(collect(SmartRecruitersSource(boards=["acme"]), client))
+
+    assert len(client.requested) == 2
+    assert len(seen) == 100
+    assert outcome.closable_scopes == []
+
+
+def test_smartrecruiters_detail_is_addressed_by_company_and_posting():
+    from trouveur.sources.smartrecruiters import SmartRecruitersSource
+
+    client = StubClient({f"{_SR_URL}/7440001": (200, {"id": "7440001"})})
+    source = SmartRecruitersSource()
+
+    document = asyncio.run(source.fetch_detail(client, "acme:7440001"))
+    assert document is not None and document.scope == "acme"
+    assert asyncio.run(source.fetch_detail(client, "acme:404")) is None
+    with pytest.raises(SourceError):
+        asyncio.run(source.fetch_detail(client, "acme"))
+
+
+def test_smartrecruiters_hybrid_posting_is_not_on_site():
+    """`remote` is false on a hybrid posting, and a False hint makes derivation say on-site."""
+    from trouveur.sources.smartrecruiters import normalize
+
+    def hint(location):
+        job = normalize({"id": "1", "name": "T", "location": location}, external_id="a:1")
+        assert job is not None
+        return job.remote_hint
+
+    assert hint({"remote": False, "hybrid": True}) is None
+    assert hint({"remote": False, "hybrid": False}) is False
+    assert hint({"remote": True}) is True

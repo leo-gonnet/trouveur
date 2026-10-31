@@ -21,6 +21,7 @@ from trouveur.sources import (
     lever,
     personio,
     rippling,
+    smartrecruiters,
     workable,
     workday,
 )
@@ -121,6 +122,12 @@ SOURCES: dict[str, SourceSpec] = {
         normalize_version=jobicy.version,
         build=lambda _scopes: jobicy.JobicySource(),
         tenant_scoped=False,
+    ),
+    smartrecruiters.SOURCE: SourceSpec(
+        normalize=smartrecruiters.normalize,
+        normalize_version=smartrecruiters.version,
+        build=lambda scopes: smartrecruiters.SmartRecruitersSource(boards=scopes),
+        tenant_scoped=True,
     ),
 }
 
