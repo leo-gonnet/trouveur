@@ -152,6 +152,15 @@ async def run(
     askable = sorted(set(SOURCES) - set(disabled))
     async with connect() as conn:
         tenants = await admin_q.enabled_tenants(conn)
+        if any(spec.by_reader_country for spec in SOURCES.values()):
+            # Here and not at the top: the coverage queries import `ingest.places`, whose package
+            # imports this module, so a module-level import is a cycle.
+            from trouveur import coverage
+
+            countries = sorted(await coverage.reader_countries(conn))
+            tenants.update(
+                {name: countries for name, spec in SOURCES.items() if spec.by_reader_country}
+            )
         trials = await admin_q.tenants_due_for_trial(
             conn,
             limit=settings.trial_boards_per_run,

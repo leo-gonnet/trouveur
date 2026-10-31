@@ -1,0 +1,28 @@
+{
+  "listing": {
+    "id": "QkVJU1BJRUwtMDAwMiA5",
+    "title": "Technicien de maintenance (H/F)",
+    "description": "<p>Maintenance préventive et curative des équipements.</p>",
+    "creationDate": 1792656726000,
+    "lastModificationDate": 1792926624000,
+    "numberOfPosts": 1,
+    "locationMap": {
+      "EL": [null]
+    },
+    "euresFlag": false,
+    "jobCategoriesCodes": [],
+    "positionScheduleCodes": [],
+    "positionOfferingCode": "temporary",
+    "employer": {
+      "name": "Non renseigné",
+      "legalID": null,
+      "website": null,
+      "sectorCodes": [],
+      "description": null
+    },
+    "availableLanguages": ["fr"],
+    "score": null,
+    "translationType": "FIRST_LANGUAGE"
+  },
+  "external_id": "QkVJU1BJRUwtMDAwMiA5"
+}

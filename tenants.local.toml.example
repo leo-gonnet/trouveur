@@ -15,8 +15,9 @@
 # Every entry is validated against the source's own grammar at import, so a typo fails loudly
 # instead of 404-ing on every sweep for ever.
 #
-# Only tenant-scoped sources belong here. arbeitsagentur, workable, arbeitnow, himalayas, jobicy
-# and karriere each sweep one global corpus and take no tenants.
+# Only tenant-scoped sources belong here. arbeitsagentur, workable, arbeitnow, himalayas, jobicy,
+# karriere and eures each sweep one global corpus and take no tenants; eures is swept in the
+# countries readers' profiles reach.
 #
 # Every slug below was verified live on 2026-09-10 (job counts at that moment in brackets).
 # Verify before adding your own: an unknown board fails silently, every day, until somebody reads

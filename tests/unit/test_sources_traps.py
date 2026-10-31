@@ -52,6 +52,9 @@ class StubClient:
     async def get_json(self, url, *, params=None, headers=None):
         return self._respond("GET", url, params, None, headers).json()
 
+    async def post_json(self, url, *, json=None, params=None, headers=None):
+        return self._respond("POST", url, params, json, headers).json()
+
 
 async def collect(source, client):
     seen = []
@@ -856,3 +859,100 @@ def test_karriere_detail_is_the_pages_json_ld_and_a_gone_posting_is_retired():
     # A page that lost its JSON-LD is a changed page, never a gone posting.
     with pytest.raises(SourceError):
         asyncio.run(source.fetch_detail(client, "3"))
+
+
+# --------------------------------------------------------------------------- eures
+
+_EURES_URL = "https://europa.eu/eures/api/jv-searchengine/public/jv-search/search"
+
+
+def _eures_page(total, ids, children=None, country="de"):
+    facets = {
+        "POSITION_LOCATION": {
+            "facetEntriesList": [
+                {"code": country, "count": total, "childrenList": children or []}
+            ]
+        }
+    }
+    return {"numberRecords": total, "jvs": [{"id": job_id, "title": "T"} for job_id in ids],
+            "facets": facets}
+
+
+def test_eures_splits_a_country_over_the_window_by_its_regions_and_its_unplaced_bucket():
+    """One query reaches 10,000 rows. A NUTS 3 code filters to nothing rather than failing, and
+    the "<country>-NS" bucket is a region of its own: skip it and those postings are never seen.
+    """
+    from trouveur.sources.eures import EuresSource
+
+    children = [
+        {"code": "de1", "count": 30, "childrenList": []},
+        {"code": "de-NS", "count": 2, "childrenList": []},
+        {"code": "de2", "count": 0, "childrenList": []},
+    ]
+
+    def respond(_params, body):
+        codes = body["locationCodes"]
+        if codes == ["de"]:
+            return 200, _eures_page(12_000, ["x"], children)
+        if codes == ["de1"]:
+            return 200, _eures_page(30, [f"a{n}" for n in range(30)])
+        return 200, _eures_page(2, ["b1", "b2"])
+
+    client = StubClient({_EURES_URL: respond})
+    outcome, seen = asyncio.run(collect(EuresSource(countries=["DE"]), client))
+
+    asked = [body["locationCodes"] for _method, _url, _params, body in client.requested]
+    assert asked == [["de"], ["de1"], ["de-NS"]], "a region with no postings costs no request"
+    assert len(seen) == 32
+    for _method, _url, _params, body in client.requested:
+        assert body["resultsPerPage"] <= 50 and body["page"] <= 200
+    # A delta never saw a whole country.
+    assert outcome.closable_scopes == []
+
+
+def test_eures_pages_a_small_country_from_the_first_answer_and_stops_on_a_short_page():
+    from trouveur.sources.eures import EuresSource
+
+    pages = {1: [f"p1-{n}" for n in range(50)], 2: ["p2-0", "p2-1"]}
+
+    def respond(_params, body):
+        return 200, _eures_page(52, pages[body["page"]], country="pt")
+
+    client = StubClient({_EURES_URL: respond})
+    _outcome, seen = asyncio.run(collect(EuresSource(countries=["PT"]), client))
+
+    assert [body["page"] for *_rest, body in client.requested] == [1, 2]
+    assert len(seen) == 52
+
+
+def test_eures_is_asked_for_greece_by_its_nuts_code_and_never_for_a_country_it_lacks():
+    """EURES writes Greece as EL. Asked for "gr", it answers zero rows and no error."""
+    from trouveur.sources.eures import EuresSource
+
+    def respond(_params, body):
+        return 200, _eures_page(0, [], country=body["locationCodes"][0])
+
+    client = StubClient({_EURES_URL: respond})
+    asyncio.run(collect(EuresSource(countries=["GR", "US"]), client))
+
+    assert [body["locationCodes"] for *_rest, body in client.requested] == [["el"]]
+
+
+def test_a_source_swept_by_reader_country_is_dropped_while_no_reader_has_one():
+    from trouveur.sources.registry import build_sources
+
+    assert "eures" not in {source.name for source in build_sources(tenants={})}
+    built = {source.name: source for source in build_sources(tenants={"eures": ["PT"]})}
+    assert built["eures"].countries == ["PT"]
+
+
+def test_eures_withheld_employer_is_no_company():
+    """A national service writes a placeholder where the employer withheld its name; read as a
+    company, thousands of unrelated postings would share one employer."""
+    from trouveur.sources.eures import normalize
+
+    for placeholder in ("Non renseigné", "siehe Beschreibung"):
+        job = normalize(
+            {"id": "x", "title": "T", "employer": {"name": placeholder}}, external_id="x"
+        )
+        assert job is not None and job.company is None
