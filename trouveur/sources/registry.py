@@ -18,6 +18,7 @@ from trouveur.sources import (
     greenhouse,
     himalayas,
     jobicy,
+    karriere,
     lever,
     personio,
     recruitee,
@@ -142,6 +143,12 @@ SOURCES: dict[str, SourceSpec] = {
         normalize_version=teamtailor.version,
         build=lambda scopes: teamtailor.TeamtailorSource(boards=scopes),
         tenant_scoped=True,
+    ),
+    karriere.SOURCE: SourceSpec(
+        normalize=karriere.normalize,
+        normalize_version=karriere.version,
+        build=lambda _scopes: karriere.KarriereSource(),
+        tenant_scoped=False,
     ),
 }
 

@@ -159,6 +159,7 @@ PORTED: tuple[tuple[str, str | None, str | None], ...] = (
     ('https://gateway.recruitee.com/session', None, None),
     ('https://acme.teamtailor.com/jobs/8610208-data-engineer', 'teamtailor', 'acme'),
     ('https://app.teamtailor.com/companies', None, None),
+    ('https://www.karriere.at/jobs/10035051', 'karriere', None),
 )
 
 
