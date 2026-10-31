@@ -746,6 +746,28 @@ def test_teamtailor_pages_past_its_default_hundred_by_offset():
     assert outcome.closable_scopes == ["acme"]
 
 
+def test_teamtailor_full_page_with_an_unreadable_item_is_not_the_last():
+    """An item without a guid is dropped, but the page is still full: read as short, it would end
+    the walk and close every job past it."""
+    from trouveur.sources.teamtailor import TeamtailorSource
+    from trouveur.sources.teamtailor.client import PAGE_SIZE
+
+    def respond(params, _body):
+        offset = params["offset"]
+        if offset:
+            return 200, _rss([f"g{offset}"])
+        return 200, _rss([f"g{n}" for n in range(PAGE_SIZE - 1)]).replace(
+            "</channel>", "<item><title>T</title></item></channel>"
+        )
+
+    client = StubClient({"https://acme.teamtailor.com/jobs.rss": respond})
+    outcome, seen = asyncio.run(collect(TeamtailorSource(boards=["acme"]), client))
+
+    assert len(client.requested) == 2
+    assert len(seen) == PAGE_SIZE
+    assert outcome.closable_scopes == ["acme"]
+
+
 def test_teamtailor_unknown_board_fails_and_closes_nothing():
     from trouveur.sources.teamtailor import TeamtailorSource
 

@@ -4,7 +4,8 @@ Probed 2026-10-26, no key:
 
 - `https://<board>.teamtailor.com/jobs.rss` stops at 100 items, whatever the board holds: a
   321-job board answered exactly 100, and read as one response it looks complete.
-- `per_page` and `offset` page it. `page` is ignored and answers the first 100 again.
+- `per_page` and `offset` page it, `per_page=200` included. `page` is ignored and answers the
+  first 100 again.
 - An unknown board is HTTP 404 with an HTML page.
 - An item carries the description; its places sit in the `https://teamtailor.com/locations`
   namespace, which the decoder drops from the tag names.
@@ -79,7 +80,7 @@ class TeamtailorSource:
                     f"Teamtailor board {scope!r} returned HTTP {response.status_code} at offset "
                     f"{offset}."
                 )
-            items = _items(response.text, scope)
+            items, count = _items(response.text, scope)
             fresh = [item for item in items if item["guid"] not in seen_ids]
             # A page of items already seen is the offset being ignored, not the end.
             if items and not fresh:
@@ -98,7 +99,8 @@ class TeamtailorSource:
                         for item in fresh[start : start + BATCH]
                     ]
                 )
-            if len(items) < PAGE_SIZE:
+            # Counted before items without a guid are dropped, or a full page reads as the last.
+            if count < PAGE_SIZE:
                 return len(seen_ids), True
         return len(seen_ids), False
 
@@ -108,7 +110,7 @@ class TeamtailorSource:
         )
 
 
-def _items(text: str, scope: str) -> list[dict]:
+def _items(text: str, scope: str) -> tuple[list[dict], int]:
     try:
         root = ElementTree.fromstring(text)
     except ElementTree.ParseError as exc:
@@ -116,9 +118,10 @@ def _items(text: str, scope: str) -> list[dict]:
             f"Teamtailor board {scope!r} returned a feed that does not parse: {exc}."
         ) from exc
     records = []
-    for node in root.iter("item"):
+    nodes = list(root.iter("item"))
+    for node in nodes:
         record = element_to_dict(node)
         if isinstance(record, dict) and str(record.get("guid") or "").strip():
             record["guid"] = str(record["guid"]).strip()
             records.append(record)
-    return records
+    return records, len(nodes)
