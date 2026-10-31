@@ -25,9 +25,11 @@ class StubClient:
         self.responses = responses or {}
         self.default = default
         self.requested: list[tuple[str, str, dict | None, dict | None]] = []
+        self.headers: list[dict | None] = []
 
-    def _respond(self, method, url, params, json):
+    def _respond(self, method, url, params, json, headers=None):
         self.requested.append((method, url, params, json))
+        self.headers.append(headers)
         entry = self.responses.get(url, self.default)
         if callable(entry):
             entry = entry(params, json)
@@ -42,13 +44,13 @@ class StubClient:
         return httpx.Response(status, json=payload, request=request)
 
     async def get(self, url, *, params=None, headers=None):
-        return self._respond("GET", url, params, None)
+        return self._respond("GET", url, params, None, headers)
 
     async def post(self, url, *, json=None, params=None, headers=None):
-        return self._respond("POST", url, params, json)
+        return self._respond("POST", url, params, json, headers)
 
     async def get_json(self, url, *, params=None, headers=None):
-        return self._respond("GET", url, params, None).json()
+        return self._respond("GET", url, params, None, headers).json()
 
 
 async def collect(source, client):
@@ -792,3 +794,57 @@ def test_teamtailor_remote_status_none_says_nothing():
     assert hint("hybrid") is None
     assert hint("onsite") is False
     assert hint("fully") is True
+
+
+# --------------------------------------------------------------------------- karriere.at
+
+
+def test_karriere_asks_for_json_with_both_headers():
+    """Without them the same URL answers ~200 KB of HTML, which the feed reads as a block."""
+    from trouveur.sources.karriere import KarriereSource
+
+    page = {"data": {"jobsSearchList": {"activeItems": {"items": []},
+                                        "loadMoreJobsButton": {"next": False}}}}
+    client = StubClient({"https://www.karriere.at/jobs": (200, page)})
+    asyncio.run(collect(KarriereSource(), client))
+
+    assert client.headers[0] == {
+        "Accept": "application/json",
+        "X-Requested-With": "XMLHttpRequest",
+    }
+
+
+def test_karriere_reads_its_prose_dates_to_the_day_and_nothing_else():
+    from trouveur.sources.karriere.client import published_at
+
+    now = datetime(2026, 10, 26, 12, tzinfo=UTC)
+    assert published_at("Heute veröffentlicht", now) == now
+    assert published_at("Gestern veröffentlicht", now) == now - timedelta(days=1)
+    assert published_at("vor 3 Tagen veröffentlicht", now) == now - timedelta(days=3)
+    assert published_at("vor 2 Wochen veröffentlicht", now) == now - timedelta(days=14)
+    # Unknown prose is no date, and an undated row is kept rather than taken for an old one.
+    assert published_at("Neu", now) is None
+
+
+def test_karriere_detail_is_the_pages_json_ld_and_a_gone_posting_is_retired():
+    from trouveur.sources.karriere import KarriereSource
+
+    page = (
+        '<html><script type="application/ld+json">{"@type": "BreadcrumbList"}</script>'
+        '<script type="application/ld+json">{"@type": "JobPosting", "title": "T"}</script></html>'
+    )
+    client = StubClient(
+        {
+            "https://www.karriere.at/jobs/1": (200, page),
+            "https://www.karriere.at/jobs/2": (404, "<html>weg</html>"),
+            "https://www.karriere.at/jobs/3": (200, "<html>no data</html>"),
+        }
+    )
+    source = KarriereSource()
+
+    document = asyncio.run(source.fetch_detail(client, "1"))
+    assert document is not None and document.payload == {"@type": "JobPosting", "title": "T"}
+    assert asyncio.run(source.fetch_detail(client, "2")) is None
+    # A page that lost its JSON-LD is a changed page, never a gone posting.
+    with pytest.raises(SourceError):
+        asyncio.run(source.fetch_detail(client, "3"))

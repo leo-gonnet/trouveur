@@ -1,0 +1,59 @@
+{
+  "facets": {
+    "cities": [
+      "Linz"
+    ],
+    "countries": [
+      "AT"
+    ],
+    "employment_type": "full_time",
+    "is_agency": null,
+    "language": null,
+    "place_ids": [
+      2772400
+    ],
+    "regions": [],
+    "salary_annualised": true,
+    "salary_max_eur_year": null,
+    "salary_min_eur_year": "54600",
+    "seniority": "unknown",
+    "skills": [
+      "kafka",
+      "python"
+    ],
+    "unplaced_countries": [],
+    "work_mode": "unknown"
+  },
+  "job": {
+    "agency_hint": null,
+    "closes_at": null,
+    "company": "Beispiel GmbH",
+    "department_hint": null,
+    "description": "Über den Job Du baust unsere Datenplattform mit Python und Kafka.",
+    "employment_type_hint": "Vollzeit",
+    "external_id": "10000001",
+    "language_hint": null,
+    "locations": [
+      {
+        "city": "Linz",
+        "country": "AT",
+        "country_hint": null,
+        "raw": "Linz, Oberösterreich, AT",
+        "region": "Oberösterreich"
+      }
+    ],
+    "posted_at": "2026-10-17T00:00:00+02:00",
+    "remote_hint": null,
+    "salary": {
+      "amount_max": null,
+      "amount_min": "3900",
+      "currency": "EUR",
+      "period": "MONTH"
+    },
+    "source": "karriere",
+    "title": "Data Engineer (m/w/d)",
+    "updated_at": null,
+    "url": "https://www.karriere.at/jobs/10000001"
+  },
+  "normalize_version": 1
+}

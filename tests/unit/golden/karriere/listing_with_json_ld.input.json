@@ -1,0 +1,50 @@
+{
+  "listing": {
+    "id": "10000001",
+    "companyId": "1234",
+    "link": "https://www.karriere.at/jobs/10000001",
+    "title": "Data Engineer (m/w/d)",
+    "company": {
+      "slug": "beispiel-gmbh",
+      "name": "Beispiel GmbH",
+      "employees": "101 - 500",
+      "isChiffre": false,
+      "mainLocation": "Linz"
+    },
+    "locations": [
+      {"name": "Linz", "slug": "linz"}
+    ],
+    "isHomeOffice": true,
+    "employmentTypes": "Vollzeit",
+    "salary": "ab 3.900 € monatlich",
+    "summary": "Datenplattform aufbauen.",
+    "date": "Heute veröffentlicht",
+    "pushedJob": false
+  },
+  "detail": {
+    "@context": "https://schema.org",
+    "@type": "JobPosting",
+    "title": "Data Engineer (m/w/d)",
+    "description": "<h3>Über den Job</h3><p>Du baust unsere Datenplattform mit Python und Kafka.</p>",
+    "datePosted": "2026-10-17T00:00:00+02:00",
+    "employmentType": ["FULL_TIME"],
+    "jobLocation": [
+      {
+        "@type": "Place",
+        "address": {
+          "@type": "PostalAddress",
+          "addressLocality": "Linz",
+          "addressRegion": "Oberösterreich",
+          "addressCountry": "AT"
+        }
+      }
+    ],
+    "baseSalary": {
+      "@type": "MonetaryAmount",
+      "currency": "EUR",
+      "value": {"@type": "QuantitativeValue", "unitText": "MONTH", "value": 3900}
+    },
+    "hiringOrganization": {"@type": "Organization", "name": "Beispiel GmbH"}
+  },
+  "external_id": "10000001"
+}

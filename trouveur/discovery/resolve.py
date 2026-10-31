@@ -123,6 +123,7 @@ RULES: tuple[Rule, ...] = (
     Rule(("arbeitnow.com",), "arbeitnow", Mode.WHOLE_SITE),
     Rule(("himalayas.app",), "himalayas", Mode.WHOLE_SITE),
     Rule(("jobicy.com",), "jobicy", Mode.WHOLE_SITE),
+    Rule(("karriere.at",), "karriere", Mode.WHOLE_SITE),
 )
 
 # Leftmost DNS labels a multi-tenant platform uses for its own product hosts rather than for a
