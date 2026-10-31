@@ -1,0 +1,22 @@
+{
+  "listing": {
+    "title": "Customer Success Manager",
+    "description": "<p>Own the relationship with our largest customers.</p>",
+    "pubDate": "Fri, 23 Oct 2026 16:22:01 +0200",
+    "link": "https://acme.teamtailor.com/jobs/8610001-customer-success-manager",
+    "remoteStatus": "hybrid",
+    "guid": "d23c1711-0000-0000-0000-000000000001",
+    "company_name": "Acme",
+    "company_uuid": "abcDEF123",
+    "locations": {
+      "location": [
+        {"name": "Acme Lisbon", "address": "Rua Exemplo 1", "zip": "1000-001", "city": "Lisbon", "country": "Portugal"},
+        {"name": "Acme Porto", "address": "", "zip": "", "city": "Porto", "country": "Portugal"}
+      ]
+    },
+    "department": "Customer Success",
+    "role": "",
+    "division": ""
+  },
+  "external_id": "acme:d23c1711-0000-0000-0000-000000000001"
+}

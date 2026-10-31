@@ -1,0 +1,60 @@
+{
+  "facets": {
+    "cities": [
+      "Lisbon",
+      "Porto"
+    ],
+    "countries": [
+      "PT"
+    ],
+    "employment_type": "unknown",
+    "is_agency": null,
+    "language": null,
+    "place_ids": [
+      2267057,
+      2735943
+    ],
+    "regions": [],
+    "salary_annualised": false,
+    "salary_max_eur_year": null,
+    "salary_min_eur_year": null,
+    "seniority": "unknown",
+    "skills": [],
+    "unplaced_countries": [],
+    "work_mode": "unknown"
+  },
+  "job": {
+    "agency_hint": null,
+    "closes_at": null,
+    "company": "Acme",
+    "department_hint": "Customer Success",
+    "description": "Own the relationship with our largest customers.",
+    "employment_type_hint": null,
+    "external_id": "acme:d23c1711-0000-0000-0000-000000000001",
+    "language_hint": null,
+    "locations": [
+      {
+        "city": "Lisbon",
+        "country": "Portugal",
+        "country_hint": null,
+        "raw": "Lisbon, Portugal",
+        "region": null
+      },
+      {
+        "city": "Porto",
+        "country": "Portugal",
+        "country_hint": null,
+        "raw": "Porto, Portugal",
+        "region": null
+      }
+    ],
+    "posted_at": "2026-10-23T14:22:01Z",
+    "remote_hint": null,
+    "salary": null,
+    "source": "teamtailor",
+    "title": "Customer Success Manager",
+    "updated_at": null,
+    "url": "https://acme.teamtailor.com/jobs/8610001-customer-success-manager"
+  },
+  "normalize_version": 1
+}

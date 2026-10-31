@@ -119,7 +119,7 @@ def test_personio_repeated_xml_elements_decode_to_a_list():
     """One office and several offices must decode to the same shape, or one of them is misread."""
     from xml.etree import ElementTree
 
-    from trouveur.sources.personio.client import element_to_dict
+    from trouveur.sources.parse import element_to_dict
 
     node = ElementTree.fromstring(
         "<position><id>1</id><jobDescriptions>"
@@ -710,3 +710,85 @@ def test_recruitee_dates_with_a_utc_suffix_are_read():
     )
     assert job is not None
     assert job.posted_at == datetime(2026, 10, 26, 19, 43, 14, tzinfo=UTC)
+
+
+# --------------------------------------------------------------------------- teamtailor
+
+
+def _rss(guids):
+    items = "".join(
+        f"<item><title>T</title><guid>{guid}</guid><link>https://acme.teamtailor.com/jobs/1</link>"
+        "</item>"
+        for guid in guids
+    )
+    return f'<?xml version="1.0"?><rss version="2.0"><channel>{items}</channel></rss>'
+
+
+def test_teamtailor_pages_past_its_default_hundred_by_offset():
+    """The feed stops at 100 items unless asked for more, and `page` is ignored: one plain request
+    to a 321-job board looks like a complete board of 100 and closes the other 221."""
+    from trouveur.sources.teamtailor import TeamtailorSource
+    from trouveur.sources.teamtailor.client import PAGE_SIZE
+
+    def respond(params, _body):
+        offset = params["offset"]
+        count = PAGE_SIZE if offset == 0 else 21
+        return 200, _rss([f"g{offset + n}" for n in range(count)])
+
+    client = StubClient({"https://acme.teamtailor.com/jobs.rss": respond})
+    outcome, seen = asyncio.run(collect(TeamtailorSource(boards=["acme"]), client))
+
+    assert [(p["per_page"], p["offset"]) for _m, _u, p, _b in client.requested] == [
+        (PAGE_SIZE, 0),
+        (PAGE_SIZE, PAGE_SIZE),
+    ]
+    assert len(seen) == PAGE_SIZE + 21
+    assert outcome.closable_scopes == ["acme"]
+
+
+def test_teamtailor_full_page_with_an_unreadable_item_is_not_the_last():
+    """An item without a guid is dropped, but the page is still full: read as short, it would end
+    the walk and close every job past it."""
+    from trouveur.sources.teamtailor import TeamtailorSource
+    from trouveur.sources.teamtailor.client import PAGE_SIZE
+
+    def respond(params, _body):
+        offset = params["offset"]
+        if offset:
+            return 200, _rss([f"g{offset}"])
+        return 200, _rss([f"g{n}" for n in range(PAGE_SIZE - 1)]).replace(
+            "</channel>", "<item><title>T</title></item></channel>"
+        )
+
+    client = StubClient({"https://acme.teamtailor.com/jobs.rss": respond})
+    outcome, seen = asyncio.run(collect(TeamtailorSource(boards=["acme"]), client))
+
+    assert len(client.requested) == 2
+    assert len(seen) == PAGE_SIZE
+    assert outcome.closable_scopes == ["acme"]
+
+
+def test_teamtailor_unknown_board_fails_and_closes_nothing():
+    from trouveur.sources.teamtailor import TeamtailorSource
+
+    client = StubClient({"https://ghost.teamtailor.com/jobs.rss": (404, "<html>404</html>")})
+    outcome, seen = asyncio.run(collect(TeamtailorSource(boards=["ghost"]), client))
+
+    assert seen == []
+    assert outcome.errors and "does not exist" in outcome.errors[0]
+    assert outcome.closable_scopes == []
+
+
+def test_teamtailor_remote_status_none_says_nothing():
+    """"none" is the employer saying nothing, not "on site"."""
+    from trouveur.sources.teamtailor import normalize
+
+    def hint(status):
+        job = normalize({"guid": "g", "title": "T", "remoteStatus": status}, external_id="a:g")
+        assert job is not None
+        return job.remote_hint
+
+    assert hint("none") is None
+    assert hint("hybrid") is None
+    assert hint("onsite") is False
+    assert hint("fully") is True
