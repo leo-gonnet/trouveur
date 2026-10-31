@@ -33,7 +33,7 @@ log = logging.getLogger(__name__)
 
 TICK_SECONDS = 20
 LINKEDIN_CHECK_SECONDS = 60
-_DETAIL_PER_TICK = 40
+_DETAIL_PER_TICK = 400
 # How long a scheduled run waits for its own sweep to be prepared before matching anyway. Workday
 # alone is a detail fetch per posting at one a second, so a busy night is about an hour of it.
 MATCH_WAIT_LIMIT = timedelta(hours=2)
@@ -241,7 +241,12 @@ async def _execute(settings: Settings, run) -> None:
         promoted = await trial.judge()
     except Exception:
         log.exception("the board trial failed; matching continues and the next run re-judges")
-    matches = await matching.run_all(settings)
+    async with connect() as conn:
+        last_match = await admin_q.last_match_started(conn)
+    # From the last match, not a fixed span back: a run whose sweep took longer than the one
+    # before it left a gap that no window ever covered (4,073 postings on 2026-10-31).
+    since = last_match or datetime.now(UTC) - timedelta(hours=retrieve.NEW_ARRIVALS_HOURS)
+    matches = await matching.run_all(settings, seen_since=since)
     # After matching, so it reads tonight's corpus and tonight's saved jobs. Free, and never part
     # of the verdict: a failed check costs one point on a chart, not anybody's edition.
     try:
@@ -359,7 +364,9 @@ async def _execute_match_only(settings: Settings, run) -> None:
         await admin_q.finish_run(conn, run.id, status=status, report=payload, error=error)
 
 
-async def _tick(settings: Settings) -> None:
+async def _tick(settings: Settings) -> bool:
+    """Whether the tick found queue work, so the loop sleeps only once the queues are idle.
+    Discovery is left out for the reason `prepare_arrivals` gives."""
     async with connect() as conn:
         await admin_q.fail_orphaned_runs(conn)
         await admin_q.fail_orphaned_sweeps(conn)
@@ -373,7 +380,7 @@ async def _tick(settings: Settings) -> None:
     async with connect() as conn:
         run = await admin_q.claim_next_run(conn)
     if run is None:
-        return
+        return any(drained[kind.value] for kind in WorkKind)
 
     log.info("starting run %s (trigger=%s)", run.id, run.trigger)
     try:
@@ -387,6 +394,7 @@ async def _tick(settings: Settings) -> None:
                 status=RunStatus.FAILED,
                 error=f"{type(exc).__name__}: {exc}",
             )
+    return True
 
 
 async def refill_below_current() -> dict[str, int]:
@@ -425,10 +433,12 @@ async def main() -> None:
                 refilled = True
             except Exception:  # noqa: BLE001 - retried next tick; the queues must still drain
                 log.exception("startup refill failed; retrying next tick")
+        busy = False
         try:
-            await _tick(settings)
+            busy = await _tick(settings)
         except Exception:  # noqa: BLE001 - the loop must survive anything a tick can raise
             log.exception("runner tick failed; continuing")
-        await asyncio.sleep(TICK_SECONDS)
+        if not busy:
+            await asyncio.sleep(TICK_SECONDS)
 
 

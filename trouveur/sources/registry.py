@@ -97,6 +97,9 @@ SOURCES: dict[str, SourceSpec] = {
         tenant_scoped=True,
         # A Workday board is three facts, not a slug; the default grammar rejects it outright.
         clean_scope=workday_scope,
+        # Per company, since Workday's budget is per host: 5 req/s against the 29 req/s one
+        # tenant took without a refusal.
+        min_interval=0.2,
     ),
     workable.SOURCE: SourceSpec(
         normalize=workable.normalize,

@@ -125,6 +125,7 @@ def _arguments(ctx: dict) -> dict[str, dict]:
         "admin.running_sweeps": {"since": _cutoff()},
         "admin.typical_sweep_seconds": {},
         "admin.recent_runs": {},
+        "admin.last_match_started": {},
         "admin.active_run": {},
         "admin.pending_match_run": {"user_id": user_id},
         "admin.fail_orphaned_runs": {},

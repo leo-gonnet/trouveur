@@ -741,6 +741,24 @@ async def recent_runs(conn: AsyncConnection, limit: int = 20) -> list[sa.Row]:
     )
 
 
+async def last_match_started(conn: AsyncConnection) -> datetime | None:
+    """When the last sweep run that recorded its matches began matching. Keyed on the recorded
+    matches, not the status: one user's error fails the whole run, and a restart during
+    discovery fails one that already matched, yet both matched the sweep. A run stopped during
+    matching recorded nothing, so the next window reaches back over it."""
+    started = pipeline_run.c.stage_started[RunStage.MATCH.value].astext
+    return await conn.scalar(
+        sa.select(sa.cast(started, sa.DateTime(timezone=True)))
+        .where(
+            pipeline_run.c.match_user_id.is_(None),
+            pipeline_run.c.report.has_key("matches"),
+            pipeline_run.c.stage_started.has_key(RunStage.MATCH.value),
+        )
+        .order_by(pipeline_run.c.started_at.desc())
+        .limit(1)
+    )
+
+
 async def active_run(conn: AsyncConnection) -> sa.Row | None:
     return (
         await conn.execute(

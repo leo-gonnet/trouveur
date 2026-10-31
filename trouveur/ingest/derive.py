@@ -60,8 +60,10 @@ _WEEKS_PER_YEAR = 52
 _DAYS_PER_YEAR = 220
 _HOURS_PER_YEAR = 1800
 
+# The lookarounds stay outside the alternation: inside it, `re` tries all hundred skills at every
+# position, and this one search was 80% of derive's time (17 ms a posting, same matches).
 _SKILL_PATTERN = re.compile(
-    "|".join(rf"(?<!\w){re.escape(fold(skill))}(?!\w)" for skill in vocab.SKILLS)
+    rf"(?<!\w)(?:{'|'.join(re.escape(fold(skill)) for skill in vocab.SKILLS)})(?!\w)"
 )
 
 

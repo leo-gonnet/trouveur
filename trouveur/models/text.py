@@ -16,6 +16,8 @@ _SPACE = re.compile(r"\s+")
 def fold(text: str) -> str:
     """Lowercase and strip diacritics: 'München' -> 'munchen'."""
     lowered = text.lower().replace("ß", "ss")
+    if lowered.isascii():
+        return lowered
     decomposed = unicodedata.normalize("NFKD", lowered)
     return "".join(ch for ch in decomposed if not unicodedata.combining(ch))
 

@@ -33,19 +33,26 @@ _CHALLENGE_MARKERS = (
 )
 
 
+# Workday limits each company's host on its own. Probed 2026-10-31 from production: one tenant
+# took 29 req/s with no refusal and answered 429 near 50 req/s, while 146 tenants together took
+# 64 req/s without a single 429. One budget for the whole domain held 173 boards to 1 req/s.
+_BUDGET_PER_HOST = frozenset({"myworkdayjobs.com"})
+
+
 def throttle_key(url: str) -> str:
     """The provider a URL belongs to, which is what the politeness budget is owed to.
 
     The registrable domain, NOT the hostname: Personio and Breezy give every tenant its own
     subdomain, so a per-host budget would be one budget per board -- a thousand requests a second
     at one provider, with every counter still reading as compliant. Over-grouping is the safe
-    direction to be wrong in.
+    direction to be wrong in. A provider measured to limit each tenant separately is the exception.
     """
     host = urlsplit(url).netloc.rsplit("@", 1)[-1].split(":", 1)[0].lower()
     labels = [label for label in host.split(".") if label]
     if len(labels) <= 2:
         return host
-    return ".".join(labels[-2:])
+    domain = ".".join(labels[-2:])
+    return host if domain in _BUDGET_PER_HOST else domain
 
 
 class PoliteClient:
@@ -63,7 +70,7 @@ class PoliteClient:
             timeout=self._timeout,
             follow_redirects=True,
             headers={"User-Agent": USER_AGENT},
-            limits=httpx.Limits(max_connections=16, max_keepalive_connections=8),
+            limits=httpx.Limits(max_connections=64, max_keepalive_connections=32),
         )
         return self
 

@@ -64,6 +64,32 @@ async def test_a_source_failing_in_a_burst_is_paused_without_spending_its_postin
     assert (jobs["arbeitsagentur"][0], "detail") not in items
 
 
+async def test_one_unexpected_error_charges_its_posting_and_keeps_the_rest_of_the_batch(
+    clean_db, gh_board, aa_listing, aa_detail
+):
+    """Fetches run as one gathered batch, so an exception that is not a SourceError used to throw
+    away every fetch of the batch, up to 400 requests, and leave their items claimed."""
+    from trouveur.db.engine import connect
+    from trouveur.ingest import workers
+    from trouveur.work import WorkKind, enqueue
+
+    await seed_corpus(gh_board, aa_listing, aa_detail)
+    async with connect() as conn:
+        jobs = await _jobs_by_source(conn)
+        await enqueue(conn, WorkKind.DETAIL, [i for ids in jobs.values() for i in ids], "1")
+
+    broken = _Source(ValueError("not enough values to unpack"))
+    healthy = _Source(None)
+    async with connect() as conn:
+        await workers.drain_detail(
+            conn, None, {"greenhouse": broken, "arbeitsagentur": healthy}, limit=10
+        )
+        items = await _items(conn)
+
+    assert sorted(items[(i, "detail")][0] for i in jobs["greenhouse"]) == [1, 1]
+    assert (jobs["arbeitsagentur"][0], "detail") not in items
+
+
 async def test_closing_a_posting_drops_its_detail_and_embed_work_but_not_its_derive(
     clean_db, gh_board, aa_listing, aa_detail
 ):

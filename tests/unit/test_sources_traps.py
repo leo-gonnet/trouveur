@@ -78,9 +78,19 @@ def test_subdomain_tenants_share_one_politeness_budget():
     assert throttle_key("https://alpha.breezy.hr/json") == throttle_key(
         "https://beta.breezy.hr/json"
     )
-    assert throttle_key("https://acme.wd5.myworkdayjobs.com/x") == "myworkdayjobs.com"
     # Distinct providers must not be merged into one queue.
     assert throttle_key("https://api.lever.co/v0/x") != throttle_key("https://api.ashbyhq.com/y")
+
+
+def test_workday_budgets_each_company_on_its_own():
+    """Measured: Workday limits each tenant host separately, so one shared budget held 173
+    boards to 1 req/s. Its per-company interval is set in the registry against that host."""
+    from trouveur.sources.http import throttle_key
+
+    assert throttle_key("https://acme.wd5.myworkdayjobs.com/x") == "acme.wd5.myworkdayjobs.com"
+    assert throttle_key("https://acme.wd5.myworkdayjobs.com/x") != throttle_key(
+        "https://other.wd5.myworkdayjobs.com/x"
+    )
 
 
 # --------------------------------------------------------------------------- personio
@@ -201,7 +211,7 @@ def test_workday_pagination_stops_when_the_clamped_page_repeats():
     def respond(_params, body):
         # Every offset past the first page returns the last page again, never an empty one.
         page = real[: body["limit"]] if body["offset"] == 0 else real[-1:]
-        return (200, {"total": 2000, "jobPostings": page})
+        return (200, {"total": 2, "jobPostings": page})
 
     client = StubClient({url: respond})
     outcome, seen = asyncio.run(collect(WorkdaySource(boards=["acme:wd5:Careers"]), client))
@@ -215,6 +225,183 @@ def test_workday_pagination_stops_when_the_clamped_page_repeats():
     ]
     # The clamp is a real end of the board: everything behind it was seen, so it stays closable.
     assert outcome.closable_scopes == ["acme:wd5:Careers"]
+
+
+def _capped_board(facets, slices):
+    """A board whose unfiltered query is capped: page one says 2,000 and, past it, the walk wraps
+    to page one again. `slices` maps one applied facet value to that slice's postings."""
+    first = [{"externalPath": "/job/a", "title": "A"}]
+
+    def respond(_params, body):
+        applied = body["appliedFacets"]
+        if not applied:
+            return (200, {"total": 2000, "jobPostings": first, "facets": facets})
+        (values,) = applied.values()
+        rows = slices[values[0]]
+        page = rows[body["offset"] : body["offset"] + body["limit"]]
+        return (200, {"total": len(rows), "jobPostings": page})
+
+    return respond
+
+
+def test_workday_capped_board_is_walked_by_facet_and_stays_closable():
+    """Some tenants cap a query at 2,000 and then wrap to page one, which reads as the end of
+    the board: nine boards lost 50 to 2,100 postings each, and every posting past the cap was
+    closed as gone. A posting in two slices (two locations) must be sunk once.
+
+    The split takes a facet summing to the figure two facets agree on, then the cheapest: a
+    truncated facet would mark the board complete while missing postings."""
+    from trouveur.sources.workday import WorkdaySource
+
+    url = "https://acme.wd5.myworkdayjobs.com/wday/cxs/acme/Careers/jobs"
+    facets = [
+        # A wrapper holds facets, not values; applied as itself it would filter nothing.
+        {
+            "facetParameter": "locationMainGroup",
+            "values": [
+                {
+                    "facetParameter": "locationCountry",
+                    "values": [
+                        {"id": "de", "count": 1000},
+                        {"id": "fr", "count": 700},
+                        {"id": "it", "count": 500},
+                    ],
+                }
+            ],
+        },
+        # Sums far below the cap, so splitting on it would list a sliver and call it the board.
+        {"facetParameter": "distance", "values": [{"id": "near", "count": 3}]},
+        # Fewer values, but it sums short of the size the other two agree on.
+        {
+            "facetParameter": "remoteType",
+            "values": [{"id": "onsite", "count": 1100}, {"id": "remote", "count": 1000}],
+        },
+        # The widest, because it counts a posting once per region it names.
+        {
+            "facetParameter": "locationRegion",
+            "values": [{"id": f"region{n}", "count": 500} for n in range(5)],
+        },
+        # Agrees on the size, at one request per value.
+        {
+            "facetParameter": "locations",
+            "values": [{"id": f"site{n}", "count": 100} for n in range(22)],
+        },
+    ]
+    slices = {
+        "de": [{"externalPath": "/job/a"}, {"externalPath": "/job/b"}],
+        "fr": [{"externalPath": "/job/b"}, {"externalPath": "/job/c"}],
+        "it": [],
+    }
+    client = StubClient({url: _capped_board(facets, slices)})
+    outcome, seen = asyncio.run(collect(WorkdaySource(boards=["acme:wd5:Careers"]), client))
+
+    assert sorted(document.external_id for document in seen) == [
+        "acme:wd5:Careers:/job/a",
+        "acme:wd5:Careers:/job/b",
+        "acme:wd5:Careers:/job/c",
+    ]
+    applied = [body["appliedFacets"] for _m, _u, _p, body in client.requested]
+    assert {key for facet in applied for key in facet} == {"locationCountry"}
+    assert outcome.closable_scopes == ["acme:wd5:Careers"]
+
+
+def test_workday_capped_board_whose_size_no_two_facets_agree_on_is_walked_but_never_closed():
+    """Every facet sum may be wrong -- truncated, or counting a posting once per place -- so
+    without two agreeing the walk keeps its postings and closes nothing."""
+    from trouveur.sources.workday import WorkdaySource
+
+    url = "https://acme.wd5.myworkdayjobs.com/wday/cxs/acme/Careers/jobs"
+    facets = [
+        {
+            "facetParameter": "locationCountry",
+            "values": [{"id": "de", "count": 1500}, {"id": "fr", "count": 700}],
+        },
+        {
+            "facetParameter": "remoteType",
+            "values": [{"id": "onsite", "count": 1100}, {"id": "remote", "count": 1000}],
+        },
+    ]
+    slices = {"de": [{"externalPath": "/job/a"}], "fr": [{"externalPath": "/job/b"}]}
+    client = StubClient({url: _capped_board(facets, slices)})
+    outcome, seen = asyncio.run(collect(WorkdaySource(boards=["acme:wd5:Careers"]), client))
+
+    assert sorted(document.external_id for document in seen) == [
+        "acme:wd5:Careers:/job/a",
+        "acme:wd5:Careers:/job/b",
+    ]
+    applied = [body["appliedFacets"] for _m, _u, _p, body in client.requested]
+    assert {key for facet in applied for key in facet} == {"locationCountry"}
+    assert outcome.closable_scopes == []
+
+
+def test_workday_capped_board_with_no_usable_facet_is_kept_but_never_closed():
+    """Unsplittable, the walk still collects what the cap shows, but it cannot have seen the
+    rest, so nothing on the board may be closed."""
+    from trouveur.sources.workday import WorkdaySource
+
+    url = "https://acme.wd5.myworkdayjobs.com/wday/cxs/acme/Careers/jobs"
+    facets = [{"facetParameter": "distance", "values": [{"id": "near", "count": 3}]}]
+    client = StubClient({url: _capped_board(facets, {})})
+    outcome, seen = asyncio.run(collect(WorkdaySource(boards=["acme:wd5:Careers"]), client))
+
+    assert [document.external_id for document in seen] == ["acme:wd5:Careers:/job/a"]
+    assert outcome.closable_scopes == []
+    assert outcome.partitions_overflowed == 1
+
+
+def test_workday_page_that_is_not_json_fails_its_board_not_the_source():
+    """On 2026-10-23 and 2026-10-31 one 200 with a body that was not JSON raised out of the sweep
+    and ended it for all 173 boards, leaving none of them closable."""
+    from trouveur.sources.workday import WorkdaySource
+
+    broken = "https://broken.wd5.myworkdayjobs.com/wday/cxs/broken/Careers/jobs"
+    fine = "https://fine.wd5.myworkdayjobs.com/wday/cxs/fine/Careers/jobs"
+    rows = [{"externalPath": "/job/a"}]
+    client = StubClient(
+        {
+            broken: (200, ""),
+            fine: lambda _p, body: (200, {"total": 1, "jobPostings": rows[body["offset"] :]}),
+        }
+    )
+    outcome, seen = asyncio.run(
+        collect(WorkdaySource(boards=["broken:wd5:Careers", "fine:wd5:Careers"]), client)
+    )
+
+    assert [document.external_id for document in seen] == ["fine:wd5:Careers:/job/a"]
+    assert outcome.closable_scopes == ["fine:wd5:Careers"]
+    assert outcome.errors and "broken:wd5:Careers" in outcome.errors[0]
+
+
+def test_workday_challenge_page_served_as_200_is_a_block_not_a_parse_error():
+    """`PoliteClient` recognises a challenge only on a refusal status; read as a page that is not
+    JSON, a 200 one would fail the board and let the walk go on asking."""
+    from trouveur.sources.workday import WorkdaySource
+
+    url = "https://acme.wd5.myworkdayjobs.com/wday/cxs/acme/Careers/jobs"
+    client = StubClient({url: (200, "<html><title>Just a moment...</title></html>")})
+    outcome, seen = asyncio.run(collect(WorkdaySource(boards=["acme:wd5:Careers"]), client))
+
+    assert seen == []
+    assert [result.blocked for result in outcome.scope_results] == [True]
+    assert outcome.closable_scopes == []
+
+
+def test_workday_detail_403_s22_is_a_withdrawn_posting_and_any_other_403_is_not():
+    """Workday answers a posting taken down after the listing with 403 S22, not 404, so it was
+    retried five times and parked, open for ever. Some tenants also answer a burst with a 403,
+    and closing on that would retire live postings."""
+    from trouveur.sources.workday import WorkdaySource
+
+    external_id = "acme:wd5:Careers:/job/Berlin/Analyst_R1"
+    url = "https://acme.wd5.myworkdayjobs.com/wday/cxs/acme/Careers/job/Berlin/Analyst_R1"
+    withdrawn = StubClient(
+        {url: (403, {"errorCode": "S22", "httpStatus": 403, "message": "permission denied"})}
+    )
+    assert asyncio.run(WorkdaySource().fetch_detail(withdrawn, external_id)) is None
+
+    refused = StubClient({url: (403, {"errorCode": "S99", "message": "too many requests"})})
+    with pytest.raises(SourceError):
+        asyncio.run(WorkdaySource().fetch_detail(refused, external_id))
 
 
 def test_workday_detail_id_carries_a_three_part_scope():
