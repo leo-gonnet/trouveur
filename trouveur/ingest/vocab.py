@@ -124,7 +124,12 @@ COUNTRIES: dict[str, str] = {
     "congo, democratic republic of the": "CD", "congo, the democratic republic of the": "CD",
     "democratic republic of congo": "CD", "tanzania, united republic of": "TZ",
     "syrian arab republic": "SY", "palestine": "PS", "palestine, state of": "PS", "bosnia": "BA",
-    "macedonia": "MK", "roumania": "RO",
+    "macedonia": "MK", "roumania": "RO", "moldova, republic of": "MD",
+    "virgin islands, british": "VG", "virgin islands, u.s.": "VI",
+    "lao people's democratic republic": "LA", "bosnia & herzegovina": "BA",
+    "france, metropolitan": "FR", "england": "GB", "scotland": "GB", "northern ireland": "GB",
+    # Read longest first, so these keep "New England" out of England and "New Mexico" out of Mexico.
+    "new england": "US", "new mexico": "US",
 }
 
 # Workday writes a site as "AUT - Graz - Plant" or "FRA-Bas-Rhin-Haguenau". Read in capitals only:
@@ -169,12 +174,19 @@ ISO3_COUNTRIES: dict[str, str] = {
 }
 
 # A country the source states in a field of its own cannot be a US state, so "Georgia" is the
-# country there: Workable's "Tbilisi, Tbilisi, Georgia" passed every filter as unread.
-STATED_COUNTRIES: dict[str, str] = {**COUNTRIES, "georgia": "GE"}
+# country there: Workable's "Tbilisi, Tbilisi, Georgia" passed every filter as unread. Nor can a
+# two-letter code be a word or a state there, so "IN" is India: Lever states every country as its
+# ISO code, and its London and Paris roles each passed every filter as unread.
+STATED_COUNTRIES: dict[str, str] = {
+    **{code.lower(): code for code in ISO3_COUNTRIES.values()},
+    **COUNTRIES,
+    "georgia": "GE",
+}
 
 # "Chicago, IL" names no country, and US boards write it that way throughout. A state is only
-# evidence once the town before it is found in the US: "Toronto, CA" is Canada. "Georgia" is
-# absent as a name for the same reason it is absent from COUNTRIES; "GA" is unambiguous.
+# evidence once the town before it is found in the US, or found nowhere at all: "Toronto, CA" is
+# Canada. "Georgia" is absent as a name for the same reason it is absent from COUNTRIES; "GA" is
+# unambiguous.
 US_STATES = frozenset({
     "al", "ak", "az", "ar", "ca", "co", "ct", "de", "dc", "fl", "ga", "hi", "id", "il", "in", "ia",
     "ks", "ky", "la", "me", "md", "ma", "mi", "mn", "ms", "mo", "mt", "ne", "nv", "nh", "nj", "nm",

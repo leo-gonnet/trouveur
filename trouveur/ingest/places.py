@@ -106,6 +106,12 @@ def exists(city: str, country: str) -> bool:
     return any((country, fold(variant)) in by_name for variant in _variants(city))
 
 
+def known(city: str) -> bool:
+    """Whether any town anywhere has that name."""
+    by_bare_name = _index().by_bare_name
+    return any(fold(variant) in by_bare_name for variant in _variants(city))
+
+
 def resolve_anywhere(city: str) -> Place | None:
     """The one place `city` names anywhere in the world, or None when it cannot be told.
 
@@ -133,6 +139,10 @@ def _variants(city: str):
     cleaned = _DISTRICT_NUMBER.sub("", _BRACKETS.sub("", _POSTAL_CODE.sub("", value))).strip()
     if cleaned and cleaned != value:
         yield cleaned
+    # "Vaulx en Velin", "Aix en Provence": boards drop the hyphens of a French commune.
+    hyphenated = "-".join((cleaned or value).split())
+    if hyphenated not in (value, cleaned):
+        yield hyphenated
     # "Berlin-Mitte", "München-Schwabing". Tried last, so "Castrop-Rauxel" matches whole first.
     head = _SUBDIVISION.split(cleaned or value)[0].strip()
     if head and head != cleaned:
