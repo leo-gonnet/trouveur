@@ -814,6 +814,14 @@ def test_karriere_asks_for_json_with_both_headers():
     }
 
 
+def test_karriere_entries_without_a_row_fail_rather_than_end_the_feed():
+    from trouveur.sources.errors import FetchError
+    from trouveur.sources.karriere.client import _rows
+
+    with pytest.raises(FetchError):
+        _rows({"data": {"jobsSearchList": {"activeItems": {"items": [{"jobItem": {}}]}}}})
+
+
 def test_karriere_reads_its_prose_dates_to_the_day_and_nothing_else():
     from trouveur.sources.karriere.client import published_at
 

@@ -105,11 +105,12 @@ def _rows(payload: Any) -> list[dict]:
     items = (listing or {}).get("activeItems")
     if not isinstance(items, dict):
         raise SourceBlocked("karriere.at returned a body without its job list.")
-    return [
-        item["jobsItem"]
-        for item in require_list(items, "items", source=SOURCE)
-        if isinstance(item.get("jobsItem"), dict)
-    ]
+    entries = require_list(items, "items", source=SOURCE)
+    rows = [item["jobsItem"] for item in entries if isinstance(item.get("jobsItem"), dict)]
+    # Entries with no row are a renamed key: read as an empty page, it ends every sweep at zero.
+    if entries and not rows:
+        raise FetchError("karriere.at returned job entries without a `jobsItem` row.")
+    return rows
 
 
 def _next_page(payload: Any) -> object | None:
