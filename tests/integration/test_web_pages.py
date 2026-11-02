@@ -1299,7 +1299,7 @@ async def test_the_found_elsewhere_page_shows_an_answer_of_every_kind(client, se
         await _stored_url(seeded["job_id"]),
         await _stored_url(held),
         "https://job-boards.greenhouse.io/neuefirma/jobs/9101",
-        "https://jobs.smartrecruiters.com/AcmeGmbH/9102",
+        "https://jobs.jobvite.com/acmegmbh/job/oAbC9102",
         "https://www.arbeitsagentur.de/jobsuche/jobdetail/10000-9999999999-S",
     )
     async with connect() as conn:
@@ -1356,7 +1356,7 @@ async def test_the_coverage_fragment_renders_the_reported_links(admin, seeded):
 
     async with connect() as conn:
         await reports_q.create(
-            conn, user_id=seeded["user_id"], url="https://jobs.smartrecruiters.com/Acme/1"
+            conn, user_id=seeded["user_id"], url="https://jobs.jobvite.com/acme/job/oAbC0001"
         )
     await report_stage.answer_pending()
 

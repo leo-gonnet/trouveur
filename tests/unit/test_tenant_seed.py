@@ -61,7 +61,7 @@ def test_a_global_source_cannot_be_given_tenants(tmp_path):
 
 
 def test_an_unknown_source_names_the_ones_that_take_tenants(tmp_path):
-    path = write(tmp_path, 'smartrecruiters = ["acme"]')
+    path = write(tmp_path, 'softgarden = ["acme"]')
 
     with pytest.raises(SourceError, match="unknown source"):
         load_seed(path)
