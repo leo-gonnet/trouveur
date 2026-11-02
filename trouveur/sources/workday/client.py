@@ -196,7 +196,7 @@ class WorkdaySource:
                         external_id=scoped_id(scope, _external_path(row)),
                         kind=DocumentKind.LISTING,
                         scope=scope,
-                        payload=row,
+                        payload=_archivable(row),
                     )
                     for row in fresh[start : start + BATCH]
                 ]
@@ -295,6 +295,16 @@ def _withdrawn(response: httpx.Response) -> bool:
     except ValueError:
         return False
     return isinstance(payload, dict) and payload.get("errorCode") == "S22"
+
+
+def _archivable(row: dict) -> dict:
+    """The listing row without `postedOn`, which nothing reads.
+
+    It is relative prose ("Posted 3 Days Ago") that changes every night, so archived verbatim it
+    made every open posting a new document each night: 1.2M of 1.7M Workday listing documents on
+    2026-11-02 differed from their previous version by this field alone.
+    """
+    return {key: value for key, value in row.items() if key != "postedOn"}
 
 
 def _external_path(row: dict) -> str | None:

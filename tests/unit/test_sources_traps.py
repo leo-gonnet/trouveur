@@ -435,6 +435,25 @@ def test_workday_detail_id_without_a_path_is_refused_as_a_source_error():
         asyncio.run(WorkdaySource().fetch_detail(StubClient(), "acme:wd5:Careers"))
 
 
+def test_workday_listing_archives_the_same_document_whatever_postedon_says():
+    """`postedOn` ticks every night, so archived as-is each sweep stores a new copy of a posting."""
+    from trouveur.sources.workday import WorkdaySource
+
+    url = "https://acme.wd5.myworkdayjobs.com/wday/cxs/acme/Careers/jobs"
+
+    def sweep(posted_on):
+        row = {"externalPath": "/job/a", "title": "A", "postedOn": posted_on}
+        pages = iter([(200, {"total": 1, "jobPostings": [row]}), (200, {"jobPostings": []})])
+        client = StubClient({url: lambda _params, _body: next(pages, (200, {"jobPostings": []}))})
+        _, seen = asyncio.run(collect(WorkdaySource(boards=["acme:wd5:Careers"]), client))
+        return seen
+
+    tonight, tomorrow = sweep("Posted Today"), sweep("Posted Yesterday")
+
+    assert tonight[0].payload_sha256 == tomorrow[0].payload_sha256
+    assert tonight[0].payload["title"] == "A"
+
+
 def test_workday_relative_posted_on_never_becomes_a_date():
     """`postedOn` is prose ("Posted Today"). The detail's startDate is the only real date."""
     from trouveur.sources.workday import normalize
